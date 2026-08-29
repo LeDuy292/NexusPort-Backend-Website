@@ -1,0 +1,114 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # Database & Storage
+  # ==========================================
+  nexusport-db:
+    image: postgres:16-alpine
+    container_name: nexusport-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME:-nexusport}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pgadmin4}
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - nexusport-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-nexusport_user} -d ${DB_NAME:-nexusport_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nexusport-redis:
+    image: redis:7-alpine
+    container_name: nexusport-redis
+    restart: always
+    command: redis-server --requirepass ${REDIS_PASSWORD:-NexusRedis2026!}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - nexusport-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nexusport-rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: nexusport-rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-nexusport_admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-NexusRabbit2026!}
+    ports:
+      - "${RABBITMQ_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - nexusport-network
+
+  # ==========================================
+  # Backend Services
+  # ==========================================
+  nexusport-csharp-api:
+    build:
+      context: ./csharp-core
+      dockerfile: src/NexusPort.Api/Dockerfile
+    container_name: nexusport-csharp-api
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__DefaultConnection=Host=nexusport-db;Port=5432;Database=${DB_NAME:-nexusport_db};Username=${DB_USER:-nexusport_user};Password=${DB_PASSWORD:-NexusPort_Secure_2026!}
+      - Redis__ConnectionString=nexusport-redis:6379,password=${REDIS_PASSWORD:-NexusRedis2026!}
+      - RabbitMQ__Host=nexusport-rabbitmq
+      - Jwt__Secret=${JWT_SECRET:-NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!}
+    ports:
+      - "5000:5000"
+      - "5001:5001"
+    depends_on:
+      nexusport-db:
+        condition: service_healthy
+      nexusport-redis:
+        condition: service_healthy
+    networks:
+      - nexusport-network
+
+  nexusport-node-core:
+    build:
+      context: ./node-core
+      dockerfile: Dockerfile
+    container_name: nexusport-node-core
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=development
+      - PORT=4000
+      - DATABASE_URL=postgresql://${DB_USER:-nexusport_user}:${DB_PASSWORD:-NexusPort_Secure_2026!}@nexusport-db:5432/${DB_NAME:-nexusport_db}
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-NexusRedis2026!}@nexusport-redis:6379
+      - JWT_SECRET=${JWT_SECRET:-NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!}
+    ports:
+      - "4000:4000"
+    depends_on:
+      nexusport-db:
+        condition: service_healthy
+      nexusport-redis:
+        condition: service_healthy
+    networks:
+      - nexusport-network
+
+networks:
+  nexusport-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
