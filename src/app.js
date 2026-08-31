@@ -8,6 +8,7 @@ const swaggerUi = require('swagger-ui-express');
 const { swaggerSpec } = require('./docs/swagger');
 const { errorHandler } = require('./middlewares/errorHandler');
 const authRoutes = require('./modules/auth/auth.routes');
+const protectedRoutes = require('./modules/protected/protected.routes');
 const { nodeEnv } = require('./config/env');
 
 const app = express();
@@ -58,6 +59,7 @@ app.get('/api/health', (req, res) => {
 
 // ─── API Routes ──────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
+app.use('/api', protectedRoutes);       // RBAC protected demo routes
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use((req, res) => {
