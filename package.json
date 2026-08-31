@@ -1,0 +1,43 @@
+{
+  "name": "nexusport-be",
+  "version": "1.0.0",
+  "description": "NexusPort Container Terminal Management System — Backend API",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "test": "jest --runInBand --forceExit --detectOpenHandles",
+    "test:coverage": "jest --runInBand --forceExit --detectOpenHandles --coverage",
+    "seed": "node src/scripts/seed.js",
+    "lint": "eslint src/ --ext .js"
+  },
+  "keywords": ["nexusport", "port", "container", "terminal", "api"],
+  "author": "NexusPort Team",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-validator": "^7.1.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "pg": "^8.12.0",
+    "sequelize": "^6.37.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.4",
+    "supertest": "^7.0.0"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": ["**/tests/**/*.test.js"],
+    "verbose": true
+  }
+}
