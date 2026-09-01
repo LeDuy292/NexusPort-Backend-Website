@@ -10,3 +10,13 @@ coverage/
 *.seed
 .DS_Store
 Thumbs.db
+
+bin/
+obj/
+.vs/
+appsettings.Development.json
+
+test_db.js
+init_db.js
+
+schema.sql
