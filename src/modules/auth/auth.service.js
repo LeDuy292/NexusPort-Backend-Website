@@ -54,12 +54,29 @@ async function login(usernameOrEmail, password, rememberMe = false) {
     throw err;
   }
 
+  // Fetch CarrierId if user is Transport Company
+  let carrierId = null;
+  if (user.role === 'Transport Company' || user.role === 'Carrier') {
+    const { sequelize } = require('../../config/database');
+    const [results] = await sequelize.query('SELECT carrier_id FROM carrier_users WHERE user_id = :userId', {
+      replacements: { userId: user.id }
+    });
+    if (results && results.length > 0) {
+      carrierId = results[0].carrier_id;
+    }
+  }
+
   // Tạo JWT payload
   const payload = {
     id: user.id,
+    sub: user.id, // maps to ClaimTypes.NameIdentifier
+    "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier": user.id, // Explicit NameIdentifier
     username: user.username,
+    name: user.username, // maps to ClaimTypes.Name
     email: user.email,
     role: user.role,
+    "http://schemas.microsoft.com/ws/2008/06/identity/claims/role": user.role, // explicitly provide ClaimTypes.Role
+    ...(carrierId && { CarrierId: carrierId }),
   };
 
   // Nếu người dùng tích "Ghi nhớ đăng nhập" (rememberMe) -> Token hết hạn sau 30 ngày ('30d'), ngược lại '8h'
