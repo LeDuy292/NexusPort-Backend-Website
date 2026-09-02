@@ -1,5 +1,4 @@
 using NexusPort.Shared.Kernel;
-using NexusPort.Modules.Driver.Domain.Enums;
 
 namespace NexusPort.Modules.Driver.Domain.Entities;
 
