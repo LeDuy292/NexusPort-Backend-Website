@@ -1,11 +1,12 @@
-﻿namespace NexusPort.Modules.Booking.Domain.Enums;
+namespace NexusPort.Modules.Booking.Domain.Enums;
 
 public enum BookingStatus
 {
-    Draft,
-    Active,
     Pending,
-    Processing,
+    Approved,
+    Rejected,
+    Canceled,
+    CheckedIn,
     Completed,
-    Cancelled
+    Expired
 }
