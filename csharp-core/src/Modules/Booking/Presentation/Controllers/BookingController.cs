@@ -124,7 +124,7 @@ public class BookingController : ControllerBase
     {
         var role = _currentUser.Role;
         return string.Equals(role, "Carrier", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(role, "TransportCompany", StringComparison.OrdinalIgnoreCase);
+               string.Equals(role, "Transport Company", StringComparison.OrdinalIgnoreCase);
     }
 
     private Guid? GetUserCarrierId()
