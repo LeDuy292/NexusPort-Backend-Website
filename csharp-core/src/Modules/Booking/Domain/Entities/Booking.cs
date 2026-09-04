@@ -10,6 +10,8 @@ public class Booking : BaseEntity, IAggregateRoot
     public Guid? TruckId { get; set; }
 
     public string BookingCode { get; set; } = string.Empty;
+    public string BookingNumber { get => BookingCode; set => BookingCode = value; }
+    public string? Description { get; set; }
     public BookingType BookingType { get; set; } = BookingType.Pickup;
     public BookingStatus Status { get; set; } = BookingStatus.Pending;
 
@@ -22,6 +24,18 @@ public class Booking : BaseEntity, IAggregateRoot
     public DateTime? CanceledAt { get; set; }
 
     public ICollection<BookingContainer> BookingContainers { get; set; } = new List<BookingContainer>();
+
+    // Associated Vehicle & Driver
+    public string? VehiclePlate { get; set; }
+    public Guid? VehicleId { get; set; }
+    public string? DriverName { get; set; }
+
+    // Time validity window
+    public DateTime? ValidFrom { get; set; }
+    public DateTime? ValidTo { get; set; }
+
+    // Gate operation type (e.g. GateIn, GateOut, Delivery, Receiving)
+    public string? GateType { get; set; } = "GateIn";
 
     public Booking() { }
 

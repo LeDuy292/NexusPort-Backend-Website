@@ -78,6 +78,16 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
         builder.Property(x => x.IsDeleted)
             .HasColumnName("is_deleted");
 
+        // Ignore unmapped helper properties for DB-first schema compatibility
+        builder.Ignore(x => x.BookingNumber);
+        builder.Ignore(x => x.VehiclePlate);
+        builder.Ignore(x => x.VehicleId);
+        builder.Ignore(x => x.DriverName);
+        builder.Ignore(x => x.ValidFrom);
+        builder.Ignore(x => x.ValidTo);
+        builder.Ignore(x => x.GateType);
+        builder.Ignore(x => x.Description);
+
         builder.HasMany(x => x.BookingContainers)
             .WithOne(x => x.Booking)
             .HasForeignKey(x => x.BookingId)

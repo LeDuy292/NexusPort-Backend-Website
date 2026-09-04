@@ -69,6 +69,14 @@ public class BookingService : IBookingService
             dto.TruckId
         );
 
+        entity.VehiclePlate = dto.VehiclePlate;
+        entity.VehicleId = dto.VehicleId;
+        entity.DriverName = dto.DriverName;
+        entity.ValidFrom = dto.ValidFrom ?? dto.AppointmentStart;
+        entity.ValidTo = dto.ValidTo ?? dto.AppointmentEnd;
+        entity.GateType = dto.GateType ?? "GateIn";
+        entity.Description = dto.Description;
+
         if (dto.ContainerIds != null)
         {
             foreach (var containerId in dto.ContainerIds)
@@ -225,7 +233,15 @@ public class BookingService : IBookingService
             RejectedReason = entity.RejectedReason,
             CanceledAt = entity.CanceledAt,
             CreatedAt = entity.CreatedAt,
-            ContainerIds = entity.BookingContainers?.Select(bc => bc.ContainerId).ToList() ?? new List<Guid>()
+            ContainerIds = entity.BookingContainers?.Select(bc => bc.ContainerId).ToList() ?? new List<Guid>(),
+
+            Description = entity.Description,
+            VehiclePlate = entity.VehiclePlate,
+            VehicleId = entity.VehicleId,
+            DriverName = entity.DriverName,
+            ValidFrom = entity.ValidFrom ?? entity.AppointmentStart,
+            ValidTo = entity.ValidTo ?? entity.AppointmentEnd,
+            GateType = entity.GateType
         };
     }
 }
