@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace NexusPort.Modules.Vehicle.Infrastructure.Configurations;
@@ -10,7 +10,11 @@ public class VehicleConfiguration : IEntityTypeConfiguration<NexusPort.Modules.V
         builder.ToTable("Vehicles");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.PlateNumber).IsRequired().HasMaxLength(100);
+        builder.Property(x => x.RfidTag).HasMaxLength(100);
         builder.Property(x => x.Status).IsRequired().HasMaxLength(50);
         builder.Property(x => x.Description).HasMaxLength(500);
+
+        builder.HasIndex(x => x.PlateNumber);
+        builder.HasIndex(x => x.RfidTag);
     }
 }

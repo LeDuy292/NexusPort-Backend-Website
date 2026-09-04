@@ -26,6 +26,8 @@ using NexusPort.Modules.Yard.Application.Services;
 using NexusPort.Modules.Yard.Infrastructure.Repositories;
 using NexusPort.Modules.Gate.Application.Interfaces;
 using NexusPort.Modules.Gate.Application.Services;
+using NexusPort.Modules.Gate.Domain.Rules;
+using NexusPort.Modules.Gate.Domain.Rules.Concrete;
 using NexusPort.Modules.Gate.Infrastructure.Repositories;
 using NexusPort.Modules.Dispatcher.Application.Interfaces;
 using NexusPort.Modules.Dispatcher.Application.Services;
@@ -133,6 +135,16 @@ public static class ServiceCollectionExtensions
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();
         services.AddScoped<IGateService, GateService>();
+        services.AddScoped<IGateVerificationRepository, GateVerificationRepository>();
+        services.AddScoped<IGateVerificationService, GateVerificationService>();
+
+        // Gate Rule Engine & Rules (Extensible Pipeline)
+        services.AddScoped<IGateRuleEngine, GateRuleEngine>();
+        services.AddScoped<IGateRule, BookingExistenceAndStatusRule>();
+        services.AddScoped<IGateRule, BookingTimeWindowRule>();
+        services.AddScoped<IGateRule, VehicleMatchAndStatusRule>();
+        services.AddScoped<IGateRule, DriverMatchAndStatusRule>();
+        services.AddScoped<IGateRule, ContainerMatchAndStatusRule>();
 
         // Dispatcher
         services.AddScoped<IDispatcherRepository, DispatcherRepository>();

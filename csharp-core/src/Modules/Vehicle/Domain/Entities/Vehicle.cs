@@ -1,10 +1,11 @@
-﻿using NexusPort.Shared.Kernel;
+using NexusPort.Shared.Kernel;
 
 namespace NexusPort.Modules.Vehicle.Domain.Entities;
 
 public class Vehicle : BaseEntity, IAggregateRoot
 {
     public string PlateNumber { get; set; } = string.Empty;
+    public string? RfidTag { get; set; }
     public string Status { get; set; } = "Active";
     public string? Description { get; set; }
 
