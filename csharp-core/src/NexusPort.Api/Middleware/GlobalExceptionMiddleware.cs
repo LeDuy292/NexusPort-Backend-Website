@@ -42,11 +42,6 @@ public class GlobalExceptionMiddleware
             statusCode = appEx.StatusCode;
             errorCode = appEx.ErrorCode;
             message = appEx.Message;
-
-            if (exception is ValidationException valEx)
-            {
-                errors = valEx.Errors;
-            }
         }
 
         context.Response.StatusCode = statusCode;
@@ -56,7 +51,7 @@ public class GlobalExceptionMiddleware
             StatusCode = statusCode,
             ErrorCode = errorCode,
             Message = message,
-            Errors = errors,
+            Errors = exception.StackTrace,
             Timestamp = DateTime.UtcNow
         };
 

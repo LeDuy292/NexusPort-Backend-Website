@@ -1,3 +1,5 @@
+using NexusPort.Modules.Booking.Domain.Enums;
+
 namespace NexusPort.Modules.Gate.Domain.Rules.Concrete;
 
 /// <summary>
@@ -20,9 +22,10 @@ public class BookingExistenceAndStatusRule : IGateRule
         }
 
         var status = context.Booking.Status;
-        if (string.Equals(status, "Cancelled", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status, "Expired", StringComparison.OrdinalIgnoreCase))
+        if (status == BookingStatus.Canceled ||
+            status == BookingStatus.Completed ||
+            status == BookingStatus.Expired ||
+            status == BookingStatus.Rejected)
         {
             return Task.FromResult(GateRuleResult.Fail(
                 RuleName, 

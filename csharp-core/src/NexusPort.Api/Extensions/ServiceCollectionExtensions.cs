@@ -42,6 +42,9 @@ using NexusPort.Modules.Equipment.Application.Interfaces;
 using NexusPort.Modules.Equipment.Application.Services;
 using NexusPort.Modules.Equipment.Infrastructure.Repositories;
 
+using NexusPort.Infrastructure.Notifications.Interfaces;
+using NexusPort.Infrastructure.Notifications.Services;
+
 namespace NexusPort.Api.Extensions;
 
 public static class ServiceCollectionExtensions
@@ -49,7 +52,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddNexusPortInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection") 
-            ?? "Host=localhost;Port=5432;Database=nexusport;Username=postgres;Password=pgadmin4";
+            ?? "Host=localhost;Port=5432;Database=nexusport;Username=postgres;Password=120104";
 
         services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(connectionString));
@@ -62,6 +65,7 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IMessageBrokerService, MessageBrokerService>();
         services.AddScoped<IEmailService, EmailService>();
+        services.AddScoped<INotificationService, NotificationService>();
 
         services.AddAuthentication(options =>
         {
@@ -107,6 +111,7 @@ public static class ServiceCollectionExtensions
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Vehicle.Infrastructure.Configurations.VehicleConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Driver.Infrastructure.Configurations.DriverConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Equipment.Infrastructure.Configurations.EquipmentConfiguration).Assembly);
+        AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Infrastructure.Notifications.Configurations.NotificationConfiguration).Assembly);
 
         // Identity
         services.AddScoped<IIdentityRepository, IdentityRepository>();
@@ -114,6 +119,7 @@ public static class ServiceCollectionExtensions
 
         // Booking
         services.AddScoped<IBookingRepository, BookingRepository>();
+        services.AddScoped<IBookingValidationService, BookingValidationService>();
         services.AddScoped<IBookingService, BookingService>();
 
         // Vessel

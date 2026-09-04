@@ -45,7 +45,7 @@ public class GateVerificationService : IGateVerificationService
         else
         {
             var bookings = await _context.Set<Booking.Domain.Entities.Booking>()
-                .Where(b => b.VehiclePlate != null && b.Status != "Cancelled" && b.Status != "Completed" && b.Status != "Expired")
+                .Where(b => b.VehiclePlate != null && b.Status != Booking.Domain.Enums.BookingStatus.Canceled && b.Status != Booking.Domain.Enums.BookingStatus.Completed && b.Status != Booking.Domain.Enums.BookingStatus.Expired)
                 .ToListAsync(cancellationToken);
 
             booking = bookings.FirstOrDefault(b => NormalizePlate(b.VehiclePlate) == normalizedDetectedPlate);
@@ -155,7 +155,7 @@ public class GateVerificationService : IGateVerificationService
             {
                 BookingId = booking.Id,
                 BookingNumber = booking.BookingNumber,
-                Status = booking.Status,
+                Status = booking.Status.ToString(),
                 ExpectedVehiclePlate = booking.VehiclePlate,
                 DriverName = driverName,
                 ValidFrom = booking.ValidFrom,
@@ -186,7 +186,7 @@ public class GateVerificationService : IGateVerificationService
         else
         {
             var bookings = await _context.Set<Booking.Domain.Entities.Booking>()
-                .Where(b => b.VehiclePlate != null && b.Status != "Cancelled" && b.Status != "Completed" && b.Status != "Expired")
+                .Where(b => b.VehiclePlate != null && b.Status != Booking.Domain.Enums.BookingStatus.Canceled && b.Status != Booking.Domain.Enums.BookingStatus.Completed && b.Status != Booking.Domain.Enums.BookingStatus.Expired)
                 .ToListAsync(cancellationToken);
 
             booking = bookings.FirstOrDefault(b => NormalizePlate(b.VehiclePlate) == normalizedPlate);
