@@ -6,6 +6,7 @@ require('./src/config/env');
 const app = require('./src/app');
 const { connectDB, syncDB } = require('./src/config/database');
 const { port, nodeEnv } = require('./src/config/env');
+const { printStartupBanner } = require('./src/utils/startupBanner');
 
 async function startServer() {
   try {
@@ -18,17 +19,8 @@ async function startServer() {
     }
 
     // 3. Khởi động HTTP server
-    app.listen(port, () => {
-      console.log('');
-      console.log('╔═══════════════════════════════════════════╗');
-      console.log('║        NexusPort API Server               ║');
-      console.log('╠═══════════════════════════════════════════╣');
-      console.log(`║  Environment : ${nodeEnv.padEnd(27)}║`);
-      console.log(`║  Port        : ${String(port).padEnd(27)}║`);
-      console.log(`║  API Base    : http://localhost:${port}/api     ║`);
-      console.log(`║  Swagger     : http://localhost:${port}/api-docs ║`);
-      console.log('╚═══════════════════════════════════════════╝');
-      console.log('');
+    app.listen(port, async () => {
+      await printStartupBanner({ port, nodeEnv });
     });
   } catch (error) {
     console.error('[Server] Khởi động thất bại:', error.message);
