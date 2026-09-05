@@ -7,7 +7,8 @@ export const errorHandler = (err: Error, req: Request, res: Response, next: Next
   logger.error(`Error processing ${req.method} ${req.path}:`, err);
 
   if (err instanceof AppError) {
-    return sendError(res, err.message, err.statusCode, err.errorCode);
+    const details = 'errors' in err ? err.errors : undefined;
+    return sendError(res, err.message, err.statusCode, err.errorCode, details);
   }
 
   return sendError(res, 'Internal server error occurred.', 500, 'INTERNAL_SERVER_ERROR');
