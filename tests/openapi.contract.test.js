@@ -11,7 +11,7 @@ const documentedOperations = (document) => Object.entries(document.paths).flatMa
     .filter((method) => ['get', 'post', 'put', 'patch', 'delete'].includes(method))
     .map((method) => `${method.toUpperCase()} ${path}`));
 
-describe('aggregated OpenAPI', () => {
+describe('JavaScript OpenAPI', () => {
   it('documents every mounted JavaScript API route', () => {
     const actual = collectRouteOperations(mountedRouters).map(({ method, path }) => `${method.toUpperCase()} ${path}`);
     expect(documentedOperations(swaggerSpec).sort()).toEqual(actual.sort());

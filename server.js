@@ -28,7 +28,6 @@ async function startServer() {
       console.log(`║  API Base    : ${`http://localhost:${port}/api`.padEnd(50)}║`);
       console.log(`║  Swagger JS  : ${`http://localhost:${port}/api-docs`.padEnd(50)}║`);
       console.log('║  Swagger TS  : http://localhost:4000/api-docs                    ║');
-      console.log('║  Swagger C#  : http://localhost:5000                             ║');
       console.log('╚══════════════════════════════════════════════════════════════════╝');
       console.log('');
     });

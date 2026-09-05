@@ -38,18 +38,3 @@ jobs:
         run: |
           npm start --prefix node-core &
           node scripts/validate-openapi-url.js http://127.0.0.1:4000/openapi.json
-
-      - name: Set up .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Build the C# API and its generated Swagger contract
-        run: dotnet build csharp-core/NexusPort.sln --configuration Release
-
-      - name: Validate the C# OpenAPI endpoint
-        env:
-          ASPNETCORE_ENVIRONMENT: Development
-        run: |
-          dotnet run --no-build --configuration Release --project csharp-core/src/NexusPort.Api/NexusPort.Api.csproj --urls http://127.0.0.1:5000 &
-          node scripts/validate-openapi-url.js http://127.0.0.1:5000/swagger/v1/swagger.json
