@@ -30,12 +30,10 @@ describe('aggregated OpenAPI', () => {
     }
   });
 
-  it('configures all three API specifications in the Swagger UI', async () => {
+  it('serves the JavaScript Swagger UI', async () => {
     const response = await request(app).get('/api-docs/').expect(200);
     expect(response.text).toContain('<title>NexusPort API Docs</title>');
     const initializer = await request(app).get('/api-docs/swagger-ui-init.js').expect(200);
-    expect(initializer.text).toContain('/api-docs/openapi.json');
-    expect(initializer.text).toContain('http://localhost:4000/openapi.json');
-    expect(initializer.text).toContain('http://localhost:5000/swagger/v1/swagger.json');
+    expect(initializer.text).toContain('NexusPort API');
   });
 });

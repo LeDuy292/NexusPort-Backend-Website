@@ -23,9 +23,12 @@ describe('node-core OpenAPI contract', () => {
     }
   });
 
-  it('mounts the generated OpenAPI JSON endpoint', () => {
+  it('mounts the generated OpenAPI JSON endpoint and Swagger UI', () => {
     const app = createApp();
-    const stack = (app as unknown as { _router: { stack: Array<{ route?: { path: string } }> } })._router.stack;
+    const stack = (app as unknown as {
+      _router: { stack: Array<{ route?: { path: string }; regexp: RegExp }> };
+    })._router.stack;
     expect(stack.some((layer) => layer.route?.path === '/openapi.json')).toBe(true);
+    expect(stack.some((layer) => layer.regexp.toString().includes('api-docs'))).toBe(true);
   });
 });

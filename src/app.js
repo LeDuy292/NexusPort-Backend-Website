@@ -39,16 +39,10 @@ app.get('/api-docs/openapi.json', (_req, res) => res.json(swaggerSpec));
 app.use(
   '/api-docs',
   swaggerUi.serve,
-  swaggerUi.setup(undefined, {
+  swaggerUi.setup(swaggerSpec, {
     customSiteTitle: 'NexusPort API Docs',
     swaggerOptions: {
       persistAuthorization: true,
-      urls: [
-        { name: 'JavaScript API — :3001', url: '/api-docs/openapi.json' },
-        { name: 'TypeScript API — :4000', url: 'http://localhost:4000/openapi.json' },
-        { name: 'C# API — :5000', url: 'http://localhost:5000/swagger/v1/swagger.json' },
-      ],
-      urlsPrimaryName: 'JavaScript API — :3001',
     },
   })
 );
