@@ -17,4 +17,6 @@ export const query = async (text: string, params?: unknown[]) => {
   return res;
 };
 
+export const getClient = () => pool.connect();
+
 export default pool;

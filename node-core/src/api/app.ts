@@ -1,8 +1,10 @@
 import express, { Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import swaggerUi from 'swagger-ui-express';
 import routes from './routes';
 import { errorHandler, requestLogger, authMiddleware } from './middleware/error.middleware';
+import { nodeCoreOpenApi } from './openapi';
 
 export const createApp = (): Application => {
   const app = express();
@@ -14,6 +16,13 @@ export const createApp = (): Application => {
   app.use(express.urlencoded({ extended: true }));
   app.use(requestLogger);
   app.use(authMiddleware);
+
+  // Machine-readable contract and a dedicated Swagger UI for the TypeScript service.
+  app.get('/openapi.json', (_req, res) => res.json(nodeCoreOpenApi));
+  app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(nodeCoreOpenApi, {
+    customSiteTitle: 'NexusPort TypeScript API Docs',
+    swaggerOptions: { persistAuthorization: true },
+  }));
 
   // Base API routes
   app.use('/api/v1', routes);
