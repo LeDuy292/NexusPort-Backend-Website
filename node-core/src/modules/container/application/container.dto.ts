@@ -1,6 +1,6 @@
 import {
   CargoType, ContainerCategory, ContainerDetailEntity, ContainerEntity,
-  ContainerSize, ContainerStatus, ContainerTypeEntity,
+  ContainerSize, ContainerTypeEntity, PersistedContainerStatus,
 } from '../domain/container.entity';
 
 export interface CreateContainerDto {
@@ -10,7 +10,7 @@ export interface CreateContainerDto {
   carrierId?: string | null;
   vesselCallId?: string | null;
   cargoType?: CargoType;
-  status?: ContainerStatus;
+  status?: PersistedContainerStatus;
   grossWeightKg?: number | null;
   expectedGateOutAt?: string | null;
 }
@@ -25,7 +25,7 @@ export interface ContainerSearchDto {
   page: number;
   limit: number;
   search?: string;
-  status?: ContainerStatus;
+  status?: PersistedContainerStatus;
   containerTypeId?: string;
   size?: ContainerSize;
   category?: ContainerCategory;
@@ -55,3 +55,7 @@ export interface ContainerListResult {
 export type ContainerDto = ContainerEntity;
 export type ContainerDetailDto = ContainerDetailEntity;
 export type ContainerTypeDto = ContainerTypeEntity;
+
+export interface TransitionContainerStatusDto {
+  status: import('../domain/container.entity').ContainerStatus;
+}

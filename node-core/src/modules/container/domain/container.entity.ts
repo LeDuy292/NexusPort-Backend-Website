@@ -3,6 +3,16 @@ export const CONTAINER_STATUSES = [
   'gate_in', 'gate_out', 'loaded', 'damaged', 'canceled',
 ] as const;
 
+/** The business lifecycle exposed by the Container Status API. */
+export enum ContainerStatus {
+  Registered = 'registered',
+  Booked = 'booked',
+  GateIn = 'gate_in',
+  InYard = 'in_yard',
+  ReadyForGateOut = 'ready_for_gate_out',
+  GateOut = 'gate_out',
+}
+
 export const CARGO_TYPES = [
   'general', 'reefer', 'dangerous', 'perishable', 'oversized', 'overweight',
 ] as const;
@@ -10,7 +20,7 @@ export const CARGO_TYPES = [
 export const CONTAINER_SIZES = ['ft20', 'ft40', 'ft45'] as const;
 export const CONTAINER_CATEGORIES = ['dry', 'reefer', 'tank', 'open_top', 'flat_rack'] as const;
 
-export type ContainerStatus = (typeof CONTAINER_STATUSES)[number];
+export type PersistedContainerStatus = (typeof CONTAINER_STATUSES)[number];
 export type CargoType = (typeof CARGO_TYPES)[number];
 export type ContainerSize = (typeof CONTAINER_SIZES)[number];
 export type ContainerCategory = (typeof CONTAINER_CATEGORIES)[number];
@@ -23,7 +33,7 @@ export interface ContainerEntity {
   containerNumber: string;
   sealNumber: string | null;
   cargoType: CargoType;
-  status: ContainerStatus;
+  status: PersistedContainerStatus;
   grossWeightKg: number | null;
   isReefer: boolean;
   isDangerous: boolean;
@@ -34,6 +44,22 @@ export interface ContainerEntity {
   leftAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface ContainerCurrentStatus {
+  containerId: string;
+  status: ContainerStatus;
+  persistedStatus: PersistedContainerStatus;
+  updatedAt: Date;
+}
+
+export interface ContainerStatusHistoryEntry {
+  id: string;
+  containerId: string;
+  fromStatus: ContainerStatus;
+  toStatus: ContainerStatus;
+  changedBy: string;
+  changedAt: Date;
 }
 
 export interface ContainerTypeEntity {

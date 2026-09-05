@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CARGO_TYPES, CONTAINER_CATEGORIES, CONTAINER_SIZES, CONTAINER_STATUSES } from '../domain/container.entity';
+import { CARGO_TYPES, CONTAINER_CATEGORIES, CONTAINER_SIZES, CONTAINER_STATUSES, ContainerStatus } from '../domain/container.entity';
 
 const ISO_6346_LETTER_VALUES: Record<string, number> = {
   A: 10, B: 12, C: 13, D: 14, E: 15, F: 16, G: 17, H: 18, I: 19,
@@ -62,3 +62,7 @@ export const containerSearchSchema = z.object({
 });
 
 export const idSchema = z.string().uuid();
+
+export const transitionContainerStatusSchema = z.object({
+  status: z.nativeEnum(ContainerStatus),
+}).strict();

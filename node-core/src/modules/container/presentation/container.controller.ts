@@ -4,8 +4,12 @@ import { ZodError, ZodSchema } from 'zod';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '../../../shared/errors/app-error';
 import { sendCreated, sendSuccess } from '../../../shared/utils/response';
 import { ContainerService } from '../application/container.service';
+import { ContainerStatusService } from '../application/container-status.service';
 import { ContainerSearchDto } from '../application/container.dto';
-import { containerSearchSchema, createContainerSchema, idSchema, updateContainerSchema } from '../application/container.validator';
+import {
+  containerSearchSchema, createContainerSchema, idSchema,
+  transitionContainerStatusSchema, updateContainerSchema,
+} from '../application/container.validator';
 
 type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer';
 interface AuthorizedRequest extends Request { containerUser?: { id: string; role: ContainerRole } }
@@ -15,6 +19,8 @@ const roleAliases: Record<string, ContainerRole> = {
   'yard staff': 'Yard Staff', 'yard operator': 'Yard Staff', yard: 'Yard Staff',
   'gate officer': 'Gate Officer', gate: 'Gate Officer',
 };
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const parse = <T>(schema: ZodSchema<T>, value: unknown): T => {
   try { return schema.parse(value); }
@@ -39,7 +45,9 @@ const authenticateContainerUser = (req: AuthorizedRequest, _res: Response, next:
     const rawRole = String(payload.role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? '').toLowerCase();
     const role = roleAliases[rawRole];
     if (!role) return next(new ForbiddenError('Your role cannot access Container Management.'));
-    req.containerUser = { id: String(payload.sub ?? payload.id ?? ''), role };
+    const userId = String(payload.sub ?? payload.id ?? '');
+    if (!UUID_PATTERN.test(userId)) return next(new UnauthorizedError('Bearer token does not identify a valid user.'));
+    req.containerUser = { id: userId, role };
     next();
   } catch {
     next(new UnauthorizedError('Bearer token is invalid or expired.'));
@@ -54,7 +62,10 @@ const allowRoles = (...roles: ContainerRole[]) => (req: AuthorizedRequest, _res:
 };
 
 export class ContainerController {
-  constructor(private readonly service = new ContainerService()) {}
+  constructor(
+    private readonly service = new ContainerService(),
+    private readonly statusService = new ContainerStatusService(),
+  ) {}
 
   getAll = async (req: Request, res: Response, next: NextFunction) => {
     try { sendSuccess(res, await this.service.getAll(parse(containerSearchSchema, req.query) as ContainerSearchDto)); }
@@ -89,6 +100,24 @@ export class ContainerController {
       res.status(204).send();
     } catch (error) { next(error); }
   };
+
+  getCurrentStatus = async (req: Request, res: Response, next: NextFunction) => {
+    try { sendSuccess(res, await this.statusService.getCurrentStatus(parse(idSchema, req.params.id))); }
+    catch (error) { next(error); }
+  };
+
+  getStatusHistory = async (req: Request, res: Response, next: NextFunction) => {
+    try { sendSuccess(res, await this.statusService.getHistory(parse(idSchema, req.params.id))); }
+    catch (error) { next(error); }
+  };
+
+  transitionStatus = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
+    try {
+      const id = parse(idSchema, req.params.id);
+      const dto = parse(transitionContainerStatusSchema, req.body);
+      sendSuccess(res, await this.statusService.transition(id, dto.status, req.containerUser!.id, req.ip));
+    } catch (error) { next(error); }
+  };
 }
 
 export const createContainerRouter = (): Router => {
@@ -100,6 +129,9 @@ export const createContainerRouter = (): Router => {
   router.use(authenticateContainerUser);
   router.get('/types', allowRoles(...readers), controller.getTypes);
   router.get('/', allowRoles(...readers), controller.getAll);
+  router.get('/:id/status/history', allowRoles(...readers), controller.getStatusHistory);
+  router.get('/:id/status', allowRoles(...readers), controller.getCurrentStatus);
+  router.post('/:id/status/transition', allowRoles(...writers), controller.transitionStatus);
   router.get('/:id', allowRoles(...readers), controller.getById);
   router.post('/', allowRoles(...writers), controller.create);
   router.put('/:id', allowRoles(...writers), controller.update);
