@@ -354,7 +354,7 @@ dotnet build
 dotnet run
 ```
 - API Base URL: `http://localhost:5000`
-- Swagger UI tài liệu API: `http://localhost:5000/swagger`
+- OpenAPI JSON: `http://localhost:5000/swagger/v1/swagger.json`
 
 ### 2. Khởi chạy Node.js Core Service (TypeScript)
 
@@ -365,6 +365,20 @@ npm run dev
 ```
 - Node Service Base URL: `http://localhost:4000`
 - Health Check: `http://localhost:4000/api/v1/health`
+- OpenAPI JSON: `http://localhost:4000/openapi.json`
+
+### 3. Khởi chạy JavaScript API và Swagger tổng
+
+```bash
+npm install
+npm run dev
+```
+
+- JavaScript API: `http://localhost:3001`
+- Swagger tổng (JS, TypeScript và C#): `http://localhost:3001/api-docs`
+- JavaScript OpenAPI JSON: `http://localhost:3001/api-docs/openapi.json`
+
+Chạy `npm run openapi:check` và `npm run openapi:check --prefix node-core` để kiểm tra route thực tế có khớp với tài liệu OpenAPI trước khi push.
 
 ---
 

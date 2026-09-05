@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "test": "jest",
+    "openapi:check": "jest src/api/openapi.test.ts --runInBand",
     "lint": "eslint src/**/*.ts"
   },
   "keywords": [

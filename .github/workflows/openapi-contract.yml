@@ -1,0 +1,55 @@
+name: OpenAPI Contract
+
+on:
+  pull_request:
+  push:
+    branches: [develop, main]
+
+jobs:
+  validate-openapi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install JavaScript API dependencies
+        run: npm ci
+
+      - name: Validate JavaScript route/OpenAPI contract
+        run: npm run openapi:check
+
+      - name: Install TypeScript API dependencies
+        run: npm ci --prefix node-core
+
+      - name: Build and validate TypeScript route/OpenAPI contract
+        run: |
+          npm run build --prefix node-core
+          npm run openapi:check --prefix node-core
+
+      - name: Validate the TypeScript OpenAPI endpoint
+        run: |
+          npm start --prefix node-core &
+          node scripts/validate-openapi-url.js http://127.0.0.1:4000/openapi.json
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build the C# API and its generated Swagger contract
+        run: dotnet build csharp-core/NexusPort.sln --configuration Release
+
+      - name: Validate the C# OpenAPI endpoint
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+        run: |
+          dotnet run --no-build --configuration Release --project csharp-core/src/NexusPort.Api/NexusPort.Api.csproj --urls http://127.0.0.1:5000 &
+          node scripts/validate-openapi-url.js http://127.0.0.1:5000/swagger/v1/swagger.json

@@ -7,9 +7,7 @@ const morgan = require('morgan');
 const swaggerUi = require('swagger-ui-express');
 const { swaggerSpec } = require('./docs/swagger');
 const { errorHandler } = require('./middlewares/errorHandler');
-const authRoutes = require('./modules/auth/auth.routes');
-const protectedRoutes = require('./modules/protected/protected.routes');
-const usersRoutes = require('./modules/users/users.routes');
+const { mountedRouters } = require('./routes');
 const { nodeEnv } = require('./config/env');
 
 const app = express();
@@ -37,31 +35,26 @@ if (nodeEnv !== 'test') {
 }
 
 // ─── Swagger API Docs ────────────────────────────────────────────────────────
+app.get('/api-docs/openapi.json', (_req, res) => res.json(swaggerSpec));
 app.use(
   '/api-docs',
   swaggerUi.serve,
-  swaggerUi.setup(swaggerSpec, {
+  swaggerUi.setup(undefined, {
     customSiteTitle: 'NexusPort API Docs',
     swaggerOptions: {
       persistAuthorization: true,
+      urls: [
+        { name: 'JavaScript API — :3001', url: '/api-docs/openapi.json' },
+        { name: 'TypeScript API — :4000', url: 'http://localhost:4000/openapi.json' },
+        { name: 'C# API — :5000', url: 'http://localhost:5000/swagger/v1/swagger.json' },
+      ],
+      urlsPrimaryName: 'JavaScript API — :3001',
     },
   })
 );
 
-// ─── Health Check ────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'NexusPort API đang hoạt động.',
-    timestamp: new Date().toISOString(),
-    environment: nodeEnv,
-  });
-});
-
 // ─── API Routes ──────────────────────────────────────────────────────────────
-app.use('/api/auth', authRoutes);
-app.use('/api/users', usersRoutes);     // NXP-034: User Management (Administrator only)
-app.use('/api', protectedRoutes);       // RBAC protected demo routes
+for (const route of mountedRouters) app.use(route.prefix, route.router);
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use((req, res) => {
