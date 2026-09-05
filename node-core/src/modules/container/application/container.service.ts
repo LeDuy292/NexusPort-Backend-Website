@@ -31,6 +31,13 @@ export class ContainerService {
 
   async update(id: string, dto: UpdateContainerDto) {
     const current = await this.getById(id);
+    if (dto.status !== undefined && dto.status !== current.status) {
+      throw new AppError(
+        'Container status can only be changed through the status transition API.',
+        409,
+        'STATUS_TRANSITION_REQUIRED',
+      );
+    }
     if (dto.containerNumber && dto.containerNumber !== current.containerNumber) {
       if (await this.repository.findByContainerNumber(dto.containerNumber)) {
         throw new AppError('Container ID already exists.', 409, 'CONTAINER_ID_DUPLICATE');

@@ -1,6 +1,19 @@
-import { query } from '../../../infrastructure/database/db';
+import { getClient, query } from '../../../infrastructure/database/db';
 import { CreateContainerDto, ContainerListItem, ContainerListResult, ContainerSearchDto, UpdateContainerDto } from '../application/container.dto';
-import { ContainerBookingSummary, ContainerDetailEntity, ContainerPositionSummary, ContainerTypeEntity } from '../domain/container.entity';
+import {
+  ContainerBookingSummary, ContainerDetailEntity, ContainerPositionSummary,
+  ContainerStatus, ContainerStatusHistoryEntry, ContainerTypeEntity, PersistedContainerStatus,
+} from '../domain/container.entity';
+
+interface TransitionStatusInput {
+  containerId: string;
+  expectedStatus: PersistedContainerStatus;
+  targetStatus: PersistedContainerStatus;
+  fromStatus: ContainerStatus;
+  toStatus: ContainerStatus;
+  userId: string;
+  ipAddress: string | null;
+}
 
 const baseSelect = `
   SELECT c.id,
@@ -51,6 +64,80 @@ const mapListRow = (row: Record<string, unknown>): ContainerListItem => ({
 } as ContainerListItem);
 
 export class ContainerRepository {
+  async findCurrentStatus(id: string): Promise<{ status: PersistedContainerStatus; updatedAt: Date } | null> {
+    const result = await query(
+      'SELECT status, updated_at AS "updatedAt" FROM containers WHERE id = $1',
+      [id],
+    );
+    return result.rows[0] ?? null;
+  }
+
+  async findStatusHistory(containerId: string): Promise<ContainerStatusHistoryEntry[]> {
+    const result = await query(
+      `SELECT id,
+              target_id AS "containerId",
+              old_data->>'status' AS "fromStatus",
+              new_data->>'status' AS "toStatus",
+              user_id AS "changedBy",
+              created_at AS "changedAt"
+         FROM audit_logs
+        WHERE module = 'container'
+          AND action = 'container_status_transition'
+          AND target_table = 'containers'
+          AND target_id = $1
+        ORDER BY created_at ASC, id ASC`,
+      [containerId],
+    );
+    return result.rows as ContainerStatusHistoryEntry[];
+  }
+
+  async transitionStatus(input: TransitionStatusInput): Promise<{
+    updatedAt?: Date;
+    conflictStatus?: PersistedContainerStatus;
+  } | null> {
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+      const locked = await client.query<{ status: PersistedContainerStatus }>(
+        'SELECT status FROM containers WHERE id = $1 FOR UPDATE',
+        [input.containerId],
+      );
+      if (!locked.rows[0]) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+      if (locked.rows[0].status !== input.expectedStatus) {
+        await client.query('ROLLBACK');
+        return { conflictStatus: locked.rows[0].status };
+      }
+
+      const updated = await client.query<{ updatedAt: Date }>(
+        `UPDATE containers
+            SET status = $2,
+                arrived_at = CASE WHEN $2 = 'gate_in' THEN COALESCE(arrived_at, now()) ELSE arrived_at END,
+                left_at = CASE WHEN $2 = 'gate_out' THEN COALESCE(left_at, now()) ELSE left_at END,
+                updated_at = now()
+          WHERE id = $1
+        RETURNING updated_at AS "updatedAt"`,
+        [input.containerId, input.targetStatus],
+      );
+      await client.query(
+        `INSERT INTO audit_logs (
+           user_id, action, module, target_table, target_id, old_data, new_data, ip_address
+         ) VALUES ($1, 'container_status_transition', 'container', 'containers', $2, $3::jsonb, $4::jsonb, $5)`,
+        [input.userId, input.containerId, JSON.stringify({ status: input.fromStatus }),
+         JSON.stringify({ status: input.toStatus }), input.ipAddress],
+      );
+      await client.query('COMMIT');
+      return { updatedAt: updated.rows[0].updatedAt };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async findAll(filters: ContainerSearchDto): Promise<ContainerListResult> {
     const conditions: string[] = [];
     const values: unknown[] = [];

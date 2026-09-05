@@ -1,4 +1,6 @@
-import { createContainerSchema, isValidIso6346, normalizeContainerNumber } from './container.validator';
+import {
+  createContainerSchema, isValidIso6346, normalizeContainerNumber, transitionContainerStatusSchema,
+} from './container.validator';
 
 describe('ISO 6346 container validation', () => {
   it('accepts valid container IDs and normalizes spacing/case', () => {
@@ -18,5 +20,13 @@ describe('ISO 6346 container validation', () => {
       expect(result.error.flatten().fieldErrors.containerTypeId).toBeDefined();
       expect(result.error.flatten().fieldErrors.sealNumber).toBeDefined();
     }
+  });
+});
+
+describe('container status transition validation', () => {
+  it('accepts a lifecycle status and rejects legacy or unknown statuses', () => {
+    expect(transitionContainerStatusSchema.safeParse({ status: 'ready_for_gate_out' }).success).toBe(true);
+    expect(transitionContainerStatusSchema.safeParse({ status: 'moving' }).success).toBe(false);
+    expect(transitionContainerStatusSchema.safeParse({ status: 'damaged' }).success).toBe(false);
   });
 });
