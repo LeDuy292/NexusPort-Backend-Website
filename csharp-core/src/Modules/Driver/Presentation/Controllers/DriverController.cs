@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using NexusPort.Modules.Driver.Application.DTOs;
 using NexusPort.Modules.Driver.Application.Interfaces;
 using System.Security.Claims;
@@ -25,15 +27,19 @@ public class DriverController : ControllerBase
         return null;
     }
 
-    private bool IsAdmin()
+    private bool IsPortStaff()
     {
-        return User.Claims.Any(c => c.Type == ClaimTypes.Role && (c.Value.Equals("Administrator", StringComparison.OrdinalIgnoreCase) || c.Value.Equals("admin", StringComparison.OrdinalIgnoreCase)));
+        return User.Claims.Any(c => c.Type == ClaimTypes.Role && 
+            (c.Value.Equals("Administrator", StringComparison.OrdinalIgnoreCase) || 
+             c.Value.Equals("admin", StringComparison.OrdinalIgnoreCase) ||
+             c.Value.Equals("dispatcher", StringComparison.OrdinalIgnoreCase) ||
+             c.Value.Equals("operation", StringComparison.OrdinalIgnoreCase)));
     }
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<DriverDto>>> GetAll([FromQuery] DriverFilterDto filter, CancellationToken cancellationToken)
     {
-        if (!IsAdmin())
+        if (!IsPortStaff())
         {
             var userCarrierId = GetCarrierIdFromToken();
             if (userCarrierId == null) return Forbid();
@@ -41,6 +47,27 @@ public class DriverController : ControllerBase
         }
 
         var items = await _service.GetAllAsync(filter, cancellationToken);
+
+        // Map Carrier Name
+        var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
+        using var command = db.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT id, company_name FROM carriers";
+        await db.Database.OpenConnectionAsync(cancellationToken);
+        using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var carrierMap = new Dictionary<Guid, string>();
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            carrierMap[reader.GetGuid(0)] = reader.GetString(1);
+        }
+
+        foreach(var item in items)
+        {
+            if (carrierMap.TryGetValue(item.CarrierId, out var cName))
+            {
+                item.CarrierName = cName;
+            }
+        }
+
         return Ok(items);
     }
 
@@ -50,7 +77,7 @@ public class DriverController : ControllerBase
         var item = await _service.GetByIdAsync(id, cancellationToken);
         if (item == null) return NotFound();
 
-        if (!IsAdmin())
+        if (!IsPortStaff())
         {
             var userCarrierId = GetCarrierIdFromToken();
             if (item.CarrierId != userCarrierId) return Forbid();
@@ -60,17 +87,35 @@ public class DriverController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<ActionResult<DriverDto>> Create([FromBody] CreateDriverDto dto, CancellationToken cancellationToken)
+    public async Task<ActionResult<DriverDto>> Create([FromBody] CreateDriverDto dto, [FromQuery] Guid? carrierId, CancellationToken cancellationToken)
     {
-        if (IsAdmin())
+        Guid targetCarrierId;
+        if (IsPortStaff())
         {
-            return Forbid("Administrator is not allowed to create drivers. Only Transport Company can create drivers.");
+            if (carrierId.HasValue && carrierId.Value != Guid.Empty)
+            {
+                targetCarrierId = carrierId.Value;
+            }
+            else
+            {
+                var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
+                using var command = db.Database.GetDbConnection().CreateCommand();
+                command.CommandText = "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1";
+                await db.Database.OpenConnectionAsync(cancellationToken);
+                var result = await command.ExecuteScalarAsync(cancellationToken);
+                if (result == null) 
+                {
+                    return BadRequest(new { message = "Không tìm thấy công ty 'Cảng Tiên Sa' trong hệ thống. Vui lòng tạo một Công ty Vận tải tên là 'Cảng Tiên Sa' trước!" });
+                }
+                targetCarrierId = (Guid)result;
+            }
         }
-
-        var userCarrierId = GetCarrierIdFromToken();
-        if (userCarrierId == null) return Forbid();
-        
-        Guid targetCarrierId = userCarrierId.Value;
+        else
+        {
+            var userCarrierId = GetCarrierIdFromToken();
+            if (userCarrierId == null) return Forbid();
+            targetCarrierId = userCarrierId.Value;
+        }
 
         try
         {
@@ -89,7 +134,7 @@ public class DriverController : ControllerBase
         var existing = await _service.GetByIdAsync(id, cancellationToken);
         if (existing == null) return NotFound();
 
-        if (!IsAdmin())
+        if (!IsPortStaff())
         {
             var userCarrierId = GetCarrierIdFromToken();
             if (existing.CarrierId != userCarrierId) return Forbid();
@@ -112,7 +157,7 @@ public class DriverController : ControllerBase
         var existing = await _service.GetByIdAsync(id, cancellationToken);
         if (existing == null) return NotFound();
 
-        if (!IsAdmin())
+        if (!IsPortStaff())
         {
             var userCarrierId = GetCarrierIdFromToken();
             if (existing.CarrierId != userCarrierId) return Forbid();
@@ -121,6 +166,20 @@ public class DriverController : ControllerBase
         try
         {
             await _service.ToggleStatusAsync(id, status, cancellationToken);
+
+            if (status.Equals("inactive", StringComparison.OrdinalIgnoreCase) || status.Equals("banned", StringComparison.OrdinalIgnoreCase))
+            {
+                var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
+                using var command = db.Database.GetDbConnection().CreateCommand();
+                command.CommandText = "UPDATE trucks SET driver_id = NULL WHERE driver_id = @id";
+                var param = command.CreateParameter();
+                param.ParameterName = "@id";
+                param.Value = id;
+                command.Parameters.Add(param);
+                await db.Database.OpenConnectionAsync(cancellationToken);
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
             return NoContent();
         }
         catch (KeyNotFoundException)

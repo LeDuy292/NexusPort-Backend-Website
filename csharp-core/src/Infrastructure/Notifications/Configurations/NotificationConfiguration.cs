@@ -16,20 +16,10 @@ public class NotificationConfiguration : IEntityTypeConfiguration<Notification>
             .HasColumnName("id");
 
         builder.Property(x => x.RecipientId)
-            .HasColumnName("recipient_id")
+            .HasColumnName("receiver_user_id")
             .IsRequired();
 
         builder.HasIndex(x => x.RecipientId);
-
-        builder.Property(x => x.Type)
-            .HasColumnName("type")
-            .HasConversion<string>()
-            .IsRequired();
-
-        builder.Property(x => x.Severity)
-            .HasColumnName("severity")
-            .HasConversion<string>()
-            .IsRequired();
 
         builder.Property(x => x.Title)
             .HasColumnName("title")
@@ -47,24 +37,17 @@ public class NotificationConfiguration : IEntityTypeConfiguration<Notification>
         builder.Property(x => x.ReadAt)
             .HasColumnName("read_at");
 
-        builder.Property(x => x.ReferenceId)
-            .HasColumnName("reference_id")
-            .HasMaxLength(100);
-
         builder.Property(x => x.CreatedAt)
             .HasColumnName("created_at")
             .IsRequired();
 
-        builder.Property(x => x.CreatedBy)
-            .HasColumnName("created_by");
-
-        builder.Property(x => x.UpdatedAt)
-            .HasColumnName("updated_at");
-
-        builder.Property(x => x.UpdatedBy)
-            .HasColumnName("updated_by");
-
-        builder.Property(x => x.IsDeleted)
-            .HasColumnName("is_deleted");
+        // Bỏ qua các thuộc tính không có trong CSDL
+        builder.Ignore(x => x.Type);
+        builder.Ignore(x => x.Severity);
+        builder.Ignore(x => x.ReferenceId);
+        builder.Ignore(x => x.CreatedBy);
+        builder.Ignore(x => x.UpdatedAt);
+        builder.Ignore(x => x.UpdatedBy);
+        builder.Ignore(x => x.IsDeleted);
     }
 }

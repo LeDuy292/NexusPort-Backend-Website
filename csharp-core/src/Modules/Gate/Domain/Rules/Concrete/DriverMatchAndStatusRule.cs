@@ -31,9 +31,7 @@ public class DriverMatchAndStatusRule : IGateRule
         if (context.Driver != null)
         {
             var status = context.Driver.Status;
-            if (string.Equals(status, "Suspended", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status, "Blacklisted", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status, "Blocked", StringComparison.OrdinalIgnoreCase))
+            if (status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned)
             {
                 return Task.FromResult(GateRuleResult.Fail(
                     RuleName,
@@ -41,7 +39,7 @@ public class DriverMatchAndStatusRule : IGateRule
                     $"Tài xế '{context.Driver.FullName}' đang bị tạm đình chỉ/khóa tài khoản (Trạng thái: {status})."));
             }
 
-            if (string.Equals(status, "Inactive", StringComparison.OrdinalIgnoreCase))
+            if (status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive)
             {
                 return Task.FromResult(GateRuleResult.Fail(
                     RuleName,
