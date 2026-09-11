@@ -19,6 +19,7 @@ public class DriverConfiguration : IEntityTypeConfiguration<NexusPort.Modules.Dr
         
         builder.Property(x => x.Status)
             .HasColumnName("status")
+            .HasColumnType("driver_status")
             .IsRequired();
             
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");

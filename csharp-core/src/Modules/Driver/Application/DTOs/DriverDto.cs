@@ -4,6 +4,7 @@ public class DriverDto
 {
     public Guid Id { get; set; }
     public Guid CarrierId { get; set; }
+    public string? CarrierName { get; set; }
     public string FullName { get; set; } = null!;
     public string Phone { get; set; } = null!;
     public string IdCardNumber { get; set; } = null!;

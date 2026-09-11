@@ -32,8 +32,10 @@ public class DriverRepository : IDriverRepository
 
         if (!string.IsNullOrWhiteSpace(filter.Status))
         {
-            var status = filter.Status.ToLower();
-            query = query.Where(x => x.Status == status);
+            if (Enum.TryParse<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>(filter.Status, true, out var parsedStatus))
+            {
+                query = query.Where(x => x.Status == parsedStatus);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(filter.SearchTerm))

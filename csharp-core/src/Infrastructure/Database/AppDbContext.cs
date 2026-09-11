@@ -15,6 +15,8 @@ public class AppDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.HasPostgresEnum("driver_status", new[] { "active", "inactive", "banned" });
+        modelBuilder.HasPostgresEnum("truck_status", new[] { "active", "inactive", "maintenance" });
 
         foreach (var assembly in ModuleAssemblies)
         {
