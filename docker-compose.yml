@@ -70,6 +70,8 @@ services:
       - ConnectionStrings__DefaultConnection=Host=nexusport-db;Port=5432;Database=${DB_NAME:-nexusport_db};Username=${DB_USER:-nexusport_user};Password=${DB_PASSWORD:-NexusPort_Secure_2026!}
       - Redis__ConnectionString=nexusport-redis:6379,password=${REDIS_PASSWORD:-NexusRedis2026!}
       - RabbitMQ__Host=nexusport-rabbitmq
+      - RabbitMQ__Username=${RABBITMQ_USER:-nexusport_admin}
+      - RabbitMQ__Password=${RABBITMQ_PASS:-NexusRabbit2026!}
       - Jwt__Secret=${JWT_SECRET:-NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!}
     ports:
       - "5000:5000"
@@ -79,6 +81,8 @@ services:
         condition: service_healthy
       nexusport-redis:
         condition: service_healthy
+      nexusport-rabbitmq:
+        condition: service_started
     networks:
       - nexusport-network
 
@@ -94,6 +98,7 @@ services:
       - DATABASE_URL=postgresql://${DB_USER:-nexusport_user}:${DB_PASSWORD:-NexusPort_Secure_2026!}@nexusport-db:5432/${DB_NAME:-nexusport_db}
       - REDIS_URL=redis://:${REDIS_PASSWORD:-NexusRedis2026!}@nexusport-redis:6379
       - JWT_SECRET=${JWT_SECRET:-NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!}
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-nexusport_admin}:${RABBITMQ_PASS:-NexusRabbit2026!}@nexusport-rabbitmq:5672
     ports:
       - "4000:4000"
     depends_on:
@@ -101,6 +106,8 @@ services:
         condition: service_healthy
       nexusport-redis:
         condition: service_healthy
+      nexusport-rabbitmq:
+        condition: service_started
     networks:
       - nexusport-network
 
