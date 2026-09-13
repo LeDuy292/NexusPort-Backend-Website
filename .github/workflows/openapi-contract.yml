@@ -9,6 +9,14 @@ jobs:
   validate-openapi:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      NODE_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_NAME: nexusport_ci
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      JWT_SECRET: ci-only-openapi-contract-secret
+      BCRYPT_SALT_ROUNDS: 4
 
     steps:
       - name: Checkout
