@@ -7,6 +7,11 @@ using NexusPort.Modules.Booking.Domain.Entities;
 using NexusPort.Modules.Booking.Domain.Enums;
 using NexusPort.Shared.Exceptions;
 using NexusPort.Shared.Results;
+using Microsoft.EntityFrameworkCore;
+using NexusPort.Infrastructure.Database;
+using NexusPort.Modules.Container.Domain.Entities;
+using NexusPort.Modules.Driver.Domain.Enums;
+using NexusPort.Modules.Yard.Domain.Entities;
 
 namespace NexusPort.Modules.Booking.Application.Services;
 
@@ -15,15 +20,21 @@ public class BookingService : IBookingService
     private readonly IBookingRepository _repository;
     private readonly IBookingValidationService _validationService;
     private readonly INotificationService _notificationService;
+    private readonly AppDbContext _context;
+    private readonly ILogger<BookingService> _logger;
 
     public BookingService(
         IBookingRepository repository,
         IBookingValidationService validationService,
-        INotificationService notificationService)
+        INotificationService notificationService,
+        AppDbContext context,
+        ILogger<BookingService> logger)
     {
         _repository = repository;
         _validationService = validationService;
         _notificationService = notificationService;
+        _context = context;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<BookingDto>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -213,6 +224,159 @@ public class BookingService : IBookingService
         }, cancellationToken);
 
         return MapToDto(entity);
+    }
+
+    public async Task<IReadOnlyList<DriverContainerOperationDto>> GetDriverOperationsAsync(Guid driverId, CancellationToken cancellationToken = default)
+    {
+        var bookings = await _context.Set<Domain.Entities.Booking>()
+            .AsNoTracking()
+            .Include(x => x.BookingContainers)
+            .Where(x => x.DriverId == driverId && x.Status != BookingStatus.Canceled && x.Status != BookingStatus.Completed)
+            .OrderBy(x => x.AppointmentStart)
+            .ToListAsync(cancellationToken);
+
+        var completedOperationContainerIds = await _context.Set<YardOperationEvent>()
+            .AsNoTracking()
+            .Where(x => x.DriverId == driverId && x.OperationStatus == "Completed")
+            .Select(x => x.ContainerId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var containerIds = bookings.SelectMany(x => x.BookingContainers.Select(bc => bc.ContainerId))
+            .Where(completedOperationContainerIds.Contains)
+            .Distinct()
+            .ToList();
+        var containers = await _context.Set<Container>()
+            .AsNoTracking()
+            .Where(x => containerIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        return bookings.SelectMany(booking => booking.BookingContainers
+            .Where(link => containers.ContainsKey(link.ContainerId))
+            .Select(link =>
+            {
+                var container = containers[link.ContainerId];
+                return new DriverContainerOperationDto
+                {
+                    BookingId = booking.Id,
+                    BookingCode = booking.BookingCode,
+                    BookingType = booking.BookingType,
+                    BookingStatus = booking.Status,
+                    ContainerId = container.Id,
+                    ContainerNumber = container.ContainerNumber,
+                    ContainerStatus = container.Status,
+                    OperationStatus = "Completed"
+                };
+            })).ToList();
+    }
+
+    public async Task<ContainerConfirmationResultDto> ConfirmContainerAsync(ContainerConfirmationDto dto, Guid driverId, CancellationToken cancellationToken = default)
+    {
+        if (driverId == Guid.Empty)
+            throw new UnauthorizedException("A valid authenticated driver is required.");
+
+        var driverExists = await _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
+            .AnyAsync(x => x.Id == driverId && x.Status == DriverStatus.active, cancellationToken);
+        if (!driverExists)
+            throw new UnauthorizedException("Only an active assigned driver can confirm a container.");
+
+        var booking = await _context.Set<Domain.Entities.Booking>()
+            .Include(x => x.BookingContainers)
+            .Where(x => x.DriverId == driverId)
+            .Where(x => x.BookingContainers.Any(link => link.ContainerId == dto.ContainerId))
+            .Where(x => x.Status != BookingStatus.Canceled)
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (booking == null)
+            throw new UnauthorizedException("The container is not assigned to the authenticated driver.");
+
+        var operationCompleted = await _context.Set<YardOperationEvent>()
+            .AnyAsync(x => x.DriverId == driverId && x.ContainerId == dto.ContainerId && x.OperationStatus == "Completed", cancellationToken);
+        if (!operationCompleted)
+            throw new ValidationException("Container", "The assigned yard operation has not been completed yet.");
+
+        var container = await _context.Set<Container>().FirstOrDefaultAsync(x => x.Id == dto.ContainerId, cancellationToken);
+        if (container == null)
+            throw new NotFoundException("Container", dto.ContainerId);
+
+        var existingAudit = await _context.Set<ContainerConfirmationAudit>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(x => x.BookingId == booking.Id && x.ContainerId == container.Id, cancellationToken);
+        if (existingAudit != null)
+        {
+            return new ContainerConfirmationResultDto
+            {
+                ConfirmationId = existingAudit.Id,
+                BookingId = booking.Id,
+                ContainerId = container.Id,
+                ContainerNumber = container.ContainerNumber,
+                ContainerStatus = existingAudit.ContainerStatusAfter,
+                BookingStatus = booking.Status,
+                DriverId = driverId,
+                ConfirmedAt = existingAudit.ConfirmedAt,
+                Condition = existingAudit.Condition
+            };
+        }
+
+        var normalizedCondition = string.IsNullOrWhiteSpace(dto.Condition) ? "OK" : dto.Condition.Trim().ToUpperInvariant();
+        if (normalizedCondition is not ("OK" or "DAMAGED" or "ISSUE"))
+            throw new ValidationException("Condition", "Condition must be OK, DAMAGED, or ISSUE.");
+
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            const string readyForGateOut = "ReadyForGateOut";
+            container.Status = readyForGateOut;
+            booking.Complete();
+
+            var audit = new ContainerConfirmationAudit
+            {
+                BookingId = booking.Id,
+                ContainerId = container.Id,
+                DriverId = driverId,
+                Condition = normalizedCondition,
+                Notes = dto.Notes,
+                ContainerStatusAfter = readyForGateOut,
+                ConfirmedAt = DateTime.UtcNow
+            };
+            await _context.Set<ContainerConfirmationAudit>().AddAsync(audit, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            try
+            {
+                await _notificationService.SendAsync(new SendNotificationDto
+                {
+                    RecipientId = driverId,
+                    Type = NotificationType.ContainerReady,
+                    Severity = normalizedCondition == "OK" ? NotificationSeverity.Success : NotificationSeverity.Warning,
+                    Title = $"Container {container.ContainerNumber} sẵn sàng Gate-Out",
+                    Message = $"Container {container.ContainerNumber} đã được xác nhận ({normalizedCondition}). Operation status: ReadyForGateOut.",
+                    ReferenceId = container.Id.ToString()
+                }, cancellationToken);
+            }
+            catch (Exception notificationError)
+            {
+                _logger.LogWarning(notificationError, "Container confirmation succeeded but driver notification failed for container {ContainerId}", container.Id);
+            }
+
+            return new ContainerConfirmationResultDto
+            {
+                ConfirmationId = audit.Id,
+                BookingId = booking.Id,
+                ContainerId = container.Id,
+                ContainerNumber = container.ContainerNumber,
+                ContainerStatus = readyForGateOut,
+                BookingStatus = booking.Status,
+                DriverId = driverId,
+                ConfirmedAt = audit.ConfirmedAt,
+                Condition = normalizedCondition
+            };
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
     }
 
     private static BookingDto MapToDto(Domain.Entities.Booking entity)

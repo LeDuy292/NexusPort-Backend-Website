@@ -79,3 +79,35 @@ public class BookingFilterParams
     public int PageNumber { get; set; } = 1;
     public int PageSize { get; set; } = 10;
 }
+
+public class DriverContainerOperationDto
+{
+    public Guid BookingId { get; set; }
+    public string BookingCode { get; set; } = string.Empty;
+    public BookingType BookingType { get; set; }
+    public BookingStatus BookingStatus { get; set; }
+    public Guid ContainerId { get; set; }
+    public string ContainerNumber { get; set; } = string.Empty;
+    public string ContainerStatus { get; set; } = string.Empty;
+    public string OperationStatus { get; set; } = string.Empty;
+}
+
+public class ContainerConfirmationDto
+{
+    public Guid ContainerId { get; set; }
+    public string Condition { get; set; } = "OK";
+    public string? Notes { get; set; }
+}
+
+public class ContainerConfirmationResultDto
+{
+    public Guid ConfirmationId { get; set; }
+    public Guid BookingId { get; set; }
+    public Guid ContainerId { get; set; }
+    public string ContainerNumber { get; set; } = string.Empty;
+    public string ContainerStatus { get; set; } = string.Empty;
+    public BookingStatus BookingStatus { get; set; }
+    public Guid DriverId { get; set; }
+    public DateTime ConfirmedAt { get; set; }
+    public string Condition { get; set; } = string.Empty;
+}

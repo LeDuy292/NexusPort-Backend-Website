@@ -120,6 +120,32 @@ public class BookingController : ControllerBase
         return Ok(item);
     }
 
+    [HttpGet("driver/operations")]
+    [ProducesResponseType(typeof(IReadOnlyList<DriverContainerOperationDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<DriverContainerOperationDto>>> GetDriverOperations(CancellationToken cancellationToken)
+    {
+        if (!_currentUser.UserId.HasValue)
+            return Unauthorized(new { message = "Driver authentication is required." });
+
+        return Ok(await _service.GetDriverOperationsAsync(_currentUser.UserId.Value, cancellationToken));
+    }
+
+    [HttpPost("driver/container-confirmation")]
+    [ProducesResponseType(typeof(ContainerConfirmationResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<ContainerConfirmationResultDto>> ConfirmContainer(
+        [FromBody] ContainerConfirmationDto dto,
+        CancellationToken cancellationToken)
+    {
+        if (!_currentUser.UserId.HasValue)
+            return Unauthorized(new { message = "Driver authentication is required." });
+
+        var result = await _service.ConfirmContainerAsync(dto, _currentUser.UserId.Value, cancellationToken);
+        return Ok(result);
+    }
+
     private bool IsCarrierRole()
     {
         var role = _currentUser.Role;
