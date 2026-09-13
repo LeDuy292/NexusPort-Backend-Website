@@ -1,15 +1,20 @@
 using NexusPort.Modules.Driver.Application.DTOs;
 using NexusPort.Modules.Driver.Application.Interfaces;
+using NexusPort.Infrastructure.ExternalServices;
 
 namespace NexusPort.Modules.Driver.Application.Services;
 
 public class DriverService : IDriverService
 {
     private readonly IDriverRepository _repository;
+    private readonly IMessageBrokerService _messageBroker;
+    private readonly ILogger<DriverService> _logger;
 
-    public DriverService(IDriverRepository repository)
+    public DriverService(IDriverRepository repository, IMessageBrokerService messageBroker, ILogger<DriverService> logger)
     {
         _repository = repository;
+        _messageBroker = messageBroker;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<DriverDto>> GetAllAsync(DriverFilterDto filter, CancellationToken cancellationToken = default)
@@ -109,10 +114,25 @@ public class DriverService : IDriverService
         {
             entity.Status = parsedStatus;
             await _repository.UpdateAsync(entity, cancellationToken);
+            await PublishStatusAsync(entity.Id, entity.Status.ToString(), entity.FullName, cancellationToken);
         }
         else
         {
             throw new ArgumentException("Invalid driver status.");
+        }
+    }
+
+    private async Task PublishStatusAsync(Guid driverId, string status, string? label, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _messageBroker.PublishAsync("dispatcher.status.updated", new DispatcherStatusUpdatedEvent(
+                Guid.NewGuid(), "driver", driverId.ToString(), status, DateTime.UtcNow,
+                DriverId: driverId, Label: label), cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Driver status updated but dispatcher event could not be published for {DriverId}", driverId);
         }
     }
 }
