@@ -1,6 +1,8 @@
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using NexusPort.Infrastructure.Database;
+using NexusPort.Infrastructure.ExternalServices;
 using NexusPort.Modules.Booking.Domain.Entities;
 using NexusPort.Modules.Container.Domain.Entities;
 using NexusPort.Modules.Driver.Domain.Entities;
@@ -154,6 +156,7 @@ public class GateVerificationService : IGateVerificationService
         };
 
         await _verificationRepository.AddAsync(record, cancellationToken);
+        await PublishDispatcherEventAsync(record, gateType, cancellationToken);
 
         // 5. Chuẩn bị kết quả trả về
         return new GateVerificationResultDto
@@ -187,6 +190,22 @@ public class GateVerificationService : IGateVerificationService
                 OverviewImageUrl = record.OverviewImageUrl
             }
         };
+    }
+
+    private async Task PublishDispatcherEventAsync(GateVerificationRecord record, string gateType, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var domain = string.Equals(gateType, "GateOut", StringComparison.OrdinalIgnoreCase) ? "gate-out" : "gate";
+            await _messageBroker.PublishAsync("dispatcher.status.updated", new DispatcherStatusUpdatedEvent(
+                Guid.NewGuid(), domain, record.Id.ToString(), record.VerificationStatus, record.VerificationTime,
+                BookingId: record.BookingId, VehicleId: record.VehicleId, DriverId: record.DriverId,
+                Label: record.GateCode), cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Gate verification saved but dispatcher event could not be published for {RecordId}", record.Id);
+        }
     }
 
     public async Task<GateRuleEvaluationResult> EvaluateRulesAsync(GateRulePreCheckRequestDto request, CancellationToken cancellationToken = default)

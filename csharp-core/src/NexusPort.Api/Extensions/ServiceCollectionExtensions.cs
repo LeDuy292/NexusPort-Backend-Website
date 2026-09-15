@@ -54,8 +54,13 @@ public static class ServiceCollectionExtensions
         var connectionString = configuration.GetConnectionString("DefaultConnection") 
             ?? "Host=localhost;Port=5432;Database=nexusport;Username=postgres;Password=120104";
 
+        var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>("driver_status");
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus>("truck_status");
+        var dataSource = dataSourceBuilder.Build();
+
         services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(connectionString));
+            options.UseNpgsql(dataSource));
 
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
@@ -137,6 +142,8 @@ public static class ServiceCollectionExtensions
         // Yard
         services.AddScoped<IYardRepository, YardRepository>();
         services.AddScoped<IYardService, YardService>();
+        services.AddScoped<IYardReceivingService, YardReceivingService>();
+        services.AddScoped<IYardTaskService, YardTaskService>();
 
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();

@@ -7,6 +7,7 @@ public enum NotificationType
     GatePassCreated,
     GateInFailed,
     ContainerReady,
+    YardOperationCompleted,
     ContainerIssue,
     TrafficCongestion,
     GateOutFailed,

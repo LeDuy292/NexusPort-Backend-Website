@@ -18,6 +18,22 @@ public class NotificationService : INotificationService
 
     public async Task<NotificationDto> SendAsync(SendNotificationDto dto, CancellationToken cancellationToken = default)
     {
+        if (dto.RecipientId == Guid.Empty)
+        {
+            return new NotificationDto
+            {
+                Id = Guid.NewGuid(),
+                RecipientId = Guid.Empty,
+                Type = dto.Type,
+                Title = dto.Title,
+                Message = dto.Message,
+                Severity = dto.Severity,
+                IsRead = false,
+                CreatedAt = DateTime.UtcNow,
+                ReferenceId = dto.ReferenceId
+            };
+        }
+
         var entity = new Notification(
             dto.RecipientId,
             dto.Type,

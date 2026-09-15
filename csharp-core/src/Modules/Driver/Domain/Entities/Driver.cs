@@ -1,4 +1,5 @@
 using NexusPort.Shared.Kernel;
+using NexusPort.Modules.Driver.Domain.Enums;
 
 namespace NexusPort.Modules.Driver.Domain.Entities;
 
@@ -9,11 +10,11 @@ public class Driver : BaseEntity, IAggregateRoot
     public string? Phone { get; set; }
     public string? IdCardNumber { get; set; }
     public string LicenseNumber { get; set; } = string.Empty;
-    public string Status { get; set; } = "active";
+    public DriverStatus Status { get; set; } = DriverStatus.active;
 
     public Driver() { }
 
-    public Driver(Guid carrierId, string fullName, string licenseNumber, string? phone = null, string? idCardNumber = null, string status = "active")
+    public Driver(Guid carrierId, string fullName, string licenseNumber, string? phone = null, string? idCardNumber = null, DriverStatus status = DriverStatus.active)
     {
         CarrierId = carrierId;
         FullName = fullName;
