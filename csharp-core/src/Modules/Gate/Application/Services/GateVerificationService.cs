@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using NexusPort.Infrastructure.Database;
 using NexusPort.Infrastructure.ExternalServices;
 using NexusPort.Modules.Booking.Domain.Entities;

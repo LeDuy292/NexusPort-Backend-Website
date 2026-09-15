@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using NexusPort.Modules.Driver.Application.DTOs;
 using NexusPort.Modules.Driver.Application.Interfaces;
 using NexusPort.Infrastructure.ExternalServices;

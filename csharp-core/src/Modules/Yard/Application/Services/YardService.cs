@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using NexusPort.Infrastructure.Database;
 using NexusPort.Infrastructure.ExternalServices;
 using NexusPort.Infrastructure.Notifications.DTOs;
@@ -79,7 +80,7 @@ public class YardService : IYardService
 
         var driverExists = await _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
             .AsNoTracking()
-            .AnyAsync(driver => driver.Id == dto.DriverId && driver.Status == "active", cancellationToken);
+            .AnyAsync(driver => driver.Id == dto.DriverId && driver.Status.ToString().ToLower() == "active", cancellationToken);
         if (!driverExists)
             throw new InvalidOperationException("The target driver does not exist or is inactive.");
 
