@@ -16,6 +16,13 @@ obj/
 .vs/
 appsettings.Development.json
 
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.onnx
+*.pt
+
 test_db.js
 init_db.js
 
