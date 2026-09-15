@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc;
 using NexusPort.Modules.Equipment.Application.DTOs;
 using NexusPort.Modules.Equipment.Application.Interfaces;
 
@@ -19,6 +19,13 @@ public class EquipmentController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<EquipmentDto>>> GetAll(CancellationToken cancellationToken)
     {
         var items = await _service.GetAllAsync(cancellationToken);
+        return Ok(items);
+    }
+
+    [HttpGet("available")]
+    public async Task<ActionResult<IReadOnlyList<EquipmentDto>>> GetAvailable([FromQuery] string? block, CancellationToken cancellationToken)
+    {
+        var items = await _service.GetAvailableAsync(block, cancellationToken);
         return Ok(items);
     }
 

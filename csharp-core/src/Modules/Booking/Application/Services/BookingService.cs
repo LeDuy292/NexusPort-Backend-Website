@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using NexusPort.Infrastructure.Notifications.DTOs;
 using NexusPort.Infrastructure.Notifications.Enums;
 using NexusPort.Infrastructure.Notifications.Interfaces;
@@ -11,7 +12,6 @@ using Microsoft.EntityFrameworkCore;
 using NexusPort.Infrastructure.Database;
 using NexusPort.Modules.Container.Domain.Entities;
 using NexusPort.Modules.Driver.Domain.Enums;
-using NexusPort.Modules.Yard.Domain.Entities;
 
 namespace NexusPort.Modules.Booking.Application.Services;
 
@@ -235,7 +235,7 @@ public class BookingService : IBookingService
             .OrderBy(x => x.AppointmentStart)
             .ToListAsync(cancellationToken);
 
-        var completedOperationContainerIds = await _context.Set<YardOperationEvent>()
+        var completedOperationContainerIds = await _context.Set<NexusPort.Modules.Yard.Domain.Entities.YardOperationEvent>()
             .AsNoTracking()
             .Where(x => x.DriverId == driverId && x.OperationStatus == "Completed")
             .Select(x => x.ContainerId)
@@ -245,7 +245,7 @@ public class BookingService : IBookingService
             .Where(completedOperationContainerIds.Contains)
             .Distinct()
             .ToList();
-        var containers = await _context.Set<Container>()
+        var containers = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
             .AsNoTracking()
             .Where(x => containerIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
@@ -289,12 +289,12 @@ public class BookingService : IBookingService
         if (booking == null)
             throw new UnauthorizedException("The container is not assigned to the authenticated driver.");
 
-        var operationCompleted = await _context.Set<YardOperationEvent>()
+        var operationCompleted = await _context.Set<NexusPort.Modules.Yard.Domain.Entities.YardOperationEvent>()
             .AnyAsync(x => x.DriverId == driverId && x.ContainerId == dto.ContainerId && x.OperationStatus == "Completed", cancellationToken);
         if (!operationCompleted)
             throw new ValidationException("Container", "The assigned yard operation has not been completed yet.");
 
-        var container = await _context.Set<Container>().FirstOrDefaultAsync(x => x.Id == dto.ContainerId, cancellationToken);
+        var container = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>().FirstOrDefaultAsync(x => x.Id == dto.ContainerId, cancellationToken);
         if (container == null)
             throw new NotFoundException("Container", dto.ContainerId);
 
