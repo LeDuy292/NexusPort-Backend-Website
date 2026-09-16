@@ -5,6 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 using NexusPort.Modules.Driver.Application.DTOs;
 using NexusPort.Modules.Driver.Application.Interfaces;
 using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using NexusPort.Modules.Driver.Application.Services;
 
 namespace NexusPort.Modules.Driver.Presentation.Controllers;
 
@@ -14,10 +16,12 @@ namespace NexusPort.Modules.Driver.Presentation.Controllers;
 public class DriverController : ControllerBase
 {
     private readonly IDriverService _service;
+    private readonly IOcrService _ocrService;
 
-    public DriverController(IDriverService service)
+    public DriverController(IDriverService service, IOcrService ocrService)
     {
         _service = service;
+        _ocrService = ocrService;
     }
 
     private Guid? GetCarrierIdFromToken()
@@ -34,6 +38,115 @@ public class DriverController : ControllerBase
              c.Value.Equals("admin", StringComparison.OrdinalIgnoreCase) ||
              c.Value.Equals("dispatcher", StringComparison.OrdinalIgnoreCase) ||
              c.Value.Equals("operation", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    [HttpPost("extract-cccd")]
+    [Consumes("multipart/form-data")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ExtractCccd(IFormFile image, CancellationToken cancellationToken)
+    {
+        if (image == null || image.Length == 0) return BadRequest(new { message = "No image provided" });
+
+        try
+        {
+            var env = HttpContext.RequestServices.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+            var uploadsFolder = Path.Combine(env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads", "drivers");
+            if (!Directory.Exists(uploadsFolder)) Directory.CreateDirectory(uploadsFolder);
+            
+            // Save original image
+            var originalFileName = $"cccd_front_{Guid.NewGuid()}{Path.GetExtension(image.FileName)}";
+            var originalFilePath = Path.Combine(uploadsFolder, originalFileName);
+            using (var stream = new FileStream(originalFilePath, FileMode.Create))
+            {
+                await image.CopyToAsync(stream, cancellationToken);
+            }
+            var idCardFrontUrl = $"/uploads/drivers/{originalFileName}";
+
+            var data = await _ocrService.ExtractIdCardAsync(image, cancellationToken);
+            if (data == null)
+            {
+                return BadRequest(new { message = "Failed to extract ID card data" });
+            }
+
+            string? faceUrl = null;
+
+            if (data.FaceImageBytes != null && data.FaceImageBytes.Length > 0)
+            {
+                var fileName = $"face_{Guid.NewGuid()}.jpg";
+                var filePath = Path.Combine(uploadsFolder, fileName);
+                
+                await System.IO.File.WriteAllBytesAsync(filePath, data.FaceImageBytes, cancellationToken);
+                
+                faceUrl = $"/uploads/drivers/{fileName}";
+            }
+
+            return Ok(new
+            {
+                fullName = data.Name,
+                idCardNumber = data.Id,
+                dob = data.Dob,
+                sex = data.Sex,
+                address = data.Address,
+                faceImageUrl = faceUrl,
+                idCardFrontUrl = idCardFrontUrl
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("EXTRACT CCCD ERROR: " + ex.ToString());
+            return StatusCode(500, new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("extract-gplx")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> ExtractGplx(IFormFile image, CancellationToken cancellationToken)
+    {
+        if (image == null || image.Length == 0) return BadRequest(new { message = "No image provided" });
+
+        try
+        {
+            var env = HttpContext.RequestServices.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
+            var uploadsFolder = Path.Combine(env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads", "drivers");
+            if (!Directory.Exists(uploadsFolder)) Directory.CreateDirectory(uploadsFolder);
+            
+            // Save original image
+            var originalFileName = $"gplx_{Guid.NewGuid()}{Path.GetExtension(image.FileName)}";
+            var originalFilePath = Path.Combine(uploadsFolder, originalFileName);
+            using (var stream = new FileStream(originalFilePath, FileMode.Create))
+            {
+                await image.CopyToAsync(stream, cancellationToken);
+            }
+            var licenseImageUrl = $"/uploads/drivers/{originalFileName}";
+
+            var data = await _ocrService.ExtractDriverLicenseAsync(image, cancellationToken);
+            if (data == null)
+            {
+                return BadRequest(new { message = "Failed to extract Driver License data" });
+            }
+            string? faceUrl = null;
+            if (data.FaceImageBytes != null && data.FaceImageBytes.Length > 0)
+            {
+                var fileName = $"face_{Guid.NewGuid()}.jpg";
+                var filePath = Path.Combine(uploadsFolder, fileName);
+                await System.IO.File.WriteAllBytesAsync(filePath, data.FaceImageBytes, cancellationToken);
+                faceUrl = $"/uploads/drivers/{fileName}";
+            }
+
+            return Ok(new
+            {
+                fullName = data.Name,
+                dob = data.Dob,
+                licenseNumber = data.Id,
+                licenseImageUrl = licenseImageUrl,
+                faceImageUrl = faceUrl
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("EXTRACT GPLX ERROR: " + ex.ToString());
+            return StatusCode(500, new { message = ex.Message });
+        }
     }
 
     [HttpGet]

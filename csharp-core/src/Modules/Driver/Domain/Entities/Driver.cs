@@ -10,6 +10,9 @@ public class Driver : BaseEntity, IAggregateRoot
     public string? Phone { get; set; }
     public string? IdCardNumber { get; set; }
     public string LicenseNumber { get; set; } = string.Empty;
+    public string? PhotoUrl { get; set; }
+    public string? IdCardFrontUrl { get; set; }
+    public string? LicenseImageUrl { get; set; }
     public DriverStatus Status { get; set; } = DriverStatus.active;
 
     public Driver() { }

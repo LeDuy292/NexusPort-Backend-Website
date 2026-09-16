@@ -30,6 +30,8 @@ public class VehicleService : IVehicleService
             Status = e.Status.ToString(),
             VehicleType = e.VehicleType,
             Description = e.Description,
+            RegistrationImageUrl = e.RegistrationImageUrl,
+            PhotoUrl = e.PhotoUrl,
             CreatedAt = e.CreatedAt
         }).ToList();
     }
@@ -47,6 +49,8 @@ public class VehicleService : IVehicleService
             Status = entity.Status.ToString(),
             VehicleType = entity.VehicleType,
             Description = entity.Description,
+            RegistrationImageUrl = entity.RegistrationImageUrl,
+            PhotoUrl = entity.PhotoUrl,
             CreatedAt = entity.CreatedAt
         };
     }
@@ -67,6 +71,15 @@ public class VehicleService : IVehicleService
         {
             entity.VehicleType = dto.VehicleType;
         }
+        entity.Description = dto.Description;
+        if (!string.IsNullOrWhiteSpace(dto.RegistrationImageUrl))
+        {
+            entity.RegistrationImageUrl = dto.RegistrationImageUrl;
+        }
+        if (!string.IsNullOrWhiteSpace(dto.PhotoUrl))
+        {
+            entity.PhotoUrl = dto.PhotoUrl;
+        }
 
         await _repository.AddAsync(entity, cancellationToken);
         return new VehicleDto
@@ -78,6 +91,8 @@ public class VehicleService : IVehicleService
             Status = entity.Status.ToString(),
             VehicleType = entity.VehicleType,
             Description = entity.Description,
+            RegistrationImageUrl = entity.RegistrationImageUrl,
+            PhotoUrl = entity.PhotoUrl,
             CreatedAt = entity.CreatedAt
         };
     }
@@ -98,6 +113,14 @@ public class VehicleService : IVehicleService
             entity.VehicleType = dto.VehicleType;
         }
         entity.Description = dto.Description;
+        if (!string.IsNullOrWhiteSpace(dto.RegistrationImageUrl))
+        {
+            entity.RegistrationImageUrl = dto.RegistrationImageUrl;
+        }
+        if (!string.IsNullOrWhiteSpace(dto.PhotoUrl))
+        {
+            entity.PhotoUrl = dto.PhotoUrl;
+        }
 
         await _repository.UpdateAsync(entity, cancellationToken);
 
@@ -110,6 +133,8 @@ public class VehicleService : IVehicleService
             Status = entity.Status.ToString(),
             VehicleType = entity.VehicleType,
             Description = entity.Description,
+            RegistrationImageUrl = entity.RegistrationImageUrl,
+            PhotoUrl = entity.PhotoUrl,
             CreatedAt = entity.CreatedAt
         };
     }

@@ -2,8 +2,11 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Hosting;
 using NexusPort.Modules.Vehicle.Application.DTOs;
 using NexusPort.Modules.Vehicle.Application.Interfaces;
+using NexusPort.Modules.Driver.Application.Services;
 using System.Security.Claims;
 
 namespace NexusPort.Modules.Vehicle.Presentation.Controllers;
@@ -14,10 +17,14 @@ namespace NexusPort.Modules.Vehicle.Presentation.Controllers;
 public class VehicleController : ControllerBase
 {
     private readonly IVehicleService _service;
+    private readonly IOcrService _ocrService;
+    private readonly IWebHostEnvironment _env;
 
-    public VehicleController(IVehicleService service)
+    public VehicleController(IVehicleService service, IOcrService ocrService, IWebHostEnvironment env)
     {
         _service = service;
+        _ocrService = ocrService;
+        _env = env;
     }
 
     private bool IsPortStaff()
@@ -135,6 +142,78 @@ public class VehicleController : ControllerBase
         }
     }
 
+    [HttpPost("upload-photo")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> UploadPhoto([FromForm] IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0) return BadRequest(new { message = "No file provided" });
+
+        var uploadDir = Path.Combine(_env.WebRootPath, "uploads", "vehicles");
+        if (!Directory.Exists(uploadDir)) Directory.CreateDirectory(uploadDir);
+
+        var ext = Path.GetExtension(file.FileName);
+        var filename = $"avatar_{Guid.NewGuid()}{ext}";
+        var filepath = Path.Combine(uploadDir, filename);
+
+        using (var stream = new FileStream(filepath, FileMode.Create))
+        {
+            await file.CopyToAsync(stream, cancellationToken);
+        }
+
+        return Ok(new { ImageUrl = $"/uploads/vehicles/{filename}" });
+    }
+
+    [HttpPost("extract-registration")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> ExtractRegistration([FromForm] IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0) return BadRequest(new { message = "Vui lòng chọn ảnh Cà Vẹt (Giấy Đăng Ký Xe)." });
+
+        try
+        {
+            var result = await _ocrService.ExtractVehicleRegistrationAsync(file, cancellationToken);
+
+            // Save the raw image
+            var uploadDir = Path.Combine(_env.WebRootPath, "uploads", "vehicles");
+            if (!Directory.Exists(uploadDir)) Directory.CreateDirectory(uploadDir);
+
+            var ext = Path.GetExtension(file.FileName);
+            var filename = $"reg_{Guid.NewGuid()}{ext}";
+            var filepath = Path.Combine(uploadDir, filename);
+
+            using (var stream = new FileStream(filepath, FileMode.Create))
+            {
+                await file.CopyToAsync(stream, cancellationToken);
+            }
+
+            var imageUrl = $"/uploads/vehicles/{filename}";
+
+            if (result == null || string.IsNullOrEmpty(result.PlateNumber))
+            {
+                return Ok(new
+                {
+                    PlateNumber = "",
+                    ImageUrl = imageUrl,
+                    IsSuccess = false,
+                    Message = "Không thể nhận diện được biển số. Vui lòng nhập tay."
+                });
+            }
+
+            return Ok(new
+            {
+                PlateNumber = result.PlateNumber,
+                Brand = result.Brand,
+                ImageUrl = imageUrl,
+                IsSuccess = true,
+                Message = "Nhận diện Cà Vẹt thành công."
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = $"Lỗi xử lý OCR: {ex.Message}" });
+        }
+    }
+
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<VehicleDto>> Update(Guid id, [FromBody] UpdateVehicleDto dto, CancellationToken cancellationToken)
     {
@@ -209,11 +288,7 @@ public class VehicleController : ControllerBase
 
         if (IsPortStaff())
         {
-            var portCarrierId = await GetPortCarrierIdAsync(cancellationToken);
-            if (portCarrierId == null || existing.CarrierId != portCarrierId.Value)
-            {
-                return StatusCode(403, new { message = "Admin/Dispatcher chỉ được phép sửa xe thuộc sở hữu của Cảng Tiên Sa." });
-            }
+            // Allowed to edit all vehicles
         }
         else
         {
