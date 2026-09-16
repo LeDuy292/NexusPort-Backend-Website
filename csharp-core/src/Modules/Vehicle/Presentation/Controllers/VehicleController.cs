@@ -52,27 +52,41 @@ public class VehicleController : ControllerBase
 
         var items = (await _service.GetAllAsync(filter, cancellationToken)).ToList();
 
-        // Map Driver Name and Carrier Name
-        var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-        using var command = db.Database.GetDbConnection().CreateCommand();
-        command.CommandText = "SELECT id, full_name FROM drivers";
-        await db.Database.OpenConnectionAsync(cancellationToken);
-        using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var driverMap = new Dictionary<Guid, string>();
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            driverMap[reader.GetGuid(0)] = reader.GetString(1);
-        }
-        await reader.CloseAsync();
-
-        command.CommandText = "SELECT id, company_name FROM carriers";
-        using var carrierReader = await command.ExecuteReaderAsync(cancellationToken);
         var carrierMap = new Dictionary<Guid, string>();
-        while (await carrierReader.ReadAsync(cancellationToken))
+
+        var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
+        if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
         {
-            carrierMap[carrierReader.GetGuid(0)] = carrierReader.GetString(1);
+            await db.Database.OpenConnectionAsync(cancellationToken);
         }
-        await carrierReader.CloseAsync();
+
+        using (var command = db.Database.GetDbConnection().CreateCommand())
+        {
+            command.CommandText = "SELECT id, full_name FROM drivers";
+            using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+            {
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    if (!reader.IsDBNull(0) && !reader.IsDBNull(1))
+                    {
+                        driverMap[reader.GetGuid(0)] = reader.GetString(1);
+                    }
+                }
+            }
+
+            command.CommandText = "SELECT id, company_name FROM carriers";
+            using (var carrierReader = await command.ExecuteReaderAsync(cancellationToken))
+            {
+                while (await carrierReader.ReadAsync(cancellationToken))
+                {
+                    if (!carrierReader.IsDBNull(0) && !carrierReader.IsDBNull(1))
+                    {
+                        carrierMap[carrierReader.GetGuid(0)] = carrierReader.GetString(1);
+                    }
+                }
+            }
+        }
 
         foreach (var item in items)
         {
@@ -299,15 +313,20 @@ public class VehicleController : ControllerBase
         if (dto.DriverId.HasValue)
         {
             var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-            using var command = db.Database.GetDbConnection().CreateCommand();
-            command.CommandText = "SELECT status FROM drivers WHERE id = @id";
-            var param = command.CreateParameter();
-            param.ParameterName = "@id";
-            param.Value = dto.DriverId.Value;
-            command.Parameters.Add(param);
-            
-            await db.Database.OpenConnectionAsync(cancellationToken);
-            var driverStatusObj = await command.ExecuteScalarAsync(cancellationToken);
+            if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+            {
+                await db.Database.OpenConnectionAsync(cancellationToken);
+            }
+            object driverStatusObj;
+            using (var command = db.Database.GetDbConnection().CreateCommand())
+            {
+                command.CommandText = "SELECT status FROM drivers WHERE id = @id";
+                var param = command.CreateParameter();
+                param.ParameterName = "@id";
+                param.Value = dto.DriverId.Value;
+                command.Parameters.Add(param);
+                driverStatusObj = await command.ExecuteScalarAsync(cancellationToken);
+            }
             if (driverStatusObj == null) return NotFound(new { message = "Không tìm thấy tài xế." });
             
             var driverStatus = driverStatusObj.ToString()?.ToLower();
@@ -330,10 +349,15 @@ public class VehicleController : ControllerBase
     private async Task<Guid?> GetPortCarrierIdAsync(CancellationToken cancellationToken)
     {
         var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-        using var command = db.Database.GetDbConnection().CreateCommand();
-        command.CommandText = "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1";
-        await db.Database.OpenConnectionAsync(cancellationToken);
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-        return result != null ? (Guid)result : null;
+        if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+        {
+            await db.Database.OpenConnectionAsync(cancellationToken);
+        }
+        using (var command = db.Database.GetDbConnection().CreateCommand())
+        {
+            command.CommandText = "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1";
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result != null ? (Guid)result : null;
+        }
     }
 }

@@ -164,8 +164,11 @@ public class DriverController : ControllerBase
         // Map Carrier Name
         var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
         using var command = db.Database.GetDbConnection().CreateCommand();
+        if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+        {
+            await db.Database.OpenConnectionAsync(cancellationToken);
+        }
         command.CommandText = "SELECT id, company_name FROM carriers";
-        await db.Database.OpenConnectionAsync(cancellationToken);
         using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var carrierMap = new Dictionary<Guid, string>();
         while (await reader.ReadAsync(cancellationToken))
@@ -212,10 +215,16 @@ public class DriverController : ControllerBase
             else
             {
                 var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-                using var command = db.Database.GetDbConnection().CreateCommand();
-                command.CommandText = "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1";
-                await db.Database.OpenConnectionAsync(cancellationToken);
-                var result = await command.ExecuteScalarAsync(cancellationToken);
+                if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await db.Database.OpenConnectionAsync(cancellationToken);
+                }
+                object result;
+                using (var command = db.Database.GetDbConnection().CreateCommand())
+                {
+                    command.CommandText = "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1";
+                    result = await command.ExecuteScalarAsync(cancellationToken);
+                }
                 if (result == null) 
                 {
                     return BadRequest(new { message = "Không tìm thấy công ty 'Cảng Tiên Sa' trong hệ thống. Vui lòng tạo một Công ty Vận tải tên là 'Cảng Tiên Sa' trước!" });
@@ -283,14 +292,19 @@ public class DriverController : ControllerBase
             if (status.Equals("inactive", StringComparison.OrdinalIgnoreCase) || status.Equals("banned", StringComparison.OrdinalIgnoreCase))
             {
                 var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-                using var command = db.Database.GetDbConnection().CreateCommand();
-                command.CommandText = "UPDATE trucks SET driver_id = NULL WHERE driver_id = @id";
-                var param = command.CreateParameter();
-                param.ParameterName = "@id";
-                param.Value = id;
-                command.Parameters.Add(param);
-                await db.Database.OpenConnectionAsync(cancellationToken);
-                await command.ExecuteNonQueryAsync(cancellationToken);
+                if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                {
+                    await db.Database.OpenConnectionAsync(cancellationToken);
+                }
+                using (var command = db.Database.GetDbConnection().CreateCommand())
+                {
+                    command.CommandText = "UPDATE trucks SET driver_id = NULL WHERE driver_id = @id";
+                    var param = command.CreateParameter();
+                    param.ParameterName = "@id";
+                    param.Value = id;
+                    command.Parameters.Add(param);
+                    await command.ExecuteNonQueryAsync(cancellationToken);
+                }
             }
 
             return NoContent();

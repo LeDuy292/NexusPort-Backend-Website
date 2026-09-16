@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -29,6 +30,9 @@ app.use(
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 if (nodeEnv !== 'test') {
   app.use(morgan('dev'));

@@ -35,6 +35,7 @@ public class GlobalExceptionMiddleware
         var statusCode = (int)HttpStatusCode.InternalServerError;
         var errorCode = "INTERNAL_SERVER_ERROR";
         var message = "An unexpected error occurred.";
+        object? errors = null;
 
         if (exception is ValidationException valEx)
         {

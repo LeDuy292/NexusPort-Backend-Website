@@ -25,16 +25,22 @@ public class GateVerificationService : IGateVerificationService
     private readonly IGateRuleEngine _ruleEngine;
     private readonly AppDbContext _context;
     private readonly INotificationService? _notificationService;
+    private readonly ILogger<GateVerificationService> _logger;
+    private readonly IMessageBrokerService _messageBroker;
 
     public GateVerificationService(
         IGateVerificationRepository verificationRepository,
         IGateRuleEngine ruleEngine,
         AppDbContext context,
+        ILogger<GateVerificationService> logger,
+        IMessageBrokerService messageBroker,
         INotificationService? notificationService = null)
     {
         _verificationRepository = verificationRepository;
         _ruleEngine = ruleEngine;
         _context = context;
+        _logger = logger;
+        _messageBroker = messageBroker;
         _notificationService = notificationService;
     }
 
@@ -347,7 +353,7 @@ public class GateVerificationService : IGateVerificationService
         // - Vehicle = INSIDE
         if (vehicle != null)
         {
-            vehicle.Status = "Inside";
+            vehicle.Status = NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.active;
             vehicle.UpdatedAt = now;
         }
 
@@ -445,7 +451,7 @@ public class GateVerificationService : IGateVerificationService
             Timestamp = now,
             BookingStatus = booking?.Status.ToString() ?? "CheckedIn",
             ContainerStatus = container?.Status ?? "InYard",
-            VehicleStatus = vehicle?.Status ?? "Inside",
+            VehicleStatus = vehicle?.Status.ToString() ?? "active",
             GateRecordId = record.Id,
             DriverNotified = driverNotified,
             DispatcherNotified = dispatcherNotified
