@@ -12,18 +12,75 @@ const {
   assignRole,
   activateUser,
   deactivateUser,
+  createCarrierStaff,
+  getCarrierStaffs,
 } = require('./users.controller');
 const {
   queryValidator,
   createUserValidator,
   updateUserValidator,
   assignRoleValidator,
+  createCarrierStaffValidator,
 } = require('./users.validator');
 
 const router = Router();
 
 // Tất cả routes trong module này yêu cầu: đã đăng nhập + là Administrator
 const adminGuard = [authenticate, authorize(PERMISSIONS.ADMIN_ONLY)];
+
+// Cấp quyền cho Hãng vận tải
+const carrierGuard = [authenticate, authorize(['Transport Company', 'Carrier'])];
+
+/**
+ * @swagger
+ * /api/users/carrier-staff:
+ *   post:
+ *     summary: Tạo tài khoản nhân viên cho hãng vận tải
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - username
+ *               - email
+ *               - password
+ *             properties:
+ *               username:
+ *                 type: string
+ *               email:
+ *                 type: string
+ *               password:
+ *                 type: string
+ *               fullName:
+ *                 type: string
+ *     responses:
+ *       201:
+ *         description: Tạo tài khoản nhân viên thành công
+ *       403:
+ *         description: Không đủ quyền
+ */
+router.post('/carrier-staff', carrierGuard, createCarrierStaffValidator, createCarrierStaff);
+
+/**
+ * @swagger
+ * /api/users/carrier-staff:
+ *   get:
+ *     summary: Lấy danh sách nhân viên của hãng vận tải
+ *     tags: [Users]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Danh sách nhân viên
+ *       403:
+ *         description: Không đủ quyền
+ */
+router.get('/carrier-staff', carrierGuard, getCarrierStaffs);
 
 /**
  * @swagger
@@ -336,7 +393,7 @@ router.patch('/:id/assign-role', adminGuard, assignRoleValidator, assignRole);
  *       404:
  *         description: Không tìm thấy người dùng
  */
-router.patch('/:id/activate', adminGuard, activateUser);
+router.patch('/:id/activate', [authenticate, authorize(['Administrator', 'admin', 'Transport Company', 'Carrier'])], activateUser);
 
 /**
  * @swagger
@@ -365,6 +422,6 @@ router.patch('/:id/activate', adminGuard, activateUser);
  *       404:
  *         description: Không tìm thấy người dùng
  */
-router.patch('/:id/deactivate', adminGuard, deactivateUser);
+router.patch('/:id/deactivate', [authenticate, authorize(['Administrator', 'admin', 'Transport Company', 'Carrier'])], deactivateUser);
 
 module.exports = router;
