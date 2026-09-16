@@ -35,6 +35,15 @@ const parameterSchema = (path: string) => [...path.matchAll(/\{([A-Za-z0-9_]+)\}
 }));
 
 const operationOverrides: Record<string, Record<string, unknown>> = {
+  'GET /api/v1/dispatcher/bookings/ready': {
+    summary: 'List approved bookings and their containers, driver and vehicle for dispatch',
+    security: [{ BearerAuth: [] }],
+    responses: {
+      200: { description: 'Approved bookings ready for dispatch' },
+      401: { description: 'Missing or invalid token' },
+      403: { description: 'Only Dispatcher or Administrator can access this list' },
+    },
+  },
   'GET /api/v1/drivers/me/routes': {
     summary: 'List Gate-In routes for the authenticated Driver and their Containers',
     security: [{ BearerAuth: [] }],
