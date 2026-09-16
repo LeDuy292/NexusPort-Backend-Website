@@ -14,3 +14,21 @@ public class CreateYardBlockDto
     public string BlockCode { get; set; } = string.Empty;
     public string? Description { get; set; }
 }
+
+public class CompleteYardOperationDto
+{
+    public Guid ContainerId { get; set; }
+    public Guid DriverId { get; set; }
+    public string OperationStatus { get; set; } = "Completed";
+}
+
+public class YardOperationCompletionDto
+{
+    public Guid EventId { get; set; }
+    public Guid OperationId { get; set; }
+    public Guid ContainerId { get; set; }
+    public Guid DriverId { get; set; }
+    public string OperationStatus { get; set; } = string.Empty;
+    public string DeliveryStatus { get; set; } = string.Empty;
+    public DateTime CompletedAt { get; set; }
+}

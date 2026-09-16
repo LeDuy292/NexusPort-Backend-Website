@@ -113,9 +113,9 @@ export class ContainerRepository {
 
       const updated = await client.query<{ updatedAt: Date }>(
         `UPDATE containers
-            SET status = $2,
-                arrived_at = CASE WHEN $2 = 'gate_in' THEN COALESCE(arrived_at, now()) ELSE arrived_at END,
-                left_at = CASE WHEN $2 = 'gate_out' THEN COALESCE(left_at, now()) ELSE left_at END,
+            SET status = $2::container_status,
+                arrived_at = CASE WHEN $2::container_status = 'gate_in' THEN COALESCE(arrived_at, now()) ELSE arrived_at END,
+                left_at = CASE WHEN $2::container_status = 'gate_out' THEN COALESCE(left_at, now()) ELSE left_at END,
                 updated_at = now()
           WHERE id = $1
         RETURNING updated_at AS "updatedAt"`,

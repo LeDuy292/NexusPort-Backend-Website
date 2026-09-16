@@ -20,4 +20,5 @@ public interface IGateVerificationService
     Task<IReadOnlyList<GateVerificationRecordDto>> GetListAsync(GateVerificationFilterDto filter, CancellationToken cancellationToken = default);
     Task<GateVerificationRecordDto?> ManualOverrideAsync(Guid id, ManualOverrideDto dto, CancellationToken cancellationToken = default);
     Task<Domain.Rules.GateRuleEvaluationResult> EvaluateRulesAsync(GateRulePreCheckRequestDto request, CancellationToken cancellationToken = default);
+    Task<GateInApprovalResultDto> ApproveGateInAsync(GateInApprovalRequestDto request, CancellationToken cancellationToken = default);
 }

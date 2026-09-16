@@ -14,4 +14,5 @@ public interface IYardService
     Task<IReadOnlyList<DTOs.YardBlockDto>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<DTOs.YardBlockDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<DTOs.YardBlockDto> CreateAsync(DTOs.CreateYardBlockDto dto, CancellationToken cancellationToken = default);
+    Task<DTOs.YardOperationCompletionDto> CompleteOperationAsync(Guid operationId, DTOs.CompleteYardOperationDto dto, CancellationToken cancellationToken = default);
 }

@@ -24,7 +24,7 @@ export const isValidIso6346 = (rawValue: string): boolean => {
 const nullableUuid = z.union([z.string().uuid(), z.null()]).optional();
 const nullableDateTime = z.union([z.string().datetime({ offset: true }), z.null()]).optional();
 const containerNumberSchema = z.string().transform(normalizeContainerNumber).refine(isValidIso6346, {
-  message: 'Container ID must be a valid ISO 6346 code with a correct check digit.',
+  message: 'Mã Container phải đúng định dạng ISO 6346 và có số kiểm tra hợp lệ.',
 });
 
 export const createContainerSchema = z.object({
@@ -42,7 +42,7 @@ export const createContainerSchema = z.object({
 export const updateContainerSchema = createContainerSchema.partial().extend({
   arrivedAt: nullableDateTime,
   leftAt: nullableDateTime,
-}).refine((value) => Object.keys(value).length > 0, { message: 'At least one field must be provided.' });
+}).refine((value) => Object.keys(value).length > 0, { message: 'Phải cung cấp ít nhất một trường cần cập nhật.' });
 
 const booleanQuery = z.preprocess((value) => value === true || value === 'true', z.boolean());
 

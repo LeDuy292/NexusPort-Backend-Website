@@ -1,15 +1,21 @@
+using Microsoft.Extensions.Logging;
 using NexusPort.Modules.Vehicle.Application.DTOs;
 using NexusPort.Modules.Vehicle.Application.Interfaces;
+using NexusPort.Infrastructure.ExternalServices;
 
 namespace NexusPort.Modules.Vehicle.Application.Services;
 
 public class VehicleService : IVehicleService
 {
     private readonly IVehicleRepository _repository;
+    private readonly IMessageBrokerService _messageBroker;
+    private readonly ILogger<VehicleService> _logger;
 
-    public VehicleService(IVehicleRepository repository)
+    public VehicleService(IVehicleRepository repository, IMessageBrokerService messageBroker, ILogger<VehicleService> logger)
     {
         _repository = repository;
+        _messageBroker = messageBroker;
+        _logger = logger;
     }
 
     public async Task<IReadOnlyList<VehicleDto>> GetAllAsync(VehicleFilterDto filter, CancellationToken cancellationToken = default)
@@ -145,6 +151,7 @@ public class VehicleService : IVehicleService
 
         entity.Status = parsedStatus;
         await _repository.UpdateAsync(entity, cancellationToken);
+        await PublishStatusAsync(entity.Id, entity.Status.ToString(), entity.PlateNumber, cancellationToken);
     }
 
     public async Task AssignDriverAsync(Guid id, AssignDriverDto dto, CancellationToken cancellationToken = default)
@@ -156,5 +163,19 @@ public class VehicleService : IVehicleService
         entity.DriverId = dto.DriverId;
         
         await _repository.UpdateAsync(entity, cancellationToken);
+    }
+
+    private async Task PublishStatusAsync(Guid vehicleId, string status, string? label, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _messageBroker.PublishAsync("dispatcher.status.updated", new DispatcherStatusUpdatedEvent(
+                Guid.NewGuid(), "vehicle", vehicleId.ToString(), status, DateTime.UtcNow,
+                VehicleId: vehicleId, Label: label), cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Vehicle status updated but dispatcher event could not be published for {VehicleId}", vehicleId);
+        }
     }
 }

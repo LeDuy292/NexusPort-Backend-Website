@@ -144,6 +144,8 @@ public static class ServiceCollectionExtensions
         // Yard
         services.AddScoped<IYardRepository, YardRepository>();
         services.AddScoped<IYardService, YardService>();
+        services.AddScoped<IYardReceivingService, YardReceivingService>();
+        services.AddScoped<IYardTaskService, YardTaskService>();
 
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();
@@ -158,6 +160,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGateRule, VehicleMatchAndStatusRule>();
         services.AddScoped<IGateRule, DriverMatchAndStatusRule>();
         services.AddScoped<IGateRule, ContainerMatchAndStatusRule>();
+        services.AddScoped<IGateRule, OperationMatchRule>();
+        services.AddScoped<IGateRule, DriverConfirmationRule>();
+        services.AddScoped<IGateRule, BillingAndPaymentStatusRule>();
 
         // Dispatcher
         services.AddScoped<IDispatcherRepository, DispatcherRepository>();

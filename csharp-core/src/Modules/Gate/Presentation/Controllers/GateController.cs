@@ -101,6 +101,26 @@ public class GateController : ControllerBase
         return Ok(updated);
     }
 
+    /// <summary>
+    /// Phê duyệt Gate-In cho phương tiện vào cảng (Role: Gate Officer + Backend)
+    /// Tự động cập nhật Booking=CheckedIn, Container=InYard, Vehicle=Inside, Lưu Timestamp và Gửi Notification
+    /// </summary>
+    [HttpPost("approve-in")]
+    [ProducesResponseType(typeof(GateInApprovalResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<GateInApprovalResultDto>> ApproveGateIn(
+        [FromBody] GateInApprovalRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var result = await _verificationService.ApproveGateInAsync(request, cancellationToken);
+        return Ok(result);
+    }
+
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<GateTransactionDto>>> GetAll(CancellationToken cancellationToken)
     {
