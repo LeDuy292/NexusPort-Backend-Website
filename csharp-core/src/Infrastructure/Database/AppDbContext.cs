@@ -17,6 +17,8 @@ public class AppDbContext : DbContext
         base.OnModelCreating(modelBuilder);
         modelBuilder.HasPostgresEnum("driver_status", new[] { "active", "inactive", "banned" });
         modelBuilder.HasPostgresEnum("truck_status", new[] { "active", "inactive", "maintenance" });
+        modelBuilder.HasPostgresEnum("booking_status", new[] { "pending", "approved", "rejected", "canceled", "checked_in", "completed", "expired" });
+        modelBuilder.HasPostgresEnum("booking_type", new[] { "pickup", "dropoff" });
 
         foreach (var assembly in ModuleAssemblies)
         {

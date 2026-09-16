@@ -57,6 +57,8 @@ public static class ServiceCollectionExtensions
         var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
         dataSourceBuilder.MapEnum<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>("driver_status");
         dataSourceBuilder.MapEnum<NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus>("truck_status");
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingStatus>("booking_status");
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingType>("booking_type");
         var dataSource = dataSourceBuilder.Build();
 
         services.AddDbContext<AppDbContext>(options =>
@@ -168,6 +170,7 @@ public static class ServiceCollectionExtensions
         // Driver
         services.AddScoped<IDriverRepository, DriverRepository>();
         services.AddScoped<IDriverService, DriverService>();
+        services.AddHttpClient<IOcrService, OcrService>();
 
         // Equipment
         services.AddScoped<IEquipmentRepository, EquipmentRepository>();

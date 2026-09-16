@@ -11,6 +11,8 @@ public class VehicleDto
     public string Status { get; set; } = string.Empty;
     public string? VehicleType { get; set; }
     public string? Description { get; set; }
+    public string? RegistrationImageUrl { get; set; }
+    public string? PhotoUrl { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
@@ -19,6 +21,8 @@ public class CreateVehicleDto
     public string PlateNumber { get; set; } = string.Empty;
     public string? VehicleType { get; set; }
     public string? Description { get; set; }
+    public string? RegistrationImageUrl { get; set; }
+    public string? PhotoUrl { get; set; }
 }
 
 public class UpdateVehicleDto
@@ -26,6 +30,8 @@ public class UpdateVehicleDto
     public string PlateNumber { get; set; } = string.Empty;
     public string? VehicleType { get; set; }
     public string? Description { get; set; }
+    public string? RegistrationImageUrl { get; set; }
+    public string? PhotoUrl { get; set; }
 }
 
 public class AssignDriverDto

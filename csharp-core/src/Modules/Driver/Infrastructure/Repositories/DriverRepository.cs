@@ -82,4 +82,9 @@ public class DriverRepository : IDriverRepository
 
         return await query.AnyAsync(cancellationToken);
     }
+
+    public async Task UnassignVehiclesFromDriverAsync(Guid driverId, CancellationToken cancellationToken = default)
+    {
+        await _context.Database.ExecuteSqlRawAsync("UPDATE trucks SET driver_id = NULL WHERE driver_id = {0}", new object[] { driverId }, cancellationToken);
+    }
 }

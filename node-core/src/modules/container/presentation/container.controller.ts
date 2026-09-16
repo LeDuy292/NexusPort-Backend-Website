@@ -11,13 +11,14 @@ import {
   transitionContainerStatusSchema, updateContainerSchema,
 } from '../application/container.validator';
 
-type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer';
+type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier';
 interface AuthorizedRequest extends Request { containerUser?: { id: string; role: ContainerRole } }
 
 const roleAliases: Record<string, ContainerRole> = {
   administrator: 'Administrator', admin: 'Administrator', dispatcher: 'Dispatcher', operation: 'Dispatcher',
   'yard staff': 'Yard Staff', 'yard operator': 'Yard Staff', yard: 'Yard Staff',
-  'gate officer': 'Gate Officer', gate: 'Gate Officer',
+  'gate officer': 'Gate Officer', gate: 'Gate Officer', carrier: 'Carrier',
+  'transport company': 'Carrier', 'transportcompany': 'Carrier'
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -123,7 +124,7 @@ export class ContainerController {
 export const createContainerRouter = (): Router => {
   const router = Router();
   const controller = new ContainerController();
-  const readers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer'];
+  const readers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer', 'Carrier'];
   const writers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Gate Officer'];
 
   router.use(authenticateContainerUser);

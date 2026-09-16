@@ -16,6 +16,9 @@ public class DriverConfiguration : IEntityTypeConfiguration<NexusPort.Modules.Dr
         builder.Property(x => x.Phone).HasColumnName("phone").HasMaxLength(30);
         builder.Property(x => x.IdCardNumber).HasColumnName("id_card_number").HasMaxLength(50);
         builder.Property(x => x.LicenseNumber).HasColumnName("license_number").IsRequired().HasMaxLength(80);
+        builder.Property(x => x.PhotoUrl).HasColumnName("photo_url").HasMaxLength(500);
+        builder.Property(x => x.IdCardFrontUrl).HasColumnName("id_card_front_url").HasMaxLength(500);
+        builder.Property(x => x.LicenseImageUrl).HasColumnName("license_image_url").HasMaxLength(500);
         
         builder.Property(x => x.Status)
             .HasColumnName("status")

@@ -24,6 +24,9 @@ public class DriverService : IDriverService
             IdCardNumber = e.IdCardNumber,
             LicenseNumber = e.LicenseNumber,
             Status = e.Status.ToString(),
+            PhotoUrl = e.PhotoUrl,
+            IdCardFrontUrl = e.IdCardFrontUrl,
+            LicenseImageUrl = e.LicenseImageUrl,
             CreatedAt = e.CreatedAt
         }).ToList();
     }
@@ -41,6 +44,9 @@ public class DriverService : IDriverService
             IdCardNumber = entity.IdCardNumber,
             LicenseNumber = entity.LicenseNumber,
             Status = entity.Status.ToString(),
+            PhotoUrl = entity.PhotoUrl,
+            IdCardFrontUrl = entity.IdCardFrontUrl,
+            LicenseImageUrl = entity.LicenseImageUrl,
             CreatedAt = entity.CreatedAt
         };
     }
@@ -60,6 +66,9 @@ public class DriverService : IDriverService
             idCardNumber: dto.IdCardNumber,
             status: NexusPort.Modules.Driver.Domain.Enums.DriverStatus.active
         );
+        entity.PhotoUrl = dto.PhotoUrl;
+        entity.IdCardFrontUrl = dto.IdCardFrontUrl;
+        entity.LicenseImageUrl = dto.LicenseImageUrl;
 
         await _repository.AddAsync(entity, cancellationToken);
         
@@ -72,6 +81,9 @@ public class DriverService : IDriverService
             IdCardNumber = entity.IdCardNumber,
             LicenseNumber = entity.LicenseNumber,
             Status = entity.Status.ToString(),
+            PhotoUrl = entity.PhotoUrl,
+            IdCardFrontUrl = entity.IdCardFrontUrl,
+            LicenseImageUrl = entity.LicenseImageUrl,
             CreatedAt = entity.CreatedAt
         };
     }
@@ -84,6 +96,18 @@ public class DriverService : IDriverService
         entity.FullName = dto.FullName;
         entity.Phone = dto.Phone;
         entity.IdCardNumber = dto.IdCardNumber;
+        if (dto.PhotoUrl != null)
+        {
+            entity.PhotoUrl = dto.PhotoUrl;
+        }
+        if (dto.IdCardFrontUrl != null)
+        {
+            entity.IdCardFrontUrl = dto.IdCardFrontUrl;
+        }
+        if (dto.LicenseImageUrl != null)
+        {
+            entity.LicenseImageUrl = dto.LicenseImageUrl;
+        }
 
         await _repository.UpdateAsync(entity, cancellationToken);
 
@@ -96,6 +120,9 @@ public class DriverService : IDriverService
             IdCardNumber = entity.IdCardNumber,
             LicenseNumber = entity.LicenseNumber,
             Status = entity.Status.ToString(),
+            PhotoUrl = entity.PhotoUrl,
+            IdCardFrontUrl = entity.IdCardFrontUrl,
+            LicenseImageUrl = entity.LicenseImageUrl,
             CreatedAt = entity.CreatedAt
         };
     }
@@ -105,10 +132,17 @@ public class DriverService : IDriverService
         var entity = await _repository.GetByIdAsync(id, cancellationToken);
         if (entity == null) throw new KeyNotFoundException("Driver not found.");
 
-        if (Enum.TryParse<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>(status, out var parsedStatus))
+        if (Enum.TryParse<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>(status, true, out var parsedStatus))
         {
             entity.Status = parsedStatus;
             await _repository.UpdateAsync(entity, cancellationToken);
+
+            // If the driver is banned (or inactive), they should be kicked out of any vehicle they are assigned to
+            if (parsedStatus == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned || 
+                parsedStatus == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive)
+            {
+                await _repository.UnassignVehiclesFromDriverAsync(id, cancellationToken);
+            }
         }
         else
         {
