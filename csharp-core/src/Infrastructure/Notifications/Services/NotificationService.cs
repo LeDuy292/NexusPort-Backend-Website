@@ -43,8 +43,15 @@ public class NotificationService : INotificationService
             dto.ReferenceId
         );
 
-        await _context.Set<Notification>().AddAsync(entity, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.Set<Notification>().AddAsync(entity, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // Do not fail parent business transactions if notification database write encounters constraint issues
+        }
 
         return MapToDto(entity);
     }

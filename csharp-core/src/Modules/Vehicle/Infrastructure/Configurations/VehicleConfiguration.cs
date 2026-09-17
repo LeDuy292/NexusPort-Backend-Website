@@ -15,7 +15,6 @@ public class VehicleConfiguration : IEntityTypeConfiguration<NexusPort.Modules.V
         
         builder.Property(x => x.Id).HasColumnName("id");
         builder.Property(x => x.CarrierId).HasColumnName("carrier_id");
-        builder.Property(x => x.DriverId).HasColumnName("driver_id");
         builder.Property(x => x.PlateNumber).HasColumnName("plate_number").IsRequired().HasMaxLength(30);
         builder.Property(x => x.RfidTag).HasColumnName("rfid_tag").HasMaxLength(100);
         builder.Property(x => x.VehicleType).HasColumnName("vehicle_type").HasMaxLength(80);
@@ -28,6 +27,7 @@ public class VehicleConfiguration : IEntityTypeConfiguration<NexusPort.Modules.V
         builder.Property(x => x.PhotoUrl).HasColumnName("photo_url").HasMaxLength(500);
 
         // Trucks table does not have these columns — ignore them
+        builder.Ignore(x => x.DriverId);
         builder.Ignore(x => x.CreatedBy);
         builder.Ignore(x => x.UpdatedBy);
         builder.Ignore(x => x.UpdatedAt);
