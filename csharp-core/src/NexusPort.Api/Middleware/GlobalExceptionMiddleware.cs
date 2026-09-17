@@ -37,8 +37,6 @@ public class GlobalExceptionMiddleware
         var message = "An unexpected error occurred.";
         object? errors = null;
 
-        object? errors = null;
-
 
         if (exception is ValidationException valEx)
         {

@@ -74,6 +74,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMessageBrokerService, MessageBrokerService>();
         services.AddScoped<IEmailService, EmailService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IS3StorageService, S3StorageService>();
 
         services.AddAuthentication(options =>
         {
