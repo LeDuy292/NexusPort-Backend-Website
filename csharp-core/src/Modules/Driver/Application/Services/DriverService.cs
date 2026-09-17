@@ -9,12 +9,18 @@ public class DriverService : IDriverService
 {
     private readonly IDriverRepository _repository;
     private readonly IMessageBrokerService _messageBroker;
+    private readonly IS3StorageService _s3StorageService;
     private readonly ILogger<DriverService> _logger;
 
-    public DriverService(IDriverRepository repository, IMessageBrokerService messageBroker, ILogger<DriverService> logger)
+    public DriverService(
+        IDriverRepository repository, 
+        IMessageBrokerService messageBroker, 
+        IS3StorageService s3StorageService,
+        ILogger<DriverService> logger)
     {
         _repository = repository;
         _messageBroker = messageBroker;
+        _s3StorageService = s3StorageService;
         _logger = logger;
     }
 
@@ -30,9 +36,9 @@ public class DriverService : IDriverService
             IdCardNumber = e.IdCardNumber,
             LicenseNumber = e.LicenseNumber,
             Status = e.Status.ToString(),
-            PhotoUrl = e.PhotoUrl,
-            IdCardFrontUrl = e.IdCardFrontUrl,
-            LicenseImageUrl = e.LicenseImageUrl,
+            PhotoUrl = _s3StorageService.GetPresignedUrl(e.PhotoUrl),
+            IdCardFrontUrl = _s3StorageService.GetPresignedUrl(e.IdCardFrontUrl),
+            LicenseImageUrl = _s3StorageService.GetPresignedUrl(e.LicenseImageUrl),
             CreatedAt = e.CreatedAt
         }).ToList();
     }
@@ -50,9 +56,9 @@ public class DriverService : IDriverService
             IdCardNumber = entity.IdCardNumber,
             LicenseNumber = entity.LicenseNumber,
             Status = entity.Status.ToString(),
-            PhotoUrl = entity.PhotoUrl,
-            IdCardFrontUrl = entity.IdCardFrontUrl,
-            LicenseImageUrl = entity.LicenseImageUrl,
+            PhotoUrl = _s3StorageService.GetPresignedUrl(entity.PhotoUrl),
+            IdCardFrontUrl = _s3StorageService.GetPresignedUrl(entity.IdCardFrontUrl),
+            LicenseImageUrl = _s3StorageService.GetPresignedUrl(entity.LicenseImageUrl),
             CreatedAt = entity.CreatedAt
         };
     }
@@ -87,9 +93,9 @@ public class DriverService : IDriverService
             IdCardNumber = entity.IdCardNumber,
             LicenseNumber = entity.LicenseNumber,
             Status = entity.Status.ToString(),
-            PhotoUrl = entity.PhotoUrl,
-            IdCardFrontUrl = entity.IdCardFrontUrl,
-            LicenseImageUrl = entity.LicenseImageUrl,
+            PhotoUrl = _s3StorageService.GetPresignedUrl(entity.PhotoUrl),
+            IdCardFrontUrl = _s3StorageService.GetPresignedUrl(entity.IdCardFrontUrl),
+            LicenseImageUrl = _s3StorageService.GetPresignedUrl(entity.LicenseImageUrl),
             CreatedAt = entity.CreatedAt
         };
     }
@@ -126,9 +132,9 @@ public class DriverService : IDriverService
             IdCardNumber = entity.IdCardNumber,
             LicenseNumber = entity.LicenseNumber,
             Status = entity.Status.ToString(),
-            PhotoUrl = entity.PhotoUrl,
-            IdCardFrontUrl = entity.IdCardFrontUrl,
-            LicenseImageUrl = entity.LicenseImageUrl,
+            PhotoUrl = _s3StorageService.GetPresignedUrl(entity.PhotoUrl),
+            IdCardFrontUrl = _s3StorageService.GetPresignedUrl(entity.IdCardFrontUrl),
+            LicenseImageUrl = _s3StorageService.GetPresignedUrl(entity.LicenseImageUrl),
             CreatedAt = entity.CreatedAt
         };
     }

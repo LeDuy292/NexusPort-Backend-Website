@@ -7,6 +7,7 @@ using NexusPort.Modules.Driver.Application.Interfaces;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using NexusPort.Modules.Driver.Application.Services;
+using NexusPort.Infrastructure.ExternalServices;
 
 namespace NexusPort.Modules.Driver.Presentation.Controllers;
 
@@ -17,11 +18,13 @@ public class DriverController : ControllerBase
 {
     private readonly IDriverService _service;
     private readonly IOcrService _ocrService;
+    private readonly IS3StorageService _s3StorageService;
 
-    public DriverController(IDriverService service, IOcrService ocrService)
+    public DriverController(IDriverService service, IOcrService ocrService, IS3StorageService s3StorageService)
     {
         _service = service;
         _ocrService = ocrService;
+        _s3StorageService = s3StorageService;
     }
 
     private Guid? GetCarrierIdFromToken()
@@ -49,103 +52,146 @@ public class DriverController : ControllerBase
 
         try
         {
-            var env = HttpContext.RequestServices.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
-            var uploadsFolder = Path.Combine(env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads", "drivers");
-            if (!Directory.Exists(uploadsFolder)) Directory.CreateDirectory(uploadsFolder);
+            var ext = Path.GetExtension(image.FileName);
+            if (string.IsNullOrEmpty(ext)) ext = ".jpg";
+            var originalFileName = $"cccd_front_{Guid.NewGuid()}{ext}";
             
-            // Save original image
-            var originalFileName = $"cccd_front_{Guid.NewGuid()}{Path.GetExtension(image.FileName)}";
-            var originalFilePath = Path.Combine(uploadsFolder, originalFileName);
-            using (var stream = new FileStream(originalFilePath, FileMode.Create))
+            // 1. Upload original CCCD image directly to AWS S3
+            string idCardFrontUrl;
+            using (var uploadStream = image.OpenReadStream())
             {
-                await image.CopyToAsync(stream, cancellationToken);
-            }
-            var idCardFrontUrl = $"/uploads/drivers/{originalFileName}";
-
-            var data = await _ocrService.ExtractIdCardAsync(image, cancellationToken);
-            if (data == null)
-            {
-                return BadRequest(new { message = "Failed to extract ID card data" });
+                idCardFrontUrl = await _s3StorageService.UploadFileAsync(
+                    uploadStream, 
+                    originalFileName, 
+                    image.ContentType ?? "image/jpeg", 
+                    "drivers", 
+                    cancellationToken
+                );
             }
 
+            // 2. Perform AI OCR extraction (best effort)
+            OcrRecognitionResponse? data = null;
+            try
+            {
+                data = await _ocrService.ExtractIdCardAsync(image, cancellationToken);
+            }
+            catch (Exception ocrEx)
+            {
+                Console.WriteLine("OCR CCCD parsing warning: " + ocrEx.Message);
+            }
+
+            // 3. Upload cropped face image directly to AWS S3 if found
             string? faceUrl = null;
-
-            if (data.FaceImageBytes != null && data.FaceImageBytes.Length > 0)
+            if (data?.FaceImageBytes != null && data.FaceImageBytes.Length > 0)
             {
-                var fileName = $"face_{Guid.NewGuid()}.jpg";
-                var filePath = Path.Combine(uploadsFolder, fileName);
-                
-                await System.IO.File.WriteAllBytesAsync(filePath, data.FaceImageBytes, cancellationToken);
-                
-                faceUrl = $"/uploads/drivers/{fileName}";
+                try
+                {
+                    var faceFileName = $"face_{Guid.NewGuid()}.jpg";
+                    faceUrl = await _s3StorageService.UploadBytesAsync(
+                        data.FaceImageBytes, 
+                        faceFileName, 
+                        "image/jpeg", 
+                        "drivers", 
+                        cancellationToken
+                    );
+                }
+                catch (Exception faceEx)
+                {
+                    Console.WriteLine("Face upload warning: " + faceEx.Message);
+                }
             }
 
             return Ok(new
             {
-                fullName = data.Name,
-                idCardNumber = data.Id,
-                dob = data.Dob,
-                sex = data.Sex,
-                address = data.Address,
+                fullName = data?.Name,
+                idCardNumber = data?.Id,
+                dob = data?.Dob,
+                sex = data?.Sex,
+                address = data?.Address,
                 faceImageUrl = faceUrl,
+                photoUrl = faceUrl,
                 idCardFrontUrl = idCardFrontUrl
             });
         }
         catch (Exception ex)
         {
-            Console.WriteLine("EXTRACT CCCD ERROR: " + ex.ToString());
-            return StatusCode(500, new { message = ex.Message });
+            Console.WriteLine("EXTRACT CCCD S3 ERROR: " + ex.ToString());
+            return StatusCode(500, new { message = $"Lỗi tải ảnh lên AWS S3: {ex.Message}" });
         }
     }
 
     [HttpPost("extract-gplx")]
     [Consumes("multipart/form-data")]
+    [AllowAnonymous]
     public async Task<IActionResult> ExtractGplx(IFormFile image, CancellationToken cancellationToken)
     {
         if (image == null || image.Length == 0) return BadRequest(new { message = "No image provided" });
 
         try
         {
-            var env = HttpContext.RequestServices.GetRequiredService<Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
-            var uploadsFolder = Path.Combine(env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads", "drivers");
-            if (!Directory.Exists(uploadsFolder)) Directory.CreateDirectory(uploadsFolder);
+            var ext = Path.GetExtension(image.FileName);
+            if (string.IsNullOrEmpty(ext)) ext = ".jpg";
+            var originalFileName = $"gplx_{Guid.NewGuid()}{ext}";
             
-            // Save original image
-            var originalFileName = $"gplx_{Guid.NewGuid()}{Path.GetExtension(image.FileName)}";
-            var originalFilePath = Path.Combine(uploadsFolder, originalFileName);
-            using (var stream = new FileStream(originalFilePath, FileMode.Create))
+            // 1. Upload original GPLX image directly to AWS S3
+            string licenseImageUrl;
+            using (var uploadStream = image.OpenReadStream())
             {
-                await image.CopyToAsync(stream, cancellationToken);
+                licenseImageUrl = await _s3StorageService.UploadFileAsync(
+                    uploadStream, 
+                    originalFileName, 
+                    image.ContentType ?? "image/jpeg", 
+                    "drivers", 
+                    cancellationToken
+                );
             }
-            var licenseImageUrl = $"/uploads/drivers/{originalFileName}";
 
-            var data = await _ocrService.ExtractDriverLicenseAsync(image, cancellationToken);
-            if (data == null)
+            // 2. Perform AI OCR extraction (best effort)
+            OcrRecognitionResponse? data = null;
+            try
             {
-                return BadRequest(new { message = "Failed to extract Driver License data" });
+                data = await _ocrService.ExtractDriverLicenseAsync(image, cancellationToken);
             }
-            string? faceUrl = null;
-            if (data.FaceImageBytes != null && data.FaceImageBytes.Length > 0)
+            catch (Exception ocrEx)
             {
-                var fileName = $"face_{Guid.NewGuid()}.jpg";
-                var filePath = Path.Combine(uploadsFolder, fileName);
-                await System.IO.File.WriteAllBytesAsync(filePath, data.FaceImageBytes, cancellationToken);
-                faceUrl = $"/uploads/drivers/{fileName}";
+                Console.WriteLine("OCR GPLX parsing warning: " + ocrEx.Message);
+            }
+
+            // 3. Upload cropped face image directly to AWS S3 if found
+            string? faceUrl = null;
+            if (data?.FaceImageBytes != null && data.FaceImageBytes.Length > 0)
+            {
+                try
+                {
+                    var faceFileName = $"face_{Guid.NewGuid()}.jpg";
+                    faceUrl = await _s3StorageService.UploadBytesAsync(
+                        data.FaceImageBytes, 
+                        faceFileName, 
+                        "image/jpeg", 
+                        "drivers", 
+                        cancellationToken
+                    );
+                }
+                catch (Exception faceEx)
+                {
+                    Console.WriteLine("Face upload warning: " + faceEx.Message);
+                }
             }
 
             return Ok(new
             {
-                fullName = data.Name,
-                dob = data.Dob,
-                licenseNumber = data.Id,
+                fullName = data?.Name,
+                dob = data?.Dob,
+                licenseNumber = data?.Id,
                 licenseImageUrl = licenseImageUrl,
-                faceImageUrl = faceUrl
+                faceImageUrl = faceUrl,
+                photoUrl = faceUrl
             });
         }
         catch (Exception ex)
         {
-            Console.WriteLine("EXTRACT GPLX ERROR: " + ex.ToString());
-            return StatusCode(500, new { message = ex.Message });
+            Console.WriteLine("EXTRACT GPLX S3 ERROR: " + ex.ToString());
+            return StatusCode(500, new { message = $"Lỗi tải ảnh lên AWS S3: {ex.Message}" });
         }
     }
 
