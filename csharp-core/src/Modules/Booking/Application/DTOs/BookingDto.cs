@@ -111,3 +111,94 @@ public class ContainerConfirmationResultDto
     public DateTime ConfirmedAt { get; set; }
     public string Condition { get; set; } = string.Empty;
 }
+
+// NXP-049: DTO Gán Tài nguyên cho Booking
+public class AssignBookingResourcesDto
+{
+    public Guid DriverId { get; set; }
+    public string? DriverName { get; set; }
+    public Guid TruckId { get; set; }
+    public string? VehiclePlate { get; set; }
+    public List<Guid> ContainerIds { get; set; } = new();
+    public string? ContainerNo { get; set; }
+}
+
+// NXP-048: DTO Kho dữ liệu sẵn sàng phục vụ AI Auto-Match & Gợi ý tối ưu
+public class AvailableFleetResourcesDto
+{
+    public List<EligibleContainerDto> Containers { get; set; } = new();
+    public List<AvailableTruckDto> Trucks { get; set; } = new();
+    public List<AvailableDriverDto> Drivers { get; set; } = new();
+}
+
+public class EligibleContainerDto
+{
+    public Guid Id { get; set; }
+    public string ContainerNumber { get; set; } = string.Empty;
+    public string SealNumber { get; set; } = string.Empty;
+    public string Size { get; set; } = "ft20";
+    public string Category { get; set; } = "dry";
+    public string CargoType { get; set; } = "general";
+    public decimal GrossWeightKg { get; set; }
+    public decimal GrossWeightTon => Math.Round(GrossWeightKg / 1000m, 2);
+    public string Status { get; set; } = "in_yard";
+}
+
+public class AvailableTruckDto
+{
+    public Guid Id { get; set; }
+    public string PlateNumber { get; set; } = string.Empty;
+    public string VehicleType { get; set; } = "Truck 24T";
+    public decimal MaxPayloadTon { get; set; } = 24m;
+    public string Status { get; set; } = "active";
+}
+
+public class AvailableDriverDto
+{
+    public Guid Id { get; set; }
+    public string FullName { get; set; } = string.Empty;
+    public string LicenseClass { get; set; } = "FC";
+    public string Phone { get; set; } = string.Empty;
+    public string Status { get; set; } = "active";
+}
+
+// NXP-048: AI Recommendation DTO processed completely in Backend
+public class FleetRecommendationDto
+{
+    public Guid? RecommendedTruckId { get; set; }
+    public string? RecommendedTruckPlate { get; set; }
+    public decimal TruckMaxPayloadTon { get; set; }
+    public Guid? RecommendedDriverId { get; set; }
+    public string? RecommendedDriverName { get; set; }
+    public string? DriverLicense { get; set; }
+    public string? DriverPhone { get; set; }
+    public Guid ContainerId { get; set; }
+    public string ContainerNumber { get; set; } = string.Empty;
+    public decimal ContainerGrossWeightTon { get; set; }
+    public string ContainerSize { get; set; } = "ft20";
+    public string CargoType { get; set; } = "general";
+    public decimal PayloadRatio { get; set; }
+    public string PayloadStatus { get; set; } = "Optimal"; // Optimal | Underutilized | Overloaded
+    public string PayloadSeverity { get; set; } = "optimal"; // optimal | warning | danger
+    public string PayloadMessage { get; set; } = string.Empty;
+    public string RecommendedDate { get; set; } = string.Empty;
+    public string RecommendedStartTime { get; set; } = "08:30";
+    public string RecommendedEndTime { get; set; } = "10:30";
+    public string SlotCongestionStatus { get; set; } = "Low (Thấp điểm - Khuyến nghị)";
+    public string SlotAdvice { get; set; } = "Khung giờ vàng giảm tải cổng và tiết kiệm 15% phí nâng hạ.";
+}
+
+// NXP-048: Real-time Payload Evaluation DTO from Backend
+public class PayloadEvaluationDto
+{
+    public Guid? ContainerId { get; set; }
+    public Guid? TruckId { get; set; }
+    public decimal ContainerGrossWeightTon { get; set; }
+    public decimal TruckMaxPayloadTon { get; set; }
+    public decimal PayloadRatio { get; set; }
+    public string Status { get; set; } = "Optimal"; // Optimal | Underutilized | Overloaded
+    public string Severity { get; set; } = "optimal"; // optimal | warning | danger
+    public string WarningMessage { get; set; } = string.Empty;
+    public bool IsSafe { get; set; } = true;
+}
+

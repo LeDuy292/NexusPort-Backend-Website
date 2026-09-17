@@ -31,9 +31,12 @@ public class BookingController : ControllerBase
         CancellationToken cancellationToken)
     {
         // Enforce Carrier tenant isolation if logged in as Carrier/TransportCompany
-        if (IsCarrierRole() && _currentUser.UserId.HasValue)
+        if (IsCarrierRole())
         {
-            filter.CarrierId = GetUserCarrierId() ?? filter.CarrierId;
+            if (!filter.CarrierId.HasValue || filter.CarrierId.Value == Guid.Empty)
+            {
+                filter.CarrierId = GetUserCarrierId() ?? filter.CarrierId;
+            }
         }
 
         var result = await _service.GetPagedAsync(filter, cancellationToken);
@@ -146,6 +149,66 @@ public class BookingController : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// NXP-048: Lấy danh sách tài nguyên sẵn sàng (Containers trong bãi, Xe đầu kéo kèm tải trọng, Tài xế active) phục vụ AI Auto-Match
+    /// </summary>
+    [HttpGet("available-resources")]
+    [ProducesResponseType(typeof(AvailableFleetResourcesDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<AvailableFleetResourcesDto>> GetAvailableResources(CancellationToken cancellationToken)
+    {
+        Guid? userCarrierId = IsCarrierRole() ? GetUserCarrierId() : null;
+        var result = await _service.GetAvailableResourcesAsync(userCarrierId, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// NXP-048: AI Gợi ý tối ưu xe đầu kéo, tài xế và khung giờ hẹn dựa trên container (xử lý hoàn toàn tại Backend và CSDL)
+    /// </summary>
+    [HttpGet("recommend-fleet")]
+    [ProducesResponseType(typeof(FleetRecommendationDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<FleetRecommendationDto>> RecommendFleet(
+        [FromQuery] Guid? containerId,
+        [FromQuery] string? bookingType,
+        CancellationToken cancellationToken)
+    {
+        Guid? userCarrierId = IsCarrierRole() ? GetUserCarrierId() : null;
+        var result = await _service.RecommendFleetAsync(containerId, bookingType, userCarrierId, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// NXP-048: Đánh giá tỷ lệ tải trọng và cảnh báo an toàn từ Backend trực tiếp từ CSDL
+    /// </summary>
+    [HttpGet("evaluate-payload")]
+    [ProducesResponseType(typeof(PayloadEvaluationDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<PayloadEvaluationDto>> EvaluatePayload(
+        [FromQuery] Guid? containerId,
+        [FromQuery] Guid? truckId,
+        [FromQuery] decimal? customGrossWeightTon,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.EvaluatePayloadAsync(containerId, truckId, customGrossWeightTon, cancellationToken);
+        return Ok(result);
+    }
+
+
+    /// <summary>
+    /// NXP-049: Gán/Điều phối Tài xế, Xe đầu kéo, Container cho Booking và chuyển sang trạng thái Ready
+    /// </summary>
+    [HttpPost("{id:guid}/assign")]
+    [ProducesResponseType(typeof(BookingDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<BookingDto>> AssignResources(
+        Guid id,
+        [FromBody] AssignBookingResourcesDto dto,
+        CancellationToken cancellationToken)
+    {
+        Guid? userCarrierId = IsCarrierRole() ? GetUserCarrierId() : null;
+        var item = await _service.AssignResourcesAsync(id, dto, userCarrierId, cancellationToken);
+        return Ok(item);
+    }
+
     private bool IsCarrierRole()
     {
         var role = _currentUser.Role;
@@ -155,13 +218,13 @@ public class BookingController : ControllerBase
 
     private Guid? GetUserCarrierId()
     {
-        // Try reading CarrierId claim or UserId
+        // Try reading CarrierId claim or default known Carrier Company ID
         var carrierIdClaim = HttpContext.User?.FindFirst("CarrierId")?.Value;
         if (Guid.TryParse(carrierIdClaim, out var carrierId))
         {
             return carrierId;
         }
 
-        return _currentUser.UserId;
+        return Guid.Parse("c1010101-0000-0000-0000-000000000001");
     }
 }

@@ -20,8 +20,7 @@ public class BookingContainerConfiguration : IEntityTypeConfiguration<BookingCon
             .HasColumnName("container_id")
             .IsRequired();
 
-        builder.Property(x => x.Note)
-            .HasColumnName("note");
+        builder.Ignore(x => x.Note);
 
         builder.HasOne(x => x.Booking)
             .WithMany(x => x.BookingContainers)
