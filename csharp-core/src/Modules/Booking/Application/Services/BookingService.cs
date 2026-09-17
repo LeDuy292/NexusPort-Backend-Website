@@ -47,6 +47,7 @@ public class BookingService : IBookingService
     {
         var pagedEntities = await _repository.GetPagedAsync(filter, cancellationToken);
         var dtos = pagedEntities.Items.Select(MapToDto).ToList();
+        await EnrichBookingDtosAsync(dtos, cancellationToken);
 
         return new PagedResult<BookingDto>(dtos, pagedEntities.TotalCount, pagedEntities.PageNumber, pagedEntities.PageSize);
     }
@@ -62,7 +63,9 @@ public class BookingService : IBookingService
             throw new UnauthorizedException("Access denied. You do not have permission to view this Booking.");
         }
 
-        return MapToDto(entity);
+        var dto = MapToDto(entity);
+        await EnrichBookingDtosAsync(new List<BookingDto> { dto }, cancellationToken);
+        return dto;
     }
 
     public async Task<BookingDto> CreateAsync(CreateBookingDto dto, CancellationToken cancellationToken = default)
@@ -176,7 +179,9 @@ public class BookingService : IBookingService
             _logger.LogWarning(ex, "Failed to send notification for booking {BookingCode}", entity.BookingCode);
         }
 
-        return MapToDto(entity);
+        var createdDto = MapToDto(entity);
+        await EnrichBookingDtosAsync(new List<BookingDto> { createdDto }, cancellationToken);
+        return createdDto;
     }
 
     public async Task<BookingDto> UpdateAsync(Guid id, UpdateBookingDto dto, Guid? userCarrierId = null, CancellationToken cancellationToken = default)
@@ -243,7 +248,9 @@ public class BookingService : IBookingService
             ReferenceId = entity.BookingCode
         }, cancellationToken);
 
-        return MapToDto(entity);
+        var updateDto = MapToDto(entity);
+        await EnrichBookingDtosAsync(new List<BookingDto> { updateDto }, cancellationToken);
+        return updateDto;
     }
 
     public async Task<BookingDto> CancelAsync(Guid id, CancelBookingDto dto, Guid? userCarrierId = null, CancellationToken cancellationToken = default)
@@ -307,7 +314,9 @@ public class BookingService : IBookingService
             ReferenceId = entity.BookingCode
         }, cancellationToken);
 
-        return MapToDto(entity);
+        var cancelDto = MapToDto(entity);
+        await EnrichBookingDtosAsync(new List<BookingDto> { cancelDto }, cancellationToken);
+        return cancelDto;
     }
 
     public async Task<IReadOnlyList<DriverContainerOperationDto>> GetDriverOperationsAsync(Guid driverId, CancellationToken cancellationToken = default)
@@ -589,7 +598,9 @@ public class BookingService : IBookingService
             _logger.LogWarning(ex, "Failed to send notification for ready booking {BookingCode}", entity.BookingCode);
         }
 
-        return MapToDto(entity);
+        var assignDto = MapToDto(entity);
+        await EnrichBookingDtosAsync(new List<BookingDto> { assignDto }, cancellationToken);
+        return assignDto;
     }
 
     private static bool _dbInitialized = false;
@@ -1019,6 +1030,56 @@ public class BookingService : IBookingService
         if (vehicleType.Contains("18")) return 18m;
         if (vehicleType.Contains("16") || vehicleType.Contains("15")) return 16m;
         return 24m;
+    }
+
+    private async Task EnrichBookingDtosAsync(List<BookingDto> dtos, CancellationToken cancellationToken)
+    {
+        if (!dtos.Any()) return;
+
+        var driverIds = dtos.Where(d => d.DriverId.HasValue && d.DriverId.Value != Guid.Empty).Select(d => d.DriverId!.Value).Distinct().ToList();
+        var truckIds = dtos.Where(d => d.TruckId.HasValue && d.TruckId.Value != Guid.Empty).Select(d => d.TruckId!.Value).Distinct().ToList();
+        var containerIds = dtos.SelectMany(d => d.ContainerIds).Where(c => c != Guid.Empty).Distinct().ToList();
+
+        var driversDict = driverIds.Any()
+            ? await _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
+                .AsNoTracking()
+                .Where(d => driverIds.Contains(d.Id))
+                .ToDictionaryAsync(d => d.Id, d => d.FullName, cancellationToken)
+            : new Dictionary<Guid, string>();
+
+        var trucksDict = truckIds.Any()
+            ? await _context.Set<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>()
+                .AsNoTracking()
+                .Where(v => truckIds.Contains(v.Id))
+                .ToDictionaryAsync(v => v.Id, v => v.PlateNumber, cancellationToken)
+            : new Dictionary<Guid, string>();
+
+        var containersDict = containerIds.Any()
+            ? await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+                .AsNoTracking()
+                .Where(c => containerIds.Contains(c.Id))
+                .ToDictionaryAsync(c => c.Id, c => c.ContainerNumber, cancellationToken)
+            : new Dictionary<Guid, string>();
+
+        foreach (var dto in dtos)
+        {
+            if (string.IsNullOrWhiteSpace(dto.DriverName) && dto.DriverId.HasValue && driversDict.TryGetValue(dto.DriverId.Value, out var driverName))
+            {
+                dto.DriverName = driverName;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.VehiclePlate) && dto.TruckId.HasValue && trucksDict.TryGetValue(dto.TruckId.Value, out var plate))
+            {
+                dto.VehiclePlate = plate;
+            }
+
+            if (dto.ContainerIds.Any())
+            {
+                dto.ContainerNumbers = dto.ContainerIds
+                    .Select(cid => containersDict.TryGetValue(cid, out var cNum) ? cNum : cid.ToString())
+                    .ToList();
+            }
+        }
     }
 
     private static BookingDto MapToDto(Domain.Entities.Booking entity)
