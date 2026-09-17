@@ -36,11 +36,24 @@ public class GlobalExceptionMiddleware
         var errorCode = "INTERNAL_SERVER_ERROR";
         var message = "An unexpected error occurred.";
 
-        if (exception is AppException appEx)
+        object? errors = null;
+
+        if (exception is ValidationException valEx)
+        {
+            statusCode = valEx.StatusCode;
+            errorCode = valEx.ErrorCode;
+            message = valEx.Message;
+            errors = valEx.Errors;
+        }
+        else if (exception is AppException appEx)
         {
             statusCode = appEx.StatusCode;
             errorCode = appEx.ErrorCode;
             message = appEx.Message;
+        }
+        else
+        {
+            message = exception.Message;
         }
 
         context.Response.StatusCode = statusCode;
@@ -50,7 +63,7 @@ public class GlobalExceptionMiddleware
             StatusCode = statusCode,
             ErrorCode = errorCode,
             Message = message,
-            Errors = exception.StackTrace,
+            Errors = errors,
             Timestamp = DateTime.UtcNow
         };
 

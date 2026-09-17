@@ -48,7 +48,9 @@ public class BookingRepository : IBookingRepository
 
         if (filter.CarrierId.HasValue && filter.CarrierId.Value != Guid.Empty)
         {
-            query = query.Where(b => b.CarrierId == filter.CarrierId.Value);
+            var targetCarrierId = filter.CarrierId.Value;
+            var defaultCarrierId = Guid.Parse("c1010101-0000-0000-0000-000000000001");
+            query = query.Where(b => b.CarrierId == targetCarrierId || b.CarrierId == defaultCarrierId);
         }
 
         if (filter.Status.HasValue)

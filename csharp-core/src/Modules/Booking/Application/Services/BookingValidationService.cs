@@ -132,11 +132,13 @@ public class BookingValidationService : IBookingValidationService
         }
 
         // 6. Duplicate / Overlapping Booking Validation
-        var activeStatuses = new[] { BookingStatus.Pending, BookingStatus.Approved, BookingStatus.CheckedIn };
         var overlappingBookings = await _context.Set<Domain.Entities.Booking>()
             .Include(b => b.BookingContainers)
             .AsNoTracking()
-            .Where(b => activeStatuses.Contains(b.Status) &&
+            .Where(b => b.Status != BookingStatus.Canceled &&
+                        b.Status != BookingStatus.Completed &&
+                        b.Status != BookingStatus.Expired &&
+                        b.Status != BookingStatus.Rejected &&
                         b.AppointmentStart < dto.AppointmentEnd &&
                         b.AppointmentEnd > dto.AppointmentStart)
             .ToListAsync(cancellationToken);

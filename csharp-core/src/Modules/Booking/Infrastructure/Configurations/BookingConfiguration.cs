@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using NexusPort.Modules.Booking.Domain.Enums;
 
 namespace NexusPort.Modules.Booking.Infrastructure.Configurations;
 
@@ -34,12 +35,12 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
 
         builder.Property(x => x.BookingType)
             .HasColumnName("booking_type")
-            .HasConversion<string>()
+            .HasColumnType("booking_type")
             .IsRequired();
 
         builder.Property(x => x.Status)
             .HasColumnName("status")
-            .HasConversion<string>()
+            .HasColumnType("booking_status")
             .IsRequired();
 
         builder.Property(x => x.AppointmentStart)
@@ -66,17 +67,11 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
             .HasColumnName("created_at")
             .IsRequired();
 
-        builder.Property(x => x.CreatedBy)
-            .HasColumnName("created_by");
+        builder.Ignore(x => x.CreatedBy);
 
-        builder.Property(x => x.UpdatedAt)
-            .HasColumnName("updated_at");
-
-        builder.Property(x => x.UpdatedBy)
-            .HasColumnName("updated_by");
-
-        builder.Property(x => x.IsDeleted)
-            .HasColumnName("is_deleted");
+        builder.Ignore(x => x.UpdatedAt);
+        builder.Ignore(x => x.UpdatedBy);
+        builder.Ignore(x => x.IsDeleted);
 
         // Ignore unmapped helper properties for DB-first schema compatibility
         builder.Ignore(x => x.BookingNumber);
