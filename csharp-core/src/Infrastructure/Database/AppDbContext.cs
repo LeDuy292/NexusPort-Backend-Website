@@ -19,6 +19,7 @@ public class AppDbContext : DbContext
         modelBuilder.HasPostgresEnum("truck_status", new[] { "active", "inactive", "maintenance" });
         modelBuilder.HasPostgresEnum("booking_status", new[] { "pending", "approved", "rejected", "canceled", "checked_in", "completed", "expired" });
         modelBuilder.HasPostgresEnum("booking_type", new[] { "pickup", "dropoff" });
+        modelBuilder.HasPostgresEnum("yard_slot_status", new[] { "empty", "reserved", "occupied", "maintenance" });
 
         foreach (var assembly in ModuleAssemblies)
         {

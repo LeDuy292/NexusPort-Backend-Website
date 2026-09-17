@@ -29,6 +29,54 @@ public class YardController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = item.Id }, item);
     }
 
+    [HttpGet("Map")]
+    public async Task<ActionResult<IReadOnlyList<YardBlockDto>>> GetYardMap(CancellationToken cancellationToken)
+    {
+        return Ok(await _service.GetYardMapAsync(cancellationToken));
+    }
+
+    [HttpGet("Block/{id:guid}/Slots")]
+    public async Task<ActionResult<IReadOnlyList<YardSlotDto>>> GetBlockSlots(Guid id, CancellationToken cancellationToken)
+    {
+        return Ok(await _service.GetBlockSlotsAsync(id, cancellationToken));
+    }
+
+    [HttpPut("Container/{containerId:guid}/Location")]
+    public async Task<ActionResult> UpdateContainerLocation(Guid containerId, [FromBody] Guid slotId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _service.UpdateContainerLocationAsync(containerId, slotId, cancellationToken);
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
+    [HttpPost("Slots/{id:guid}/toggle-maintenance")]
+    public async Task<ActionResult> ToggleSlotMaintenance(Guid id, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _service.ToggleSlotMaintenanceAsync(id, cancellationToken);
+            return NoContent();
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+    }
+
     /// <summary>Completes a yard operation and queues a realtime driver notification.</summary>
     [HttpPost("operations/{operationId:guid}/complete")]
     public async Task<ActionResult<YardOperationCompletionDto>> CompleteOperation(Guid operationId, [FromBody] CompleteYardOperationDto dto, CancellationToken cancellationToken)
