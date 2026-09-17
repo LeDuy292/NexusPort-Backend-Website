@@ -54,9 +54,9 @@ async function login(usernameOrEmail, password, rememberMe = false) {
     throw err;
   }
 
-  // Fetch CarrierId if user is Transport Company
+  // Fetch CarrierId if user is Transport Company, Carrier, or Carrier Staff
   let carrierId = null;
-  if (user.role === 'Transport Company' || user.role === 'Carrier') {
+  if (user.role === 'Transport Company' || user.role === 'Carrier' || user.role === 'Carrier Staff') {
     const { sequelize } = require('../../config/database');
     const [results] = await sequelize.query('SELECT carrier_id FROM carrier_users WHERE user_id = :userId', {
       replacements: { userId: user.id }

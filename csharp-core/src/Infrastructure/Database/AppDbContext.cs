@@ -22,6 +22,7 @@ public class AppDbContext : DbContext
         modelBuilder.HasPostgresEnum("container_status", new[] { "expected", "discharged", "in_yard", "reserved", "moving", "gate_in", "gate_out", "loaded", "damaged", "canceled" });
         modelBuilder.HasPostgresEnum("cargo_type", new[] { "general", "dangerous", "refrigerated", "out_of_gauge", "liquid_bulk", "dry_bulk", "vehicles", "livestock", "empty" });
 
+
         foreach (var assembly in ModuleAssemblies)
         {
             modelBuilder.ApplyConfigurationsFromAssembly(assembly);

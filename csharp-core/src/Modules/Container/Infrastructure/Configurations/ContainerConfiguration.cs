@@ -44,5 +44,6 @@ public class ContainerConfiguration : IEntityTypeConfiguration<NexusPort.Modules
         builder.Ignore(x => x.CreatedBy);
         builder.Ignore(x => x.UpdatedBy);
         builder.Ignore(x => x.IsDeleted);
+
     }
 }

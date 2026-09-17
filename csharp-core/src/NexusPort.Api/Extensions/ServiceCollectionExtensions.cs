@@ -59,6 +59,7 @@ public static class ServiceCollectionExtensions
         dataSourceBuilder.MapEnum<NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus>("truck_status");
         dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingType>("booking_type");
         dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingStatus>("booking_status");
+
         var dataSource = dataSourceBuilder.Build();
 
         services.AddDbContext<AppDbContext>(options =>
@@ -160,6 +161,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGateRule, VehicleMatchAndStatusRule>();
         services.AddScoped<IGateRule, DriverMatchAndStatusRule>();
         services.AddScoped<IGateRule, ContainerMatchAndStatusRule>();
+        services.AddScoped<IGateRule, OperationMatchRule>();
+        services.AddScoped<IGateRule, DriverConfirmationRule>();
+        services.AddScoped<IGateRule, BillingAndPaymentStatusRule>();
 
         // Dispatcher
         services.AddScoped<IDispatcherRepository, DispatcherRepository>();
@@ -172,6 +176,7 @@ public static class ServiceCollectionExtensions
         // Driver
         services.AddScoped<IDriverRepository, DriverRepository>();
         services.AddScoped<IDriverService, DriverService>();
+        services.AddHttpClient<IOcrService, OcrService>();
 
         // Equipment
         services.AddScoped<IEquipmentRepository, EquipmentRepository>();

@@ -10,6 +10,9 @@ public class DriverDto
     public string IdCardNumber { get; set; } = null!;
     public string LicenseNumber { get; set; } = null!;
     public string Status { get; set; } = null!;
+    public string? PhotoUrl { get; set; }
+    public string? IdCardFrontUrl { get; set; }
+    public string? LicenseImageUrl { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
@@ -19,6 +22,9 @@ public class CreateDriverDto
     public string Phone { get; set; } = null!;
     public string IdCardNumber { get; set; } = null!;
     public string LicenseNumber { get; set; } = null!;
+    public string? PhotoUrl { get; set; }
+    public string? IdCardFrontUrl { get; set; }
+    public string? LicenseImageUrl { get; set; }
 }
 
 public class UpdateDriverDto
@@ -26,6 +32,9 @@ public class UpdateDriverDto
     public string FullName { get; set; } = null!;
     public string Phone { get; set; } = null!;
     public string IdCardNumber { get; set; } = null!;
+    public string? PhotoUrl { get; set; }
+    public string? IdCardFrontUrl { get; set; }
+    public string? LicenseImageUrl { get; set; }
 }
 
 public class DriverFilterDto

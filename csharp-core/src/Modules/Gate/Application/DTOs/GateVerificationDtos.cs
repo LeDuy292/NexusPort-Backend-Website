@@ -8,24 +8,23 @@ namespace NexusPort.Modules.Gate.Application.DTOs;
 /// </summary>
 public class GateRecognitionEventDto
 {
-    private string _gateId = string.Empty;
+    private string _gateId = "GATE_A";
     private string _vehiclePlate = string.Empty;
     private string? _laneId;
     private DateTime? _recognizedAt;
 
-    [Required(ErrorMessage = "Mã cổng (gateId) là bắt buộc")]
     [JsonPropertyName("gateId")]
     public string GateId 
     { 
         get => _gateId; 
-        set => _gateId = value; 
+        set => _gateId = string.IsNullOrWhiteSpace(value) ? "GATE_A" : value; 
     }
 
     [JsonPropertyName("gateCode")]
     public string GateCode 
     { 
         get => _gateId; 
-        set => _gateId = value; 
+        set => _gateId = string.IsNullOrWhiteSpace(value) ? "GATE_A" : value; 
     }
 
     [JsonPropertyName("laneId")]
@@ -42,9 +41,16 @@ public class GateRecognitionEventDto
         set => _laneId = value; 
     }
 
-    [Required(ErrorMessage = "Biển số xe nhận diện (vehiclePlate) là bắt buộc")]
+    [Required(ErrorMessage = "Biển số xe nhận diện (vehiclePlate/licensePlate) là bắt buộc")]
     [JsonPropertyName("vehiclePlate")]
     public string VehiclePlate 
+    { 
+        get => _vehiclePlate; 
+        set => _vehiclePlate = value; 
+    }
+
+    [JsonPropertyName("licensePlate")]
+    public string LicensePlate 
     { 
         get => _vehiclePlate; 
         set => _vehiclePlate = value; 
@@ -97,6 +103,28 @@ public class GateRecognitionEventDto
 
     [JsonPropertyName("ocrRawData")]
     public string? OcrRawData { get; set; }
+
+    [JsonPropertyName("containerNumber")]
+    public string? ContainerNumber { get; set; }
+
+    [JsonPropertyName("containerId")]
+    public string? ContainerId
+    {
+        get => ContainerNumber;
+        set => ContainerNumber = value;
+    }
+
+    [JsonPropertyName("operationType")]
+    public string? OperationType { get; set; }
+
+    [JsonPropertyName("driverConfirmed")]
+    public bool? DriverConfirmed { get; set; }
+
+    [JsonPropertyName("billingSettled")]
+    public bool? BillingSettled { get; set; }
+
+    [JsonPropertyName("billingStatus")]
+    public string? BillingStatus { get; set; }
 }
 
 /// <summary>
@@ -236,4 +264,39 @@ public class GateRulePreCheckRequestDto
     public string? ContainerNumber { get; set; }
     public string? BookingNumber { get; set; }
     public DateTime? VerificationTime { get; set; }
+    public string? OperationType { get; set; }
+    public bool? DriverConfirmed { get; set; }
+    public bool? BillingSettled { get; set; }
+    public string? BillingStatus { get; set; }
+}
+
+/// <summary>
+/// Yêu cầu phê duyệt Gate-In (Role: Gate Officer + Backend)
+/// </summary>
+public class GateInApprovalRequestDto
+{
+    public Guid? VerificationRecordId { get; set; }
+    public string? BookingNumber { get; set; }
+    public string? VehiclePlate { get; set; }
+    public string? ContainerNumber { get; set; }
+    public string GateCode { get; set; } = "GATE_IN_A";
+    public string? LaneCode { get; set; } = "LANE_01";
+    public string? OfficerId { get; set; }
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// Kết quả phê duyệt Gate-In và cập nhật trạng thái toàn hệ thống
+/// </summary>
+public class GateInApprovalResultDto
+{
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    public string BookingStatus { get; set; } = "CheckedIn";
+    public string ContainerStatus { get; set; } = "InYard";
+    public string VehicleStatus { get; set; } = "Inside";
+    public Guid? GateRecordId { get; set; }
+    public bool DriverNotified { get; set; }
+    public bool DispatcherNotified { get; set; }
 }

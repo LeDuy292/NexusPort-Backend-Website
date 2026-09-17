@@ -35,6 +35,16 @@ public class GateValidationContext
     public string? BookingNumber { get; set; }
     public Booking.Domain.Entities.Booking? Booking { get; set; }
 
+    // Thông tin Tác nghiệp (Operation: GateIn, GateOut, Delivery, Pickup, DropOff)
+    public string? OperationType { get; set; }
+
+    // Xác nhận từ tài xế (Driver Confirmation)
+    public bool? DriverConfirmed { get; set; }
+
+    // Tình trạng thanh toán & cước phí cổng (Billing / Payment)
+    public bool? BillingSettled { get; set; }
+    public string? BillingStatus { get; set; } // "PAID", "CREDIT_VALID", "WAIVED", "UNPAID"
+
     // Dữ liệu mở rộng tuỳ chọn truyền giữa các rule
     public IDictionary<string, object> Items { get; set; } = new Dictionary<string, object>();
 }

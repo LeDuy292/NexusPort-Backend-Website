@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 import { logger } from '../../shared/utils/logger';
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:pgadmin4@localhost:5432/nexusport',
+  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:120104@localhost:5432/nexusport',
 });
 
 pool.on('error', (err) => {
