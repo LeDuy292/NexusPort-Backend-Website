@@ -1,4 +1,4 @@
-import { AppError, NotFoundError } from '../../../shared/errors/app-error';
+import { AppError } from '../../../shared/errors/app-error';
 import { CreateContainerDto, ContainerSearchDto, UpdateContainerDto } from './container.dto';
 import { ContainerRepository } from '../infrastructure/container.repository';
 
@@ -12,16 +12,16 @@ export class ContainerService {
 
   async getById(id: string) {
     const container = await this.repository.findById(id);
-    if (!container) throw new NotFoundError('Container', id);
+    if (!container) throw new AppError(`Không tìm thấy Container có ID '${id}'.`, 404, 'CONTAINER_NOT_FOUND');
     return container;
   }
 
   async create(dto: CreateContainerDto) {
     if (await this.repository.findByContainerNumber(dto.containerNumber)) {
-      throw new AppError('Container ID already exists.', 409, 'CONTAINER_ID_DUPLICATE');
+      throw new AppError('Mã Container đã tồn tại.', 409, 'CONTAINER_ID_DUPLICATE');
     }
     const containerType = await this.repository.findTypeById(dto.containerTypeId);
-    if (!containerType) throw new NotFoundError('Container type', dto.containerTypeId);
+    if (!containerType) throw new AppError(`Không tìm thấy loại Container có ID '${dto.containerTypeId}'.`, 404, 'CONTAINER_TYPE_NOT_FOUND');
     try {
       return await this.repository.create(dto, containerType.category);
     } catch (error) {
@@ -33,19 +33,19 @@ export class ContainerService {
     const current = await this.getById(id);
     if (dto.status !== undefined && dto.status !== current.status) {
       throw new AppError(
-        'Container status can only be changed through the status transition API.',
+        'Trạng thái Container chỉ được thay đổi thông qua chức năng chuyển trạng thái.',
         409,
         'STATUS_TRANSITION_REQUIRED',
       );
     }
     if (dto.containerNumber && dto.containerNumber !== current.containerNumber) {
       if (await this.repository.findByContainerNumber(dto.containerNumber)) {
-        throw new AppError('Container ID already exists.', 409, 'CONTAINER_ID_DUPLICATE');
+        throw new AppError('Mã Container đã tồn tại.', 409, 'CONTAINER_ID_DUPLICATE');
       }
     }
     const typeId = dto.containerTypeId ?? current.containerTypeId;
     const containerType = await this.repository.findTypeById(typeId);
-    if (!containerType) throw new NotFoundError('Container type', typeId);
+    if (!containerType) throw new AppError(`Không tìm thấy loại Container có ID '${typeId}'.`, 404, 'CONTAINER_TYPE_NOT_FOUND');
     try {
       return await this.repository.update(id, dto, containerType.category, dto.cargoType ?? current.cargoType);
     } catch (error) {
@@ -59,8 +59,8 @@ export class ContainerService {
   }
 
   private handlePersistenceError(error: PostgresError): never {
-    if (error.code === '23505') throw new AppError('Container ID already exists.', 409, 'CONTAINER_ID_DUPLICATE');
-    if (error.code === '23503') throw new AppError('A referenced carrier, vessel call, or container type does not exist.', 422, 'INVALID_REFERENCE');
+    if (error.code === '23505') throw new AppError('Mã Container đã tồn tại.', 409, 'CONTAINER_ID_DUPLICATE');
+    if (error.code === '23503') throw new AppError('Carrier, chuyến tàu hoặc loại Container được tham chiếu không tồn tại.', 422, 'INVALID_REFERENCE');
     throw error;
   }
 }

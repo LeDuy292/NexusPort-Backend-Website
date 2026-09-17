@@ -149,6 +149,22 @@ async function assignRole(req, res, next) {
 async function activateUser(req, res, next) {
   try {
     const { id } = req.params;
+    const requester = req.user;
+
+    if (requester.role !== 'Administrator' && requester.role !== 'admin') {
+      const { sequelize } = require('../../config/database');
+      const [results] = await sequelize.query(`
+          SELECT cu.carrier_id, u.role
+          FROM users u
+          LEFT JOIN carrier_users cu ON u.id = cu.user_id
+          WHERE u.id = :id
+      `, { replacements: { id } });
+
+      if (!results || results.length === 0 || results[0].role !== 'Carrier Staff' || results[0].carrier_id !== requester.CarrierId) {
+          return res.status(403).json({ success: false, message: 'Không có quyền thao tác trên tài khoản này.' });
+      }
+    }
+
     const user = await usersService.activateUser(id);
 
     return res.status(200).json({
@@ -168,13 +184,90 @@ async function activateUser(req, res, next) {
 async function deactivateUser(req, res, next) {
   try {
     const { id } = req.params;
-    const requesterId = req.user.id;
-    const user = await usersService.deactivateUser(id, requesterId);
+    const requester = req.user;
+
+    if (requester.role !== 'Administrator' && requester.role !== 'admin') {
+      const { sequelize } = require('../../config/database');
+      const [results] = await sequelize.query(`
+          SELECT cu.carrier_id, u.role
+          FROM users u
+          LEFT JOIN carrier_users cu ON u.id = cu.user_id
+          WHERE u.id = :id
+      `, { replacements: { id } });
+
+      if (!results || results.length === 0 || results[0].role !== 'Carrier Staff' || results[0].carrier_id !== requester.CarrierId) {
+          return res.status(403).json({ success: false, message: 'Không có quyền thao tác trên tài khoản này.' });
+      }
+    }
+
+    const user = await usersService.deactivateUser(id, requester.id);
 
     return res.status(200).json({
       success: true,
       message: 'Tài khoản đã bị vô hiệu hóa.',
       data: { user },
+    });
+  } catch (error) {
+    handleServiceError(error, res, next);
+  }
+}
+
+/**
+ * POST /api/users/carrier-staff
+ * Tạo tài khoản nhân viên cho hãng vận tải.
+ */
+async function createCarrierStaff(req, res, next) {
+  try {
+    if (!checkValidation(req, res)) return;
+
+    const { username, email, password, fullName } = req.body;
+    const carrierId = req.user.CarrierId;
+
+    if (!carrierId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Tài khoản của bạn không được gắn với hãng vận tải nào.',
+      });
+    }
+
+    const user = await usersService.createCarrierStaff({
+      username,
+      email,
+      password,
+      fullName,
+      carrierId,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Tạo tài khoản nhân viên thành công.',
+      data: { user },
+    });
+  } catch (error) {
+    handleServiceError(error, res, next);
+  }
+}
+
+/**
+ * GET /api/users/carrier-staff
+ * Lấy danh sách nhân viên của hãng vận tải.
+ */
+async function getCarrierStaffs(req, res, next) {
+  try {
+    const carrierId = req.user.CarrierId;
+
+    if (!carrierId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Tài khoản của bạn không được gắn với hãng vận tải nào.',
+      });
+    }
+
+    const staffs = await usersService.getCarrierStaffs(carrierId);
+
+    return res.status(200).json({
+      success: true,
+      data: { staffs },
     });
   } catch (error) {
     handleServiceError(error, res, next);
@@ -189,4 +282,6 @@ module.exports = {
   assignRole,
   activateUser,
   deactivateUser,
+  createCarrierStaff,
+  getCarrierStaffs,
 };

@@ -9,6 +9,7 @@ const { sequelize } = require('../config/database');
 const VALID_ROLES = [
   'Administrator',
   'Transport Company',
+  'Carrier Staff',
   'Driver',
   'Dispatcher',
   'Gate Officer',

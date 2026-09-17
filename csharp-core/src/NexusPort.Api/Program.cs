@@ -7,6 +7,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
+
     {
         options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
     })
@@ -28,6 +29,12 @@ builder.Services.AddNexusPortModules();
 builder.Services.AddCarrierModule(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Host=localhost;Port=5432;Database=nexusport;Username=postgres;Password=120104");
 builder.Services.AddSwaggerDocumentation();
 
+// Ensure wwwroot exists for StaticFiles middleware
+var webRoot = builder.Environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+if (!Directory.Exists(webRoot)) {
+    Directory.CreateDirectory(webRoot);
+}
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -45,6 +52,8 @@ app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseMiddleware<RequestLoggingMiddleware>();
 
 app.UseCors("NexusPortCorsPolicy");
+
+app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();

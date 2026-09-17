@@ -1,4 +1,4 @@
-import { AppError, NotFoundError } from '../../../shared/errors/app-error';
+import { AppError } from '../../../shared/errors/app-error';
 import {
   ContainerCurrentStatus,
   ContainerStatus,
@@ -13,6 +13,15 @@ const nextStatus: Record<ContainerStatus, ContainerStatus | null> = {
   [ContainerStatus.InYard]: ContainerStatus.ReadyForGateOut,
   [ContainerStatus.ReadyForGateOut]: ContainerStatus.GateOut,
   [ContainerStatus.GateOut]: null,
+};
+
+const statusLabel: Record<ContainerStatus, string> = {
+  [ContainerStatus.Registered]: 'Đã đăng ký',
+  [ContainerStatus.Booked]: 'Đã đặt lịch',
+  [ContainerStatus.GateIn]: 'Đã vào cổng',
+  [ContainerStatus.InYard]: 'Trong bãi',
+  [ContainerStatus.ReadyForGateOut]: 'Sẵn sàng ra cổng',
+  [ContainerStatus.GateOut]: 'Đã ra cổng',
 };
 
 const persistedByStatus: Record<ContainerStatus, PersistedContainerStatus> = {
@@ -32,7 +41,7 @@ export const toContainerStatus = (status: PersistedContainerStatus): ContainerSt
   const lifecycleStatus = statusByPersisted[status];
   if (!lifecycleStatus) {
     throw new AppError(
-      `Container status '${status}' is outside the managed gate lifecycle.`,
+      `Trạng thái Container '${status}' không thuộc quy trình cổng đang được quản lý.`,
       409,
       'UNMANAGED_CONTAINER_STATUS',
     );
@@ -45,7 +54,7 @@ export class ContainerStatusService {
 
   async getCurrentStatus(containerId: string): Promise<ContainerCurrentStatus> {
     const current = await this.repository.findCurrentStatus(containerId);
-    if (!current) throw new NotFoundError('Container', containerId);
+    if (!current) throw new AppError(`Không tìm thấy Container có ID '${containerId}'.`, 404, 'CONTAINER_NOT_FOUND');
     return {
       containerId,
       status: toContainerStatus(current.status),
@@ -56,7 +65,7 @@ export class ContainerStatusService {
 
   async getHistory(containerId: string) {
     if (!(await this.repository.findCurrentStatus(containerId))) {
-      throw new NotFoundError('Container', containerId);
+      throw new AppError(`Không tìm thấy Container có ID '${containerId}'.`, 404, 'CONTAINER_NOT_FOUND');
     }
     return this.repository.findStatusHistory(containerId);
   }
@@ -66,7 +75,7 @@ export class ContainerStatusService {
     const allowedTarget = nextStatus[current.status];
     if (allowedTarget !== target) {
       throw new AppError(
-        `Invalid container status transition from '${current.status}' to '${target}'.`,
+        `Không thể chuyển trạng thái Container từ '${statusLabel[current.status]}' sang '${statusLabel[target]}'.`,
         409,
         'INVALID_STATUS_TRANSITION',
       );
@@ -81,10 +90,10 @@ export class ContainerStatusService {
       userId,
       ipAddress: ipAddress ?? null,
     });
-    if (!result) throw new NotFoundError('Container', containerId);
+    if (!result) throw new AppError(`Không tìm thấy Container có ID '${containerId}'.`, 404, 'CONTAINER_NOT_FOUND');
     if (result.conflictStatus) {
       throw new AppError(
-        'Container status changed concurrently. Reload the current status and retry.',
+        'Trạng thái Container vừa được thay đổi bởi thao tác khác. Vui lòng tải lại và thử lại.',
         409,
         'STATUS_TRANSITION_CONFLICT',
       );

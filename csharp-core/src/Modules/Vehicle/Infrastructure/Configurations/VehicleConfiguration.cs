@@ -23,6 +23,8 @@ public class VehicleConfiguration : IEntityTypeConfiguration<NexusPort.Modules.V
             .HasColumnType("truck_status")
             .IsRequired();
         builder.Property(x => x.CreatedAt).HasColumnName("created_at");
+        builder.Property(x => x.RegistrationImageUrl).HasColumnName("registration_image_url").HasMaxLength(500);
+        builder.Property(x => x.PhotoUrl).HasColumnName("photo_url").HasMaxLength(500);
 
         // Trucks table does not have these columns — ignore them
         builder.Ignore(x => x.DriverId);

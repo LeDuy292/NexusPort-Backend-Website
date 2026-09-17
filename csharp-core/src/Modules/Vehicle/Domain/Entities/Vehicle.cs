@@ -12,6 +12,8 @@ public class Vehicle : BaseEntity, IAggregateRoot
     public string VehicleType { get; set; } = "Truck";
     public TruckStatus Status { get; set; } = TruckStatus.active;
     public string? Description { get; set; }
+    public string? RegistrationImageUrl { get; set; }
+    public string? PhotoUrl { get; set; }
 
     public Vehicle() { }
 

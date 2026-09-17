@@ -11,16 +11,25 @@ import {
   transitionContainerStatusSchema, updateContainerSchema,
 } from '../application/container.validator';
 
-type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer';
+type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier';
 interface AuthorizedRequest extends Request { containerUser?: { id: string; role: ContainerRole } }
 
 const roleAliases: Record<string, ContainerRole> = {
   administrator: 'Administrator', admin: 'Administrator', dispatcher: 'Dispatcher', operation: 'Dispatcher',
   'yard staff': 'Yard Staff', 'yard operator': 'Yard Staff', yard: 'Yard Staff',
-  'gate officer': 'Gate Officer', gate: 'Gate Officer',
+  'gate officer': 'Gate Officer', gate: 'Gate Officer', carrier: 'Carrier',
+  'transport company': 'Carrier', 'transportcompany': 'Carrier'
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const vietnameseValidationMessage = (issue: ZodError['issues'][number]): string => {
+  if (issue.message !== 'Invalid input' && !issue.message.startsWith('Invalid')) return issue.message;
+  if (issue.code === 'invalid_type') return 'Giá trị không đúng kiểu dữ liệu yêu cầu.';
+  if (issue.code === 'invalid_enum_value') return 'Giá trị không nằm trong danh sách được hỗ trợ.';
+  if (issue.code === 'invalid_string') return 'Giá trị không đúng định dạng yêu cầu.';
+  return 'Giá trị không hợp lệ.';
+};
 
 const parse = <T>(schema: ZodSchema<T>, value: unknown): T => {
   try { return schema.parse(value); }
@@ -28,10 +37,10 @@ const parse = <T>(schema: ZodSchema<T>, value: unknown): T => {
     if (error instanceof ZodError) {
       const details = error.issues.reduce<Record<string, string[]>>((result, issue) => {
         const field = issue.path.join('.') || 'request';
-        result[field] = [...(result[field] ?? []), issue.message];
+        result[field] = [...(result[field] ?? []), vietnameseValidationMessage(issue)];
         return result;
       }, {});
-      throw new ValidationError('Container data is invalid.', details);
+      throw new ValidationError('Dữ liệu Container không hợp lệ.', details);
     }
     throw error;
   }
@@ -39,24 +48,24 @@ const parse = <T>(schema: ZodSchema<T>, value: unknown): T => {
 
 const authenticateContainerUser = (req: AuthorizedRequest, _res: Response, next: NextFunction) => {
   const token = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-  if (!token) return next(new UnauthorizedError('A valid bearer token is required.'));
+  if (!token) return next(new UnauthorizedError('Vui lòng đăng nhập để sử dụng chức năng quản lý Container.'));
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET || 'NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!', { algorithms: ['HS256'] }) as JwtPayload;
     const rawRole = String(payload.role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? '').toLowerCase();
     const role = roleAliases[rawRole];
-    if (!role) return next(new ForbiddenError('Your role cannot access Container Management.'));
+    if (!role) return next(new ForbiddenError('Vai trò của bạn không có quyền truy cập chức năng quản lý Container.'));
     const userId = String(payload.sub ?? payload.id ?? '');
-    if (!UUID_PATTERN.test(userId)) return next(new UnauthorizedError('Bearer token does not identify a valid user.'));
+    if (!UUID_PATTERN.test(userId)) return next(new UnauthorizedError('Token đăng nhập không xác định được người dùng hợp lệ.'));
     req.containerUser = { id: userId, role };
     next();
   } catch {
-    next(new UnauthorizedError('Bearer token is invalid or expired.'));
+    next(new UnauthorizedError('Token đăng nhập không hợp lệ hoặc đã hết hạn.'));
   }
 };
 
 const allowRoles = (...roles: ContainerRole[]) => (req: AuthorizedRequest, _res: Response, next: NextFunction) => {
   if (!req.containerUser || !roles.includes(req.containerUser.role)) {
-    return next(new ForbiddenError('You do not have permission to perform this action.'));
+    return next(new ForbiddenError('Bạn không có quyền thực hiện thao tác này.'));
   }
   next();
 };
@@ -123,7 +132,7 @@ export class ContainerController {
 export const createContainerRouter = (): Router => {
   const router = Router();
   const controller = new ContainerController();
-  const readers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer'];
+  const readers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer', 'Carrier'];
   const writers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Gate Officer'];
 
   router.use(authenticateContainerUser);
