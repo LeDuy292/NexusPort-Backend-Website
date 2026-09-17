@@ -30,6 +30,7 @@ public class BookingDto
 
     public DateTime CreatedAt { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
+    public List<string> ContainerNumbers { get; set; } = new();
 }
 
 public class CreateBookingDto
