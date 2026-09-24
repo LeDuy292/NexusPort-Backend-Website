@@ -27,7 +27,7 @@ public class VehicleConfiguration : IEntityTypeConfiguration<NexusPort.Modules.V
         builder.Property(x => x.PhotoUrl).HasColumnName("photo_url").HasMaxLength(500);
 
         // Trucks table does not have these columns — ignore them
-        builder.Ignore(x => x.DriverId);
+        builder.Property(x => x.DriverId).HasColumnName("driver_id");
         builder.Ignore(x => x.CreatedBy);
         builder.Ignore(x => x.UpdatedBy);
         builder.Ignore(x => x.UpdatedAt);

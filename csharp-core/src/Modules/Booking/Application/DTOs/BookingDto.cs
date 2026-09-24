@@ -152,6 +152,7 @@ public class AvailableTruckDto
     public string VehicleType { get; set; } = "Truck 24T";
     public decimal MaxPayloadTon { get; set; } = 24m;
     public string Status { get; set; } = "active";
+    public Guid? DriverId { get; set; }
 }
 
 public class AvailableDriverDto

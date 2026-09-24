@@ -13,6 +13,7 @@ public class VehicleDto
     public string? Description { get; set; }
     public string? RegistrationImageUrl { get; set; }
     public string? PhotoUrl { get; set; }
+    public string? CurrentLocation { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
@@ -23,6 +24,7 @@ public class CreateVehicleDto
     public string? Description { get; set; }
     public string? RegistrationImageUrl { get; set; }
     public string? PhotoUrl { get; set; }
+    public string? CurrentLocation { get; set; }
 }
 
 public class UpdateVehicleDto
@@ -32,6 +34,7 @@ public class UpdateVehicleDto
     public string? Description { get; set; }
     public string? RegistrationImageUrl { get; set; }
     public string? PhotoUrl { get; set; }
+    public string? CurrentLocation { get; set; }
 }
 
 public class AssignDriverDto

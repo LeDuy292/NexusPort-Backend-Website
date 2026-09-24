@@ -10,12 +10,14 @@ public class VehicleService : IVehicleService
     private readonly IVehicleRepository _repository;
     private readonly IMessageBrokerService _messageBroker;
     private readonly ILogger<VehicleService> _logger;
+    private readonly IS3StorageService _s3StorageService;
 
-    public VehicleService(IVehicleRepository repository, IMessageBrokerService messageBroker, ILogger<VehicleService> logger)
+    public VehicleService(IVehicleRepository repository, IMessageBrokerService messageBroker, ILogger<VehicleService> logger, IS3StorageService s3StorageService)
     {
         _repository = repository;
         _messageBroker = messageBroker;
         _logger = logger;
+        _s3StorageService = s3StorageService;
     }
 
     public async Task<IReadOnlyList<VehicleDto>> GetAllAsync(VehicleFilterDto filter, CancellationToken cancellationToken = default)
@@ -30,8 +32,9 @@ public class VehicleService : IVehicleService
             Status = e.Status.ToString(),
             VehicleType = e.VehicleType,
             Description = e.Description,
-            RegistrationImageUrl = e.RegistrationImageUrl,
-            PhotoUrl = e.PhotoUrl,
+            RegistrationImageUrl = _s3StorageService.GetPresignedUrl(e.RegistrationImageUrl),
+            PhotoUrl = _s3StorageService.GetPresignedUrl(e.PhotoUrl),
+            CurrentLocation = e.CurrentLocation,
             CreatedAt = e.CreatedAt
         }).ToList();
     }
@@ -49,8 +52,9 @@ public class VehicleService : IVehicleService
             Status = entity.Status.ToString(),
             VehicleType = entity.VehicleType,
             Description = entity.Description,
-            RegistrationImageUrl = entity.RegistrationImageUrl,
-            PhotoUrl = entity.PhotoUrl,
+            RegistrationImageUrl = _s3StorageService.GetPresignedUrl(entity.RegistrationImageUrl),
+            PhotoUrl = _s3StorageService.GetPresignedUrl(entity.PhotoUrl),
+            CurrentLocation = entity.CurrentLocation,
             CreatedAt = entity.CreatedAt
         };
     }
@@ -80,6 +84,10 @@ public class VehicleService : IVehicleService
         {
             entity.PhotoUrl = dto.PhotoUrl;
         }
+        if (!string.IsNullOrWhiteSpace(dto.CurrentLocation))
+        {
+            entity.CurrentLocation = dto.CurrentLocation;
+        }
 
         await _repository.AddAsync(entity, cancellationToken);
         return new VehicleDto
@@ -91,8 +99,9 @@ public class VehicleService : IVehicleService
             Status = entity.Status.ToString(),
             VehicleType = entity.VehicleType,
             Description = entity.Description,
-            RegistrationImageUrl = entity.RegistrationImageUrl,
-            PhotoUrl = entity.PhotoUrl,
+            RegistrationImageUrl = _s3StorageService.GetPresignedUrl(entity.RegistrationImageUrl),
+            PhotoUrl = _s3StorageService.GetPresignedUrl(entity.PhotoUrl),
+            CurrentLocation = entity.CurrentLocation,
             CreatedAt = entity.CreatedAt
         };
     }
@@ -121,6 +130,10 @@ public class VehicleService : IVehicleService
         {
             entity.PhotoUrl = dto.PhotoUrl;
         }
+        if (dto.CurrentLocation != null)
+        {
+            entity.CurrentLocation = dto.CurrentLocation;
+        }
 
         await _repository.UpdateAsync(entity, cancellationToken);
 
@@ -133,8 +146,9 @@ public class VehicleService : IVehicleService
             Status = entity.Status.ToString(),
             VehicleType = entity.VehicleType,
             Description = entity.Description,
-            RegistrationImageUrl = entity.RegistrationImageUrl,
-            PhotoUrl = entity.PhotoUrl,
+            RegistrationImageUrl = _s3StorageService.GetPresignedUrl(entity.RegistrationImageUrl),
+            PhotoUrl = _s3StorageService.GetPresignedUrl(entity.PhotoUrl),
+            CurrentLocation = entity.CurrentLocation,
             CreatedAt = entity.CreatedAt
         };
     }
