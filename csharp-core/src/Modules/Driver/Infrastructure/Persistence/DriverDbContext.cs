@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 
 namespace NexusPort.Modules.Driver.Infrastructure.Persistence;
 
@@ -13,6 +13,7 @@ public class DriverDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.HasPostgresEnum<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>();
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(DriverDbContext).Assembly);
     }
 }

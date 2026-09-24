@@ -1,10 +1,19 @@
 using NexusPort.Api.Extensions;
 using NexusPort.Api.Middleware;
+using NexusPort.Modules.Carrier;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Fix Npgsql DateTime timezone conversion error
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 // Add services to the container.
 builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+
+    {
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    })
     .AddApplicationPart(typeof(NexusPort.Modules.Identity.Presentation.Controllers.IdentityController).Assembly)
     .AddApplicationPart(typeof(NexusPort.Modules.Booking.Presentation.Controllers.BookingController).Assembly)
     .AddApplicationPart(typeof(NexusPort.Modules.Vessel.Presentation.Controllers.VesselController).Assembly)
@@ -20,7 +29,14 @@ builder.Services.AddControllers()
 // Add Infrastructure & Domain Modules
 builder.Services.AddNexusPortInfrastructure(builder.Configuration);
 builder.Services.AddNexusPortModules();
+builder.Services.AddCarrierModule(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Host=localhost;Port=5432;Database=nexusport;Username=postgres;Password=120104");
 builder.Services.AddSwaggerDocumentation();
+
+// Ensure wwwroot exists for StaticFiles middleware
+var webRoot = builder.Environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+if (!Directory.Exists(webRoot)) {
+    Directory.CreateDirectory(webRoot);
+}
 
 var app = builder.Build();
 
@@ -39,6 +55,8 @@ app.UseMiddleware<GlobalExceptionMiddleware>();
 app.UseMiddleware<RequestLoggingMiddleware>();
 
 app.UseCors("NexusPortCorsPolicy");
+
+app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();

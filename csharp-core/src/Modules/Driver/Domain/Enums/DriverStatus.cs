@@ -1,11 +1,12 @@
-﻿namespace NexusPort.Modules.Driver.Domain.Enums;
-
-public enum DriverStatus
-{
-    Draft,
-    Active,
-    Pending,
-    Processing,
-    Completed,
-    Cancelled
+namespace NexusPort.Modules.Driver.Domain.Enums;
+public enum DriverStatus {
+    active,
+    inactive,
+    banned,
+    waiting_confirmation,
+    receiving_vehicle,
+    vehicle_received,
+    booking_confirmed,
+    transporting,
+    transport_completed
 }

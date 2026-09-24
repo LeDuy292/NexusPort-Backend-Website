@@ -37,16 +37,23 @@ public class GlobalExceptionMiddleware
         var message = "An unexpected error occurred.";
         object? errors = null;
 
-        if (exception is AppException appEx)
+
+        if (exception is ValidationException valEx)
+        {
+            statusCode = valEx.StatusCode;
+            errorCode = valEx.ErrorCode;
+            message = valEx.Message;
+            errors = valEx.Errors;
+        }
+        else if (exception is AppException appEx)
         {
             statusCode = appEx.StatusCode;
             errorCode = appEx.ErrorCode;
             message = appEx.Message;
-
-            if (exception is ValidationException valEx)
-            {
-                errors = valEx.Errors;
-            }
+        }
+        else
+        {
+            message = exception.Message;
         }
 
         context.Response.StatusCode = statusCode;
@@ -57,6 +64,7 @@ public class GlobalExceptionMiddleware
             ErrorCode = errorCode,
             Message = message,
             Errors = errors,
+
             Timestamp = DateTime.UtcNow
         };
 

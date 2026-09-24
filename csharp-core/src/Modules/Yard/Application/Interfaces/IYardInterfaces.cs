@@ -1,4 +1,4 @@
-﻿namespace NexusPort.Modules.Yard.Application.Interfaces;
+namespace NexusPort.Modules.Yard.Application.Interfaces;
 
 public interface IYardRepository
 {
@@ -14,4 +14,9 @@ public interface IYardService
     Task<IReadOnlyList<DTOs.YardBlockDto>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<DTOs.YardBlockDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<DTOs.YardBlockDto> CreateAsync(DTOs.CreateYardBlockDto dto, CancellationToken cancellationToken = default);
+    Task<DTOs.YardOperationCompletionDto> CompleteOperationAsync(Guid operationId, DTOs.CompleteYardOperationDto dto, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DTOs.YardBlockDto>> GetYardMapAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DTOs.YardSlotDto>> GetBlockSlotsAsync(Guid blockId, CancellationToken cancellationToken = default);
+    Task<bool> UpdateContainerLocationAsync(Guid containerId, Guid slotId, CancellationToken cancellationToken = default);
+    Task<bool> ToggleSlotMaintenanceAsync(Guid slotId, CancellationToken cancellationToken = default);
 }
