@@ -1,5 +1,6 @@
 using NexusPort.Shared.Kernel;
 using NexusPort.Modules.Driver.Domain.Enums;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace NexusPort.Modules.Driver.Domain.Entities;
 
@@ -12,7 +13,21 @@ public class Driver : BaseEntity, IAggregateRoot
     public string LicenseNumber { get; set; } = string.Empty;
     public string? PhotoUrl { get; set; }
     public string? IdCardFrontUrl { get; set; }
+    
+    [Column("id_card_back_url")]
+    public string? IdCardBackUrl { get; set; }
+
     public string? LicenseImageUrl { get; set; }
+    
+    [Column("license_back_image_url")]
+    public string? LicenseBackImageUrl { get; set; }
+    
+    [Column("id_card_expiry_date")]
+    public DateTime? IdCardExpiryDate { get; set; }
+    
+    [Column("license_expiry_date")]
+    public DateTime? LicenseExpiryDate { get; set; }
+    
     public DriverStatus Status { get; set; } = DriverStatus.active;
 
     public Driver() { }

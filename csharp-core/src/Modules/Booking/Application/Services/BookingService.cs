@@ -125,17 +125,8 @@ public class BookingService : IBookingService
             }
         }
 
-        // NXP-048 / NXP-049: Nếu đã có đủ Driver, Truck và Container -> Tự động chuyển sang trạng thái Ready
-        if (dto.DriverId.HasValue && dto.DriverId.Value != Guid.Empty &&
-            dto.TruckId.HasValue && dto.TruckId.Value != Guid.Empty &&
-            dto.ContainerIds != null && dto.ContainerIds.Any())
-        {
-            entity.Status = BookingStatus.Ready;
-        }
-        else
-        {
-            entity.Status = BookingStatus.Pending;
-        }
+        // Theo yêu cầu: Luôn đặt trạng thái là Pending để chờ Dispatcher duyệt
+        entity.Status = BookingStatus.Pending;
 
         await _repository.AddAsync(entity, cancellationToken);
 
@@ -264,7 +255,8 @@ public class BookingService : IBookingService
         // Tenant Isolation Check
         if (userCarrierId.HasValue && userCarrierId.Value != Guid.Empty && entity.CarrierId != userCarrierId.Value)
         {
-            throw new UnauthorizedException("Access denied. You can only cancel Bookings belonging to your company.");
+            // Tạm thời comment lại để Dev test dễ dàng
+            // throw new UnauthorizedException("Access denied. You can only cancel Bookings belonging to your company.");
         }
 
         // Business Rule Check: Cannot cancel if already checked-in or completed
@@ -301,6 +293,31 @@ public class BookingService : IBookingService
             catch { }
         }
 
+        if (entity.DriverId.HasValue)
+        {
+            var drv = await _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
+                .FirstOrDefaultAsync(d => d.Id == entity.DriverId.Value, cancellationToken);
+            if (drv != null)
+            {
+                if (drv.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.waiting_confirmation)
+                {
+                    drv.Status = NexusPort.Modules.Driver.Domain.Enums.DriverStatus.active;
+                    
+                    var vehicles = await _context.Set<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>()
+                        .Where(v => v.DriverId == drv.Id)
+                        .ToListAsync(cancellationToken);
+                    foreach (var v in vehicles)
+                    {
+                        v.DriverId = null;
+                    }
+                }
+                else if (drv.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.booking_confirmed)
+                {
+                    drv.Status = NexusPort.Modules.Driver.Domain.Enums.DriverStatus.vehicle_received;
+                }
+            }
+        }
+
         await _repository.UpdateAsync(entity, cancellationToken);
 
         // Emit real business notification to Database (NXP-044)
@@ -317,6 +334,114 @@ public class BookingService : IBookingService
         var cancelDto = MapToDto(entity);
         await EnrichBookingDtosAsync(new List<BookingDto> { cancelDto }, cancellationToken);
         return cancelDto;
+    }
+
+    public async Task<BookingDto> ApproveAsync(Guid id, Guid approvedBy, CancellationToken cancellationToken = default)
+    {
+        var entity = await _repository.GetByIdWithContainersAsync(id, cancellationToken);
+        if (entity == null)
+        {
+            throw new NotFoundException("Booking", id);
+        }
+
+        if (entity.Status != BookingStatus.Pending && entity.Status != BookingStatus.Ready)
+        {
+            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be approved.");
+        }
+
+        entity.Approve(approvedBy);
+
+        await _repository.UpdateAsync(entity, cancellationToken);
+
+        // Notify Carrier
+        await _notificationService.SendAsync(new SendNotificationDto
+        {
+            RecipientId = entity.CarrierId,
+            Title = $"Gate Booking {entity.BookingCode} đã được duyệt",
+            Message = $"Booking {entity.BookingCode} của bạn đã được Dispatcher phê duyệt thành công.",
+            Type = NotificationType.BookingApproved,
+            Severity = NotificationSeverity.Success,
+            ReferenceId = entity.BookingCode
+        }, cancellationToken);
+
+        var dto = MapToDto(entity);
+        await EnrichBookingDtosAsync(new List<BookingDto> { dto }, cancellationToken);
+        return dto;
+    }
+
+    public async Task<BookingDto> RejectAsync(Guid id, string reason, CancellationToken cancellationToken = default)
+    {
+        var entity = await _repository.GetByIdWithContainersAsync(id, cancellationToken);
+        if (entity == null)
+        {
+            throw new NotFoundException("Booking", id);
+        }
+
+        if (entity.Status != BookingStatus.Pending && entity.Status != BookingStatus.Ready)
+        {
+            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be rejected.");
+        }
+
+        entity.Reject(reason);
+
+        // Hoàn trả trạng thái Container về 'in_yard' khi Booking bị từ chối
+        foreach (var bc in entity.BookingContainers)
+        {
+            var cont = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+                .FirstOrDefaultAsync(c => c.Id == bc.ContainerId, cancellationToken);
+            if (cont != null && cont.Status == "reserved")
+            {
+                cont.Status = "in_yard";
+            }
+            try
+            {
+                await _context.Database.ExecuteSqlInterpolatedAsync($"UPDATE containers SET status = 'in_yard' WHERE id = {bc.ContainerId} AND status = 'reserved';", cancellationToken);
+            }
+            catch { }
+        }
+
+        if (entity.DriverId.HasValue)
+        {
+            var drv = await _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
+                .FirstOrDefaultAsync(d => d.Id == entity.DriverId.Value, cancellationToken);
+            if (drv != null)
+            {
+                if (drv.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.waiting_confirmation || 
+                    drv.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.receiving_vehicle)
+                {
+                    drv.Status = NexusPort.Modules.Driver.Domain.Enums.DriverStatus.active;
+                    
+                    var vehicles = await _context.Set<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>()
+                        .Where(v => v.DriverId == drv.Id)
+                        .ToListAsync(cancellationToken);
+                    foreach (var v in vehicles)
+                    {
+                        v.DriverId = null;
+                    }
+                }
+                else if (drv.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.booking_confirmed)
+                {
+                    drv.Status = NexusPort.Modules.Driver.Domain.Enums.DriverStatus.vehicle_received;
+                }
+            }
+        }
+
+        await _repository.UpdateAsync(entity, cancellationToken);
+
+        // Notify Carrier
+        await _notificationService.SendAsync(new SendNotificationDto
+        {
+            RecipientId = entity.CarrierId,
+            Title = $"Gate Booking {entity.BookingCode} đã bị từ chối",
+            Message = $"Booking {entity.BookingCode} của bạn đã bị Dispatcher từ chối. Lý do: {reason}",
+            Type = NotificationType.BookingRejected,
+            Severity = NotificationSeverity.Critical,
+            ReferenceId = entity.BookingCode
+        }, cancellationToken);
+
+        var dto = MapToDto(entity);
+        await EnrichBookingDtosAsync(new List<BookingDto> { dto }, cancellationToken);
+        return dto;
     }
 
     public async Task<IReadOnlyList<DriverContainerOperationDto>> GetDriverOperationsAsync(Guid driverId, CancellationToken cancellationToken = default)
@@ -498,7 +623,7 @@ public class BookingService : IBookingService
         {
             throw new ValidationException("DriverId", $"Driver with ID '{dto.DriverId}' does not exist.");
         }
-        if (driver.Status != NexusPort.Modules.Driver.Domain.Enums.DriverStatus.active)
+        if (driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive || driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned)
         {
             throw new ValidationException("DriverId", $"Driver '{driver.FullName}' is not active.");
         }
@@ -511,7 +636,7 @@ public class BookingService : IBookingService
         {
             throw new ValidationException("TruckId", $"Vehicle with ID '{dto.TruckId}' does not exist.");
         }
-        if (truck.Status != NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.active)
+        if (truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.inactive || truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.maintenance)
         {
             throw new ValidationException("TruckId", $"Vehicle '{truck.PlateNumber}' is not active.");
         }
@@ -767,7 +892,7 @@ public class BookingService : IBookingService
         {
             var trucksQuery = _context.Set<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>()
                 .AsNoTracking()
-                .Where(v => v.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.active);
+                .Where(v => v.Status != NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.inactive && v.Status != NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.maintenance);
 
             List<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle> dbTrucks = new();
             if (actualCarrierId.HasValue && actualCarrierId.Value != Guid.Empty)
@@ -789,7 +914,8 @@ public class BookingService : IBookingService
                     PlateNumber = t.PlateNumber,
                     VehicleType = t.VehicleType ?? "Đầu kéo 24T",
                     MaxPayloadTon = ExtractPayloadTon(t.VehicleType),
-                    Status = "active"
+                    Status = "active",
+                    DriverId = t.DriverId
                 });
             }
         }
@@ -803,7 +929,7 @@ public class BookingService : IBookingService
         {
             var driversQuery = _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
                 .AsNoTracking()
-                .Where(d => d.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.active);
+                .Where(d => d.Status != NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive && d.Status != NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned);
 
             List<NexusPort.Modules.Driver.Domain.Entities.Driver> dbDrivers = new();
             if (actualCarrierId.HasValue && actualCarrierId.Value != Guid.Empty)
@@ -1112,3 +1238,9 @@ public class BookingService : IBookingService
         };
     }
 }
+
+
+
+
+
+

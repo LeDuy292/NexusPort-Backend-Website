@@ -4,6 +4,9 @@ using NexusPort.Modules.Carrier;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Fix Npgsql DateTime timezone conversion error
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 // Add services to the container.
 builder.Services.AddControllers()
     .AddJsonOptions(options =>

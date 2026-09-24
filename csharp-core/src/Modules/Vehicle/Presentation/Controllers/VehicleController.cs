@@ -19,12 +19,14 @@ public class VehicleController : ControllerBase
     private readonly IVehicleService _service;
     private readonly IOcrService _ocrService;
     private readonly IWebHostEnvironment _env;
+    private readonly NexusPort.Infrastructure.ExternalServices.IS3StorageService _s3StorageService;
 
-    public VehicleController(IVehicleService service, IOcrService ocrService, IWebHostEnvironment env)
+    public VehicleController(IVehicleService service, IOcrService ocrService, IWebHostEnvironment env, NexusPort.Infrastructure.ExternalServices.IS3StorageService s3StorageService)
     {
         _service = service;
         _ocrService = ocrService;
         _env = env;
+        _s3StorageService = s3StorageService;
     }
 
     private bool IsPortStaff()
@@ -162,19 +164,15 @@ public class VehicleController : ControllerBase
     {
         if (file == null || file.Length == 0) return BadRequest(new { message = "No file provided" });
 
-        var uploadDir = Path.Combine(_env.WebRootPath, "uploads", "vehicles");
-        if (!Directory.Exists(uploadDir)) Directory.CreateDirectory(uploadDir);
-
-        var ext = Path.GetExtension(file.FileName);
-        var filename = $"avatar_{Guid.NewGuid()}{ext}";
-        var filepath = Path.Combine(uploadDir, filename);
-
-        using (var stream = new FileStream(filepath, FileMode.Create))
+        try
         {
-            await file.CopyToAsync(stream, cancellationToken);
+            var imageUrl = await _s3StorageService.UploadFileAsync(file.OpenReadStream(), file.FileName, file.ContentType, "vehicles", cancellationToken);
+            return Ok(new { ImageUrl = imageUrl });
         }
-
-        return Ok(new { ImageUrl = $"/uploads/vehicles/{filename}" });
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = $"Lỗi tải ảnh lên AWS S3: {ex.Message}" });
+        }
     }
 
     [HttpPost("extract-registration")]
@@ -186,21 +184,7 @@ public class VehicleController : ControllerBase
         try
         {
             var result = await _ocrService.ExtractVehicleRegistrationAsync(file, cancellationToken);
-
-            // Save the raw image
-            var uploadDir = Path.Combine(_env.WebRootPath, "uploads", "vehicles");
-            if (!Directory.Exists(uploadDir)) Directory.CreateDirectory(uploadDir);
-
-            var ext = Path.GetExtension(file.FileName);
-            var filename = $"reg_{Guid.NewGuid()}{ext}";
-            var filepath = Path.Combine(uploadDir, filename);
-
-            using (var stream = new FileStream(filepath, FileMode.Create))
-            {
-                await file.CopyToAsync(stream, cancellationToken);
-            }
-
-            var imageUrl = $"/uploads/vehicles/{filename}";
+            var imageUrl = await _s3StorageService.UploadFileAsync(file.OpenReadStream(), file.FileName, file.ContentType, "vehicles", cancellationToken);
 
             if (result == null || string.IsNullOrEmpty(result.PlateNumber))
             {

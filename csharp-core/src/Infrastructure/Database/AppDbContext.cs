@@ -15,7 +15,7 @@ public class AppDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        modelBuilder.HasPostgresEnum("driver_status", new[] { "active", "inactive", "banned" });
+        modelBuilder.HasPostgresEnum("driver_status", new[] { "active", "inactive", "banned", "waiting_confirmation", "receiving_vehicle", "vehicle_received", "booking_confirmed", "transporting", "transport_completed" });
         modelBuilder.HasPostgresEnum("truck_status", new[] { "active", "inactive", "maintenance" });
         modelBuilder.HasPostgresEnum("booking_type", new[] { "pickup", "dropoff" });
         modelBuilder.HasPostgresEnum("yard_slot_status", new[] { "empty", "reserved", "occupied", "maintenance" });
@@ -52,3 +52,4 @@ public class AppDbContext : DbContext
         return await base.SaveChangesAsync(cancellationToken);
     }
 }
+

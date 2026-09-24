@@ -39,6 +39,10 @@ public class DriverService : IDriverService
             PhotoUrl = _s3StorageService.GetPresignedUrl(e.PhotoUrl),
             IdCardFrontUrl = _s3StorageService.GetPresignedUrl(e.IdCardFrontUrl),
             LicenseImageUrl = _s3StorageService.GetPresignedUrl(e.LicenseImageUrl),
+            IdCardBackUrl = _s3StorageService.GetPresignedUrl(e.IdCardBackUrl),
+            LicenseBackImageUrl = _s3StorageService.GetPresignedUrl(e.LicenseBackImageUrl),
+            IdCardExpiryDate = e.IdCardExpiryDate,
+            LicenseExpiryDate = e.LicenseExpiryDate,
             CreatedAt = e.CreatedAt
         }).ToList();
     }
@@ -59,6 +63,10 @@ public class DriverService : IDriverService
             PhotoUrl = _s3StorageService.GetPresignedUrl(entity.PhotoUrl),
             IdCardFrontUrl = _s3StorageService.GetPresignedUrl(entity.IdCardFrontUrl),
             LicenseImageUrl = _s3StorageService.GetPresignedUrl(entity.LicenseImageUrl),
+            IdCardBackUrl = _s3StorageService.GetPresignedUrl(entity.IdCardBackUrl),
+            LicenseBackImageUrl = _s3StorageService.GetPresignedUrl(entity.LicenseBackImageUrl),
+            IdCardExpiryDate = entity.IdCardExpiryDate,
+            LicenseExpiryDate = entity.LicenseExpiryDate,
             CreatedAt = entity.CreatedAt
         };
     }
@@ -81,6 +89,10 @@ public class DriverService : IDriverService
         entity.PhotoUrl = dto.PhotoUrl;
         entity.IdCardFrontUrl = dto.IdCardFrontUrl;
         entity.LicenseImageUrl = dto.LicenseImageUrl;
+        entity.IdCardBackUrl = dto.IdCardBackUrl;
+        entity.LicenseBackImageUrl = dto.LicenseBackImageUrl;
+        entity.IdCardExpiryDate = dto.IdCardExpiryDate?.ToUniversalTime();
+        entity.LicenseExpiryDate = dto.LicenseExpiryDate?.ToUniversalTime();
 
         await _repository.AddAsync(entity, cancellationToken);
         
@@ -96,6 +108,10 @@ public class DriverService : IDriverService
             PhotoUrl = _s3StorageService.GetPresignedUrl(entity.PhotoUrl),
             IdCardFrontUrl = _s3StorageService.GetPresignedUrl(entity.IdCardFrontUrl),
             LicenseImageUrl = _s3StorageService.GetPresignedUrl(entity.LicenseImageUrl),
+            IdCardBackUrl = _s3StorageService.GetPresignedUrl(entity.IdCardBackUrl),
+            LicenseBackImageUrl = _s3StorageService.GetPresignedUrl(entity.LicenseBackImageUrl),
+            IdCardExpiryDate = entity.IdCardExpiryDate,
+            LicenseExpiryDate = entity.LicenseExpiryDate,
             CreatedAt = entity.CreatedAt
         };
     }
@@ -108,6 +124,7 @@ public class DriverService : IDriverService
         entity.FullName = dto.FullName;
         entity.Phone = dto.Phone;
         entity.IdCardNumber = dto.IdCardNumber;
+        
         if (dto.PhotoUrl != null)
         {
             entity.PhotoUrl = dto.PhotoUrl;
@@ -120,6 +137,11 @@ public class DriverService : IDriverService
         {
             entity.LicenseImageUrl = dto.LicenseImageUrl;
         }
+        
+        entity.IdCardBackUrl = dto.IdCardBackUrl;
+        entity.LicenseBackImageUrl = dto.LicenseBackImageUrl;
+        entity.IdCardExpiryDate = dto.IdCardExpiryDate?.ToUniversalTime();
+        entity.LicenseExpiryDate = dto.LicenseExpiryDate?.ToUniversalTime();
 
         await _repository.UpdateAsync(entity, cancellationToken);
 
@@ -135,6 +157,10 @@ public class DriverService : IDriverService
             PhotoUrl = _s3StorageService.GetPresignedUrl(entity.PhotoUrl),
             IdCardFrontUrl = _s3StorageService.GetPresignedUrl(entity.IdCardFrontUrl),
             LicenseImageUrl = _s3StorageService.GetPresignedUrl(entity.LicenseImageUrl),
+            IdCardBackUrl = _s3StorageService.GetPresignedUrl(entity.IdCardBackUrl),
+            LicenseBackImageUrl = _s3StorageService.GetPresignedUrl(entity.LicenseBackImageUrl),
+            IdCardExpiryDate = entity.IdCardExpiryDate,
+            LicenseExpiryDate = entity.LicenseExpiryDate,
             CreatedAt = entity.CreatedAt
         };
     }
@@ -148,7 +174,7 @@ public class DriverService : IDriverService
         {
             entity.Status = parsedStatus;
             await _repository.UpdateAsync(entity, cancellationToken);
-            // If the driver is banned (or inactive), they should be kicked out of any vehicle they are assigned to
+            
             if (parsedStatus == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned || 
                 parsedStatus == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive)
             {

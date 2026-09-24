@@ -191,6 +191,33 @@ public class BookingController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("{id:guid}/approve")]
+    [ProducesResponseType(typeof(BookingDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<BookingDto>> Approve(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var approvedBy = _currentUser.UserId ?? Guid.Empty;
+        var item = await _service.ApproveAsync(id, approvedBy, cancellationToken);
+        return Ok(item);
+    }
+
+    [HttpPost("{id:guid}/reject")]
+    [ProducesResponseType(typeof(BookingDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<BookingDto>> Reject(
+        Guid id,
+        [FromBody] CancelBookingDto? dto,
+        CancellationToken cancellationToken)
+    {
+        var reason = dto?.Reason ?? "Dispatcher rejected";
+        var item = await _service.RejectAsync(id, reason, cancellationToken);
+        return Ok(item);
+    }
+
 
     /// <summary>
     /// NXP-049: Gán/Điều phối Tài xế, Xe đầu kéo, Container cho Booking và chuyển sang trạng thái Ready
@@ -225,6 +252,7 @@ public class BookingController : ControllerBase
             return carrierId;
         }
 
-        return Guid.Parse("c1010101-0000-0000-0000-000000000001");
+        // Dùng CarrierId khớp với Frontend (Vito Logistics) để test dễ dàng
+        return Guid.Parse("d5683608-2134-44a2-94bc-91ee3805bdc0");
     }
 }

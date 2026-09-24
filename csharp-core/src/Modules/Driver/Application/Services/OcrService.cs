@@ -61,7 +61,26 @@ public class OcrService : IOcrService
             }
         }
 
-        if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(idNumber))
+        string side = "front";
+        if (text.Contains("Đặc điểm nhận dạng") || text.Contains("Ngón trỏ trái") || text.Contains("Ngón trỏ phải") || text.Contains("CỤC TRƯỞNG CỤC CẢNH SÁT") || text.Contains("Đặc điểm nhân dạng") || text.Contains("Vân tay"))
+        {
+            side = "back";
+        }
+        else if (text.Contains("CĂN CƯỚC CÔNG DÂN") || text.Contains("SOCIALIST REPUBLIC") || text.Contains("CĂN CƯỚC"))
+        {
+            side = "front";
+        }
+
+        // Extract Date (Dob or Expiry)
+        string? expiryDate = null;
+        var dateMatches = Regex.Matches(textNoSpaces, @"\d{2}[/.\-]\d{2}[/.\-]\d{4}");
+        if (dateMatches.Count > 0)
+        {
+            // The last date on the front is usually expiry date
+            expiryDate = dateMatches.Last().Value;
+        }
+
+        if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(idNumber) && side != "back")
         {
             return null;
         }
@@ -70,7 +89,9 @@ public class OcrService : IOcrService
         {
             Id = idNumber,
             Name = name,
-            FaceImageBytes = faceBytes
+            ExpiryDate = expiryDate,
+            FaceImageBytes = faceBytes,
+            Side = side
         };
     }
 
@@ -104,7 +125,25 @@ public class OcrService : IOcrService
             }
         }
 
-        if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(idNumber))
+        string side = "front";
+        // Detection for Driver License back
+        if (text.Contains("Các loại xe") || text.Contains("được phép điều khiển") || text.Contains("CƠ QUAN CẤP") || text.Contains("Ngày trúng tuyển") || text.Contains("hạng"))
+        {
+            side = "back";
+        }
+        else if (text.Contains("GIẤY PHÉP LÁI XE") || text.Contains("DRIVER'S LICENSE") || text.Contains("MỘT SỐ QUY ĐỊNH"))
+        {
+            side = "front";
+        }
+
+        string? expiryDate = null;
+        var dateMatches = Regex.Matches(textNoSpaces, @"\d{2}[/.\-]\d{2}[/.\-]\d{4}");
+        if (dateMatches.Count > 0)
+        {
+            expiryDate = dateMatches.Last().Value;
+        }
+
+        if (string.IsNullOrEmpty(name) && string.IsNullOrEmpty(idNumber) && side != "back")
         {
             return null;
         }
@@ -113,7 +152,9 @@ public class OcrService : IOcrService
         {
             Id = idNumber,
             Name = name,
-            FaceImageBytes = faceBytes
+            ExpiryDate = expiryDate,
+            FaceImageBytes = faceBytes,
+            Side = side
         };
     }
 
@@ -284,7 +325,9 @@ public class OcrRecognitionResponse
     public string? Dob { get; set; }
     public string? Sex { get; set; }
     public string? Address { get; set; }
+    public string? ExpiryDate { get; set; }
     public byte[]? FaceImageBytes { get; set; }
+    public string Side { get; set; } = "front";
 }
 
 public class OcrVehicleRegistrationResponse

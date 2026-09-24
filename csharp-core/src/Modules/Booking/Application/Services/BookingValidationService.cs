@@ -64,7 +64,7 @@ public class BookingValidationService : IBookingValidationService
                     AddError(nameof(dto.DriverId), $"Driver '{driver.FullName}' does not belong to the specified Transport Company (Carrier).");
                 }
 
-                if (driver.Status != NexusPort.Modules.Driver.Domain.Enums.DriverStatus.active)
+                if (driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive || driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned)
                 {
                     AddError(nameof(dto.DriverId), $"Driver '{driver.FullName}' is currently not active (Status: {driver.Status}).");
                 }
@@ -89,7 +89,7 @@ public class BookingValidationService : IBookingValidationService
                     AddError(nameof(dto.TruckId), $"Vehicle '{truck.PlateNumber}' does not belong to the specified Transport Company (Carrier).");
                 }
 
-                if (truck.Status != NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.active)
+                if (truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.inactive || truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.maintenance)
                 {
                     AddError(nameof(dto.TruckId), $"Vehicle '{truck.PlateNumber}' is currently not active (Status: {truck.Status}).");
                 }

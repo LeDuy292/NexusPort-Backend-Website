@@ -108,9 +108,11 @@ public class DriverController : ControllerBase
                 dob = data?.Dob,
                 sex = data?.Sex,
                 address = data?.Address,
+                expiryDate = data?.ExpiryDate,
                 faceImageUrl = faceUrl,
                 photoUrl = faceUrl,
-                idCardFrontUrl = idCardFrontUrl
+                idCardFrontUrl = idCardFrontUrl,
+                side = data?.Side
             });
         }
         catch (Exception ex)
@@ -183,15 +185,50 @@ public class DriverController : ControllerBase
                 fullName = data?.Name,
                 dob = data?.Dob,
                 licenseNumber = data?.Id,
+                expiryDate = data?.ExpiryDate,
                 licenseImageUrl = licenseImageUrl,
                 faceImageUrl = faceUrl,
-                photoUrl = faceUrl
+                photoUrl = faceUrl,
+                side = data?.Side
             });
         }
         catch (Exception ex)
         {
             Console.WriteLine("EXTRACT GPLX S3 ERROR: " + ex.ToString());
-            return StatusCode(500, new { message = $"Lỗi tải ảnh lên AWS S3: {ex.Message}" });
+            return StatusCode(500, new { message = "Upload/OCR process failed. Please try again or fill manually." });
+        }
+    }
+
+    [HttpPost("upload-document-back")]
+    [Consumes("multipart/form-data")]
+    public async Task<IActionResult> UploadDocumentBack(IFormFile image, CancellationToken cancellationToken)
+    {
+        if (image == null || image.Length == 0)
+            return BadRequest(new { message = "No image file provided." });
+
+        try
+        {
+            string url = string.Empty;
+            using (var uploadStream = image.OpenReadStream())
+            {
+                url = await _s3StorageService.UploadFileAsync(
+                    uploadStream, 
+                    image.FileName, 
+                    image.ContentType, 
+                    "drivers",
+                    cancellationToken);
+            }
+
+            return Ok(new
+            {
+                success = true,
+                imageUrl = url
+            });
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("UPLOAD DOCUMENT BACK ERROR: " + ex.ToString());
+            return StatusCode(500, new { message = "Upload process failed." });
         }
     }
 

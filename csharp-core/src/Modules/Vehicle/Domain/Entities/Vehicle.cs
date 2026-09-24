@@ -1,5 +1,6 @@
 using NexusPort.Shared.Kernel;
 using NexusPort.Modules.Vehicle.Domain.Enums;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace NexusPort.Modules.Vehicle.Domain.Entities;
 
@@ -14,6 +15,9 @@ public class Vehicle : BaseEntity, IAggregateRoot
     public string? Description { get; set; }
     public string? RegistrationImageUrl { get; set; }
     public string? PhotoUrl { get; set; }
+    
+    [Column("current_location")]
+    public string? CurrentLocation { get; set; }
 
     public Vehicle() { }
 
