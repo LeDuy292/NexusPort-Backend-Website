@@ -12,5 +12,9 @@ public interface IYardTaskService
     Task<YardTaskDto> ReceiveContainerAtYardAsync(YardReceivingInspectionDto dto, string userId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<YardOperatorDto>> GetAvailableOperatorsAsync(CancellationToken cancellationToken = default);
     Task<YardTaskDto> CreateTaskAsync(CreateYardTaskDto dto, CancellationToken cancellationToken = default);
+    Task<YardTaskDto> CreateRelocationTaskAsync(CreateRelocationTaskDto dto, string createdBy, CancellationToken cancellationToken = default);
+    Task<ValidateSlotResponseDto> ValidateTargetSlotAsync(ValidateSlotRequestDto dto, CancellationToken cancellationToken = default);
+    Task<CalculateShiftingFeeResponseDto> CalculateShiftingFeeAsync(CalculateShiftingFeeRequestDto dto, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<YardTaskDto>> GetRelocationTasksAsync(string? status, CancellationToken cancellationToken = default);
     Task EnsureSeedTasksAsync(CancellationToken cancellationToken = default);
 }

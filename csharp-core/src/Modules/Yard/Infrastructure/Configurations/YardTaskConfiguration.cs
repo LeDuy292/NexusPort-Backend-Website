@@ -27,6 +27,8 @@ public class YardTaskConfiguration : IEntityTypeConfiguration<YardTask>
         builder.Property(x => x.Priority).IsRequired().HasMaxLength(30);
         builder.Property(x => x.Status).IsRequired().HasMaxLength(50);
         builder.Property(x => x.AssignedBy).HasMaxLength(150);
+        builder.Property(x => x.InternalFee).HasPrecision(12, 2);
+        builder.Property(x => x.ShiftingReason).HasMaxLength(250);
         builder.Property(x => x.Notes).HasMaxLength(500);
 
         builder.HasIndex(x => x.TaskCode);
