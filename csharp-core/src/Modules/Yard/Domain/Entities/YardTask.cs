@@ -35,6 +35,8 @@ public class YardTask : BaseEntity, IAggregateRoot
     public DateTime? ReceivedAt { get; set; }
     public string? ReceivedBy { get; set; }
     public string? CompletedLocation { get; set; }
+    public decimal? InternalFee { get; set; }
+    public string? ShiftingReason { get; set; }
     public string? Notes { get; set; }
 
     public YardTask() { }
@@ -53,7 +55,9 @@ public class YardTask : BaseEntity, IAggregateRoot
         string? vehiclePlate = null,
         string? driverName = null,
         DateTime? dueTime = null,
-        string? notes = null)
+        string? notes = null,
+        decimal? internalFee = null,
+        string? shiftingReason = null)
     {
         TaskCode = taskCode;
         ContainerNo = containerNo;
@@ -69,5 +73,7 @@ public class YardTask : BaseEntity, IAggregateRoot
         DriverName = driverName;
         DueTime = dueTime;
         Notes = notes;
+        InternalFee = internalFee;
+        ShiftingReason = shiftingReason;
     }
 }

@@ -251,6 +251,62 @@ public class YardTaskService : IYardTaskService
         {
             container.Status = "Stacked";
             container.Description = $"Lưu tại bãi {task.BlockCode} vị trí {task.CompletedLocation}";
+
+            // Cập nhật vị trí bãi yard_slots & container_positions
+            try
+            {
+                // Giải phóng slot cũ
+                var currentPos = await _context.Set<ContainerPosition>()
+                    .FirstOrDefaultAsync(cp => cp.ContainerId == container.Id && cp.IsCurrent, cancellationToken);
+                if (currentPos != null)
+                {
+                    currentPos.IsCurrent = false;
+                    currentPos.RemovedAt = DateTime.UtcNow;
+                    await _context.Database.ExecuteSqlInterpolatedAsync(
+                        $"UPDATE yard_slots SET status = 'empty'::yard_slot_status WHERE id = {currentPos.SlotId}", cancellationToken);
+                }
+
+                if (!string.IsNullOrWhiteSpace(task.FromLocation))
+                {
+                    var (fromBlockCode, fromBay, fromRow, fromTier) = ParseSlotLocation(task.FromLocation);
+                    var fromBlock = await FindBlockByCodeAsync(fromBlockCode, cancellationToken);
+                    if (fromBlock != null)
+                    {
+                        var fromSlot = await _context.Set<YardSlot>()
+                            .FirstOrDefaultAsync(s => s.YardBlockId == fromBlock.Id && s.Bay == fromBay && s.Row == fromRow && s.Tier == fromTier, cancellationToken);
+                        if (fromSlot != null)
+                        {
+                            await _context.Database.ExecuteSqlInterpolatedAsync(
+                                $"UPDATE yard_slots SET status = 'empty'::yard_slot_status WHERE id = {fromSlot.Id}", cancellationToken);
+                        }
+                    }
+                }
+
+                // Chiếm slot mới
+                var targetLoc = task.CompletedLocation ?? task.ToLocation;
+                if (!string.IsNullOrWhiteSpace(targetLoc))
+                {
+                    var (toBlockCode, toBay, toRow, toTier) = ParseSlotLocation(targetLoc);
+                    var toBlock = await FindBlockByCodeAsync(toBlockCode, cancellationToken);
+                    if (toBlock != null)
+                    {
+                        var toSlot = await _context.Set<YardSlot>()
+                            .FirstOrDefaultAsync(s => s.YardBlockId == toBlock.Id && s.Bay == toBay && s.Row == toRow && s.Tier == toTier, cancellationToken);
+                        if (toSlot != null)
+                        {
+                            await _context.Database.ExecuteSqlInterpolatedAsync(
+                                $"UPDATE yard_slots SET status = 'occupied'::yard_slot_status WHERE id = {toSlot.Id}", cancellationToken);
+
+                            var newPos = new ContainerPosition(container.Id, toSlot.Id);
+                            await _context.Set<ContainerPosition>().AddAsync(newPos, cancellationToken);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not sync yard_slots/container_positions for task {TaskId}", task.Id);
+            }
         }
 
         // Save Yard Operation History Event
@@ -269,16 +325,28 @@ public class YardTaskService : IYardTaskService
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        // Send Realtime Notification to Driver & Dispatcher (NXP-044)
+        int durationMinutes = task.StartTime.HasValue 
+            ? (int)Math.Max(1, (task.EndTime.Value - task.StartTime.Value).TotalMinutes) 
+            : 0;
+
+        // Send Realtime Notification to Driver, Operator & Dispatcher (NXP-044 / NXP-119)
         try
         {
+            var isRelocate = string.Equals(task.OperationType, "Relocate", StringComparison.OrdinalIgnoreCase);
+            var title = isRelocate
+                ? $"Hoàn thành chuyển container {task.ContainerNo} sang Block {task.BlockCode}"
+                : $"Hoàn thành cẩu container {task.ContainerNo}";
+            var message = isRelocate
+                ? $"Lệnh {task.TaskCode}: Container {task.ContainerNo} đã được chuyển an toàn từ {task.FromLocation} đến {task.CompletedLocation} (Block {task.BlockCode}) lúc {task.EndTime:HH:mm dd/MM/yyyy}. Thời gian thực hiện: {durationMinutes} phút. Phí: {task.InternalFee?.ToString("N0") ?? "0"} VND. Thiết bị {task.EquipmentCode ?? "RTG"} đã được giải phóng."
+                : $"Container {task.ContainerNo} đã được cẩu hạ bãi an toàn tại {task.CompletedLocation} (Block {task.BlockCode}) lúc {task.EndTime:HH:mm dd/MM/yyyy}. Thiết bị {task.EquipmentCode} đã được giải phóng.";
+
             await _notificationService.SendAsync(new SendNotificationDto
             {
-                RecipientId = task.DriverId ?? Guid.Empty,
+                RecipientId = task.OperatorId ?? task.DriverId ?? Guid.Empty,
                 Type = NotificationType.YardOperationCompleted,
                 Severity = NotificationSeverity.Success,
-                Title = $"Hoàn thành cẩu container {task.ContainerNo}",
-                Message = $"Container {task.ContainerNo} đã được cẩu hạ bãi an toàn tại {task.CompletedLocation} (Block {task.BlockCode}) lúc {task.EndTime:HH:mm dd/MM/yyyy}. Thiết bị {task.EquipmentCode} đã được giải phóng.",
+                Title = title,
+                Message = message,
                 ReferenceId = task.TaskCode
             }, cancellationToken);
         }
@@ -470,13 +538,369 @@ public class YardTaskService : IYardTaskService
         return MapToDto(task);
     }
 
+    /// <summary>NXP-119: Tạo lệnh chuyển container giữa các Block</summary>
+    public async Task<YardTaskDto> CreateRelocationTaskAsync(CreateRelocationTaskDto dto, string createdBy, CancellationToken cancellationToken = default)
+    {
+        await EnsureTableAndSeedAsync(cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(dto.ContainerNo))
+        {
+            throw new ValidationException("ContainerNo", "Mã Container không được để trống.");
+        }
+        if (string.IsNullOrWhiteSpace(dto.ToLocation))
+        {
+            throw new ValidationException("ToLocation", "Vị trí đích không được để trống.");
+        }
+
+        var cleanContainerNo = dto.ContainerNo.Trim().ToUpperInvariant();
+
+        // 1. Tìm container trong DB nếu có
+        var container = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+            .FirstOrDefaultAsync(c => c.ContainerNumber.ToUpper() == cleanContainerNo, cancellationToken);
+
+        // 2. Xác định vị trí gốc nếu chưa có
+        string fromLocation = dto.FromLocation?.Trim() ?? string.Empty;
+        string sourceBlock = dto.SourceBlockCode?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(fromLocation) && container != null)
+        {
+            var currentPosition = await _context.Set<ContainerPosition>()
+                .Include(cp => cp.Slot)
+                .ThenInclude(s => s.Block)
+                .FirstOrDefaultAsync(cp => cp.ContainerId == container.Id && cp.IsCurrent, cancellationToken);
+
+            if (currentPosition?.Slot != null)
+            {
+                var blockCode = currentPosition.Slot.Block?.Code ?? "A01";
+                fromLocation = $"{blockCode}-{currentPosition.Slot.Bay:D2}-{currentPosition.Slot.Row:D2}-{currentPosition.Slot.Tier}";
+                if (string.IsNullOrWhiteSpace(sourceBlock))
+                {
+                    sourceBlock = blockCode;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(fromLocation))
+        {
+            fromLocation = "A01-01-01-1";
+            sourceBlock = "A01";
+        }
+
+        // 3. Validate Target Slot
+        var validationResult = await ValidateTargetSlotAsync(new ValidateSlotRequestDto
+        {
+            TargetLocation = dto.ToLocation,
+            ContainerNo = cleanContainerNo,
+            ContainerType = dto.ContainerType ?? container?.CargoType ?? "40FT HC"
+        }, cancellationToken);
+
+        if (!validationResult.IsValid)
+        {
+            throw new ValidationException("ToLocation", $"Vị trí đích [{dto.ToLocation}] không hợp lệ: {validationResult.Message}");
+        }
+
+        // 4. Tính chi phí di chuyển nội bộ
+        decimal internalFee = dto.InternalFee ?? 0;
+        if (dto.InternalFee == null)
+        {
+            var feeCalc = await CalculateShiftingFeeAsync(new CalculateShiftingFeeRequestDto
+            {
+                ContainerNo = cleanContainerNo,
+                ContainerType = dto.ContainerType ?? container?.CargoType ?? "40FT HC",
+                ShiftingReason = dto.ShiftingReason,
+                IsBillable = dto.IsBillable
+            }, cancellationToken);
+            internalFee = feeCalc.Fee;
+        }
+
+        // 5. Sinh mã lệnh
+        var randomSuffix = new Random().Next(1000, 9999);
+        var taskCode = $"REL-{DateTime.UtcNow:yyyyMMdd}-{randomSuffix}";
+
+        string targetBlock = !string.IsNullOrWhiteSpace(dto.TargetBlockCode) 
+            ? dto.TargetBlockCode 
+            : validationResult.BlockCode;
+        if (string.IsNullOrWhiteSpace(targetBlock)) targetBlock = "B02";
+
+        var task = new YardTask(
+            taskCode: taskCode,
+            containerNo: cleanContainerNo,
+            blockCode: targetBlock,
+            operationType: "Relocate",
+            fromLocation: fromLocation,
+            toLocation: dto.ToLocation.Trim(),
+            priority: string.IsNullOrWhiteSpace(dto.Priority) ? "Normal" : dto.Priority,
+            status: dto.EquipmentId.HasValue ? "Ready" : "Assigned",
+            containerType: dto.ContainerType ?? "40FT HC",
+            cargoType: container?.Description ?? "Hàng Khô",
+            dueTime: DateTime.UtcNow.AddHours(2),
+            notes: dto.Notes,
+            internalFee: internalFee,
+            shiftingReason: dto.ShiftingReason ?? "Tái cơ cấu xếp bãi"
+        );
+
+        task.ContainerId = container?.Id;
+        task.AssignedBy = string.IsNullOrWhiteSpace(createdBy) ? "Operator - Điều Phối Bãi" : createdBy;
+        task.AssignedAt = DateTime.UtcNow;
+
+        // Gán thiết bị nếu có
+        if (dto.EquipmentId.HasValue)
+        {
+            var eq = await _context.Set<NexusPort.Modules.Equipment.Domain.Entities.Equipment>()
+                .FindAsync(new object[] { dto.EquipmentId.Value }, cancellationToken);
+            if (eq != null)
+            {
+                task.EquipmentId = eq.Id;
+                task.EquipmentCode = eq.EquipmentCode;
+                task.EquipmentType = eq.EquipmentType;
+            }
+        }
+        if (dto.OperatorId.HasValue)
+        {
+            task.OperatorId = dto.OperatorId.Value;
+            task.OperatorName = dto.OperatorName ?? "Cần Thủ Ca Trực";
+        }
+
+        await _context.Set<YardTask>().AddAsync(task, cancellationToken);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Gửi thông báo cho Operator & Dispatcher
+        try
+        {
+            await _notificationService.SendAsync(new SendNotificationDto
+            {
+                RecipientId = dto.OperatorId ?? Guid.Empty,
+                Type = NotificationType.YardOperationCompleted,
+                Severity = NotificationSeverity.Info,
+                Title = $"Lệnh chuyển container mới: {task.TaskCode}",
+                Message = $"Lệnh chuyển container {task.ContainerNo} từ {task.FromLocation} sang {task.ToLocation} đã được tạo. Ưu tiên: {task.Priority}. Lý do: {task.ShiftingReason}.",
+                ReferenceId = task.TaskCode
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not send relocation task creation notification for {TaskCode}", task.TaskCode);
+        }
+
+        // Publish broker event
+        try
+        {
+            await _messageBroker.PublishAsync("dispatcher.status.updated", new DispatcherStatusUpdatedEvent(
+                Guid.NewGuid(), "yard_task", task.Id.ToString(), task.Status, DateTime.UtcNow,
+                Label: $"Tạo lệnh chuyển container {task.ContainerNo}: {task.FromLocation} ➔ {task.ToLocation}"), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not publish realtime relocation task creation event for {TaskCode}", task.TaskCode);
+        }
+
+        return MapToDto(task);
+    }
+
+    /// <summary>NXP-119: Kiểm tra Slot đích (Trọng lực, Sức chứa, Trạng thái)</summary>
+    public async Task<ValidateSlotResponseDto> ValidateTargetSlotAsync(ValidateSlotRequestDto dto, CancellationToken cancellationToken = default)
+    {
+        await EnsureTableAndSeedAsync(cancellationToken);
+
+        var response = new ValidateSlotResponseDto
+        {
+            TargetLocation = dto.TargetLocation,
+            IsValid = true,
+            Message = "Vị trí đích hợp lệ và sẵn sàng tiếp nhận container.",
+            Warnings = new List<string>()
+        };
+
+        if (string.IsNullOrWhiteSpace(dto.TargetLocation))
+        {
+            response.IsValid = false;
+            response.Message = "Vị trí đích không được để trống.";
+            return response;
+        }
+
+        var (blockCode, bay, row, tier) = ParseSlotLocation(dto.TargetLocation);
+        response.BlockCode = blockCode;
+        response.Bay = bay;
+        response.Row = row;
+        response.Tier = tier;
+
+        if (bay <= 0 || row <= 0 || tier <= 0)
+        {
+            response.IsValid = false;
+            response.Message = "Định dạng tọa độ bãi không hợp lệ (Mẫu: Block-Bay-Row-Tier, ví dụ: B02-04-01-2).";
+            return response;
+        }
+
+        // Tìm Block
+        var block = await FindBlockByCodeAsync(blockCode, cancellationToken);
+        if (block == null)
+        {
+            block = await _context.Set<YardBlock>().FirstOrDefaultAsync(b => b.Code.StartsWith(blockCode) || blockCode.StartsWith(b.Code), cancellationToken);
+        }
+
+        if (block != null)
+        {
+            response.BlockCode = block.Code;
+
+            // Tìm Slot trong DB
+            var slot = await _context.Set<YardSlot>()
+                .FirstOrDefaultAsync(s => s.YardBlockId == block.Id && s.Bay == bay && s.Row == row && s.Tier == tier, cancellationToken);
+
+            if (slot != null)
+            {
+                response.SlotStatus = slot.Status;
+                if (slot.Status.ToLower() == "occupied")
+                {
+                    response.IsValid = false;
+                    response.Message = $"Slot [{dto.TargetLocation}] đã có container chiếm chỗ!";
+                    return response;
+                }
+                if (slot.Status.ToLower() == "maintenance")
+                {
+                    response.IsValid = false;
+                    response.Message = $"Slot [{dto.TargetLocation}] đang bảo trì kỹ thuật!";
+                    return response;
+                }
+                if (slot.Status.ToLower() == "reserved")
+                {
+                    response.IsValid = false;
+                    response.Message = $"Slot [{dto.TargetLocation}] đã được đặt chỗ trước!";
+                    return response;
+                }
+            }
+
+            // Kiểm tra Quy tắc Trọng Lực (Gravity Rule): Nếu Tier > 1, kiểm tra Tier - 1
+            if (tier > 1)
+            {
+                var lowerSlot = await _context.Set<YardSlot>()
+                    .FirstOrDefaultAsync(s => s.YardBlockId == block.Id && s.Bay == bay && s.Row == row && s.Tier == tier - 1, cancellationToken);
+
+                if (lowerSlot != null && lowerSlot.Status.ToLower() != "occupied")
+                {
+                    response.GravitySatisfied = false;
+                    response.Warnings.Add($"Cảnh báo trọng lực: Tầng dưới (Tier {tier - 1}) hiện đang trống ({lowerSlot.Status}). Container nên được xếp từ tầng dưới lên.");
+                }
+            }
+        }
+        else
+        {
+            // Block chưa khai báo trong DB nhưng cho phép nếu tọa độ hợp lệ
+            if (tier > 5)
+            {
+                response.IsValid = false;
+                response.Message = $"Tầng cẩu (Tier {tier}) vượt quá chiều cao an toàn tối đa cho phép (Tối đa 5 tầng).";
+                return response;
+            }
+        }
+
+        return response;
+    }
+
+    /// <summary>NXP-119: Tính chi phí di chuyển nội bộ nếu có</summary>
+    public Task<CalculateShiftingFeeResponseDto> CalculateShiftingFeeAsync(CalculateShiftingFeeRequestDto dto, CancellationToken cancellationToken = default)
+    {
+        // Nghiệp vụ tính phí chuyển bãi:
+        // - Yêu cầu từ Hãng tàu/Khách hàng (Billable): 20FT = 350,000 VND, 40FT/45FT = 550,000 VND
+        // - Nội bộ cảng (Housekeeping, tái cơ cấu bãi, chuẩn bị cẩu dỡ): 0 VND (Miễn phí tác nghiệp nội bộ)
+        decimal fee = 0;
+        string desc = "Tác nghiệp đảo chuyển nội bộ cảng (Miễn phí)";
+
+        if (dto.IsBillable || string.Equals(dto.ShiftingReason, "Theo yêu cầu khách hàng", StringComparison.OrdinalIgnoreCase))
+        {
+            var type = dto.ContainerType?.ToUpperInvariant() ?? "40FT";
+            if (type.Contains("20"))
+            {
+                fee = 350000;
+                desc = "Phí đảo chuyển container 20FT theo yêu cầu khách hàng (350.000 VND)";
+            }
+            else
+            {
+                fee = 550000;
+                desc = "Phí đảo chuyển container 40FT/45FT theo yêu cầu khách hàng (550.000 VND)";
+            }
+        }
+
+        return Task.FromResult(new CalculateShiftingFeeResponseDto
+        {
+            Fee = fee,
+            Currency = "VND",
+            Description = desc
+        });
+    }
+
+    /// <summary>NXP-119: Lấy danh sách lệnh di chuyển container giữa các Block</summary>
+    public async Task<IReadOnlyList<YardTaskDto>> GetRelocationTasksAsync(string? status, CancellationToken cancellationToken = default)
+    {
+        await EnsureTableAndSeedAsync(cancellationToken);
+
+        var query = _context.Set<YardTask>()
+            .Where(t => t.OperationType == "Relocate" || t.OperationType.Contains("chuyển") || t.OperationType.Contains("Chuyển") || t.OperationType.Contains("Đảo") || t.OperationType.Contains("Reloc"));
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            query = query.Where(t => t.Status.ToLower() == status.ToLower());
+        }
+
+        var tasks = await query.OrderByDescending(t => t.CreatedAt).ToListAsync(cancellationToken);
+        return tasks.Select(MapToDto).ToList();
+    }
+
     public async Task EnsureSeedTasksAsync(CancellationToken cancellationToken = default)
     {
         await EnsureTableAndSeedAsync(cancellationToken);
     }
 
+    private static (string BlockCode, int Bay, int Row, int Tier) ParseSlotLocation(string location)
+    {
+        if (string.IsNullOrWhiteSpace(location))
+            return (string.Empty, 0, 0, 0);
+
+        // Formats supported: "A01-03-02-1", "A-03-12-2", "B02-04-01-2", "A01-3-2-1"
+        var parts = location.Split(new[] { '-', '_', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 4)
+        {
+            string block = parts[0].Trim().ToUpperInvariant();
+            int.TryParse(parts[1], out int bay);
+            int.TryParse(parts[2], out int row);
+            int.TryParse(parts[3], out int tier);
+            return (block, bay, row, tier);
+        }
+        if (parts.Length == 3)
+        {
+            string block = parts[0].Trim().ToUpperInvariant();
+            int.TryParse(parts[1], out int bay);
+            int.TryParse(parts[2], out int row);
+            return (block, bay, row, 1);
+        }
+        return (location.Trim().ToUpperInvariant(), 1, 1, 1);
+    }
+
+    private async Task<YardBlock?> FindBlockByCodeAsync(string blockCode, CancellationToken cancellationToken)
+    {
+        var cleanCode = blockCode.Trim().ToUpperInvariant();
+        return await _context.Set<YardBlock>()
+            .FirstOrDefaultAsync(b => b.Code.ToUpper() == cleanCode || b.Name.ToUpper().Contains(cleanCode), cancellationToken);
+    }
+
     private static YardTaskDto MapToDto(YardTask t)
     {
+        int? duration = null;
+        if (t.StartTime.HasValue)
+        {
+            var end = t.EndTime ?? DateTime.UtcNow;
+            duration = (int)Math.Max(0, (end - t.StartTime.Value).TotalMinutes);
+        }
+
+        string sourceBlock = t.BlockCode;
+        string targetBlock = t.BlockCode;
+        if (!string.IsNullOrWhiteSpace(t.FromLocation) && t.FromLocation.Contains("-"))
+        {
+            sourceBlock = t.FromLocation.Split('-')[0];
+        }
+        if (!string.IsNullOrWhiteSpace(t.ToLocation) && t.ToLocation.Contains("-"))
+        {
+            targetBlock = t.ToLocation.Split('-')[0];
+        }
+
         return new YardTaskDto
         {
             Id = t.Id,
@@ -511,6 +935,11 @@ public class YardTaskService : IYardTaskService
             ReceivedAt = t.ReceivedAt,
             ReceivedBy = t.ReceivedBy,
             CompletedLocation = t.CompletedLocation,
+            InternalFee = t.InternalFee,
+            ShiftingReason = t.ShiftingReason,
+            DurationMinutes = duration,
+            SourceBlockCode = sourceBlock,
+            TargetBlockCode = targetBlock,
             Notes = t.Notes,
             CreatedAt = t.CreatedAt
         };
@@ -705,6 +1134,8 @@ ALTER TABLE yard_tasks ADD COLUMN IF NOT EXISTS ""Condition"" varchar(50);
 ALTER TABLE yard_tasks ADD COLUMN IF NOT EXISTS ""ReceivedAt"" timestamptz;
 ALTER TABLE yard_tasks ADD COLUMN IF NOT EXISTS ""ReceivedBy"" varchar(150);
 ALTER TABLE yard_tasks ADD COLUMN IF NOT EXISTS ""CompletedLocation"" varchar(100);
+ALTER TABLE yard_tasks ADD COLUMN IF NOT EXISTS ""InternalFee"" numeric(12,2) DEFAULT 0;
+ALTER TABLE yard_tasks ADD COLUMN IF NOT EXISTS ""ShiftingReason"" varchar(250);
 ALTER TABLE yard_tasks ADD COLUMN IF NOT EXISTS ""Notes"" varchar(500);
 ALTER TABLE yard_tasks ADD COLUMN IF NOT EXISTS ""CreatedAt"" timestamptz NOT NULL DEFAULT now();
 ALTER TABLE yard_tasks ADD COLUMN IF NOT EXISTS ""CreatedBy"" varchar(150);
@@ -958,6 +1389,102 @@ CREATE INDEX IF NOT EXISTS ix_yard_tasks_status ON yard_tasks (""Status"");
                         StartTime = DateTime.UtcNow.AddMinutes(-110),
                         EndTime = DateTime.UtcNow.AddMinutes(-100),
                         CompletedLocation = "B02-DG-01-1"
+                    },
+
+                    // [NXP-119]: Lệnh chuyển container giữa các Block
+                    new(
+                        "MOV-1024",
+                        "MSCU1234567",
+                        "B02",
+                        "Relocate",
+                        "A01-03-12-2",
+                        "B02-02-08-3",
+                        "High",
+                        "Assigned",
+                        "40FT HC",
+                        "Hàng May Mặc Tái Cơ Cấu",
+                        null,
+                        null,
+                        DateTime.UtcNow.AddHours(2),
+                        "Chuyển bãi tái cơ cấu xếp tầng",
+                        350000,
+                        "Tái cơ cấu xếp bãi"
+                    )
+                    {
+                        AssignedBy = "Operator - Nguyễn Văn Q"
+                    },
+                    new(
+                        "MOV-1025",
+                        "TEMU8822190",
+                        "B02",
+                        "Relocate",
+                        "B02-01-02-1",
+                        "A01-05-02-1",
+                        "Critical",
+                        "Assigned",
+                        "40FT HC",
+                        "Hàng Xuất Khẩu Khẩn",
+                        null,
+                        null,
+                        DateTime.UtcNow.AddMinutes(45),
+                        "Chuẩn bị xuất cổng khẩn theo booking",
+                        550000,
+                        "Chuẩn bị xuất cổng khẩn"
+                    )
+                    {
+                        AssignedBy = "Operator - Nguyễn Văn Q"
+                    },
+                    new(
+                        "MOV-1022",
+                        "CMAU9918234",
+                        "A01",
+                        "Relocate",
+                        "A01-01-05-3",
+                        "A01-01-01-1",
+                        "Medium",
+                        "In_Progress",
+                        "20FT ST",
+                        "Hàng Bách Hóa",
+                        null,
+                        null,
+                        DateTime.UtcNow.AddHours(1),
+                        "Đảo tầng cẩu bãi giải phóng cont bên dưới",
+                        0,
+                        "Đảo tầng cẩu bãi"
+                    )
+                    {
+                        AssignedBy = "Điều phối viên",
+                        EquipmentCode = "RTG-01",
+                        EquipmentType = "RTG",
+                        OperatorName = "Trần Văn Hùng",
+                        StartTime = DateTime.UtcNow.AddMinutes(-15)
+                    },
+                    new(
+                        "MOV-1020",
+                        "COSU8819201",
+                        "B02",
+                        "Relocate",
+                        "A01-02-04-2",
+                        "B02-03-01-1",
+                        "Normal",
+                        "Completed",
+                        "40FT HC",
+                        "Hàng Công Nghiệp Tiêu Dùng",
+                        null,
+                        null,
+                        DateTime.UtcNow.AddHours(-1),
+                        "Chuyển kho bãi lưu trữ dài hạn",
+                        0,
+                        "Tái cơ cấu xếp bãi"
+                    )
+                    {
+                        AssignedBy = "Operator - Lê Văn Hoàng",
+                        EquipmentCode = "RTG-02",
+                        EquipmentType = "RTG",
+                        OperatorName = "Phạm Văn Cần",
+                        StartTime = DateTime.UtcNow.AddMinutes(-50),
+                        EndTime = DateTime.UtcNow.AddMinutes(-32),
+                        CompletedLocation = "B02-03-01-1"
                     }
                 };
 

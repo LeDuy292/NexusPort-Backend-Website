@@ -116,6 +116,52 @@ public class YardTaskController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
+    /// <summary>NXP-119: Tạo lệnh chuyển container giữa các Block</summary>
+    [HttpPost("relocate")]
+    public async Task<ActionResult<YardTaskDto>> CreateRelocationTask(
+        [FromBody] CreateRelocationTaskDto dto,
+        CancellationToken cancellationToken)
+    {
+        var createdBy = User.FindFirstValue(ClaimTypes.Name) ?? User.FindFirstValue("username") ?? "Operator / Yard Staff";
+        var result = await _taskService.CreateRelocationTaskAsync(dto, createdBy, cancellationToken);
+        return Ok(new
+        {
+            success = true,
+            message = $"Tạo lệnh chuyển container {result.ContainerNo} từ {result.FromLocation} sang {result.ToLocation} thành công!",
+            data = result
+        });
+    }
+
+    /// <summary>NXP-119: Kiểm tra Slot đích (Trọng lực, Sức chứa, Trạng thái)</summary>
+    [HttpPost("validate-slot")]
+    public async Task<ActionResult<ValidateSlotResponseDto>> ValidateSlot(
+        [FromBody] ValidateSlotRequestDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _taskService.ValidateTargetSlotAsync(dto, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>NXP-119: Tính chi phí di chuyển nội bộ nếu có</summary>
+    [HttpPost("calculate-fee")]
+    public async Task<ActionResult<CalculateShiftingFeeResponseDto>> CalculateShiftingFee(
+        [FromBody] CalculateShiftingFeeRequestDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _taskService.CalculateShiftingFeeAsync(dto, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>NXP-119: Lấy danh sách lệnh di chuyển container giữa các Block</summary>
+    [HttpGet("relocate-tasks")]
+    public async Task<ActionResult<IReadOnlyList<YardTaskDto>>> GetRelocationTasks(
+        [FromQuery] string? status,
+        CancellationToken cancellationToken)
+    {
+        var tasks = await _taskService.GetRelocationTasksAsync(status, cancellationToken);
+        return Ok(tasks);
+    }
+
     [HttpPost("seed")]
     public async Task<ActionResult> SeedTasks(CancellationToken cancellationToken)
     {
