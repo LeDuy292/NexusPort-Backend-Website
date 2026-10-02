@@ -13,13 +13,17 @@ describe('ISO 6346 container validation', () => {
     expect(isValidIso6346('ABC123')).toBe(false);
   });
 
-  it('requires container type and seal number when registering', () => {
+  it('requires container type but keeps visit-specific seal optional when registering', () => {
     const result = createContainerSchema.safeParse({ containerNumber: 'CSQU3054383' });
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(result.error.flatten().fieldErrors.containerTypeId).toBeDefined();
-      expect(result.error.flatten().fieldErrors.sealNumber).toBeDefined();
     }
+
+    expect(createContainerSchema.safeParse({
+      containerNumber: 'CSQU3054383',
+      containerTypeId: 'd151a4ee-1b22-4ff8-9174-0f28cc1a1b3d',
+    }).success).toBe(true);
   });
 });
 

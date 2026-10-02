@@ -1,10 +1,12 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
+import multer from 'multer';
 import { ZodError, ZodSchema } from 'zod';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '../../../shared/errors/app-error';
 import { sendCreated, sendSuccess } from '../../../shared/utils/response';
 import { ContainerService } from '../application/container.service';
 import { ContainerStatusService } from '../application/container-status.service';
+import { ContainerIntakeService } from '../application/container-intake.service';
 import { ContainerSearchDto } from '../application/container.dto';
 import {
   containerSearchSchema, createContainerSchema, idSchema,
@@ -18,7 +20,7 @@ const roleAliases: Record<string, ContainerRole> = {
   administrator: 'Administrator', admin: 'Administrator', dispatcher: 'Dispatcher', operation: 'Dispatcher',
   'yard staff': 'Yard Staff', 'yard operator': 'Yard Staff', yard: 'Yard Staff',
   'gate officer': 'Gate Officer', gate: 'Gate Officer', carrier: 'Carrier',
-  'transport company': 'Carrier', 'transportcompany': 'Carrier'
+  'carrier staff': 'Carrier', 'transport company': 'Carrier', 'transportcompany': 'Carrier'
 };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -74,7 +76,38 @@ export class ContainerController {
   constructor(
     private readonly service = new ContainerService(),
     private readonly statusService = new ContainerStatusService(),
+    private readonly intakeService = new ContainerIntakeService(),
   ) {}
+
+  createPortIntake = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
+    try { sendCreated(res, await this.intakeService.createManual(req.body, 'port_vessel', req.containerUser!.id)); }
+    catch (error) { next(error); }
+  };
+
+  createTransportIntake = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
+    try { sendCreated(res, await this.intakeService.createManual(req.body, 'transport_company', req.containerUser!.id)); }
+    catch (error) { next(error); }
+  };
+
+  importPortExcel = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
+    try { sendSuccess(res, await this.intakeService.importExcel(req.file, 'port_vessel', req.containerUser!.id)); }
+    catch (error) { next(error); }
+  };
+
+  importTransportExcel = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
+    try { sendSuccess(res, await this.intakeService.importExcel(req.file, 'transport_company', req.containerUser!.id)); }
+    catch (error) { next(error); }
+  };
+
+  listImports = async (_req: Request, res: Response, next: NextFunction) => {
+    try { sendSuccess(res, await this.intakeService.listImports()); }
+    catch (error) { next(error); }
+  };
+
+  listTransportDeclarations = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
+    try { sendSuccess(res, await this.intakeService.listTransportDeclarations(req.containerUser!.id)); }
+    catch (error) { next(error); }
+  };
 
   getAll = async (req: Request, res: Response, next: NextFunction) => {
     try { sendSuccess(res, await this.service.getAll(parse(containerSearchSchema, req.query) as ContainerSearchDto)); }
@@ -132,11 +165,21 @@ export class ContainerController {
 export const createContainerRouter = (): Router => {
   const router = Router();
   const controller = new ContainerController();
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+  });
   const readers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer', 'Carrier'];
   const writers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Gate Officer'];
 
   router.use(authenticateContainerUser);
   router.get('/types', allowRoles(...readers), controller.getTypes);
+  router.get('/intake/imports', allowRoles('Administrator', 'Dispatcher'), controller.listImports);
+  router.get('/intake/transport/declarations', allowRoles('Carrier'), controller.listTransportDeclarations);
+  router.post('/intake/port/manual', allowRoles('Administrator', 'Dispatcher'), controller.createPortIntake);
+  router.post('/intake/port/import', allowRoles('Administrator', 'Dispatcher'), upload.single('file'), controller.importPortExcel);
+  router.post('/intake/transport/manual', allowRoles('Carrier'), controller.createTransportIntake);
+  router.post('/intake/transport/import', allowRoles('Carrier'), upload.single('file'), controller.importTransportExcel);
   router.get('/', allowRoles(...readers), controller.getAll);
   router.get('/:id/status/history', allowRoles(...readers), controller.getStatusHistory);
   router.get('/:id/status', allowRoles(...readers), controller.getCurrentStatus);
