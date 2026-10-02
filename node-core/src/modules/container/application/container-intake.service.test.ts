@@ -60,4 +60,45 @@ describe('ContainerIntakeService', () => {
     expect(repository.processRow).not.toHaveBeenCalled();
     expect(repository.saveRowResult).toHaveBeenCalled();
   });
+
+  it.each(['pickup_request', 'truck_dropoff'])('uses one requested service date for %s', async (movementType) => {
+    const repository = {
+      createBatch: jest.fn().mockResolvedValue('batch-3'),
+      processRow: jest.fn().mockResolvedValue({ rowNumber: 2, containerNumber: 'EMCU8361795', status: 'created_visit', errors: [] }),
+      saveRowResult: jest.fn().mockResolvedValue(undefined), completeBatch: jest.fn().mockResolvedValue(undefined),
+      failBatch: jest.fn().mockResolvedValue(undefined), listBatches: jest.fn(),
+    } as unknown as jest.Mocked<ContainerIntakeRepository>;
+    const service = new ContainerIntakeService(repository);
+    const file = buildFile('CongTyVanChuyen', [{
+      container_number: 'EMCU8361795', container_type: '40HC', movement_type: movementType,
+      requested_service_date: '2026-04-04', transport_company_name: 'Demo Logistics',
+      bl_booking_number: 'EXT-BOOKING-01',
+    }]);
+
+    const result = await service.importExcel(file, 'transport_company', userId);
+
+    expect(result).toMatchObject({ successRows: 1, failedRows: 0 });
+    expect(repository.processRow).toHaveBeenCalledWith(expect.objectContaining({
+      movementType, requestedServiceDate: '2026-04-04', blBookingNumber: 'EXT-BOOKING-01',
+    }), userId, 'batch-3', 2);
+  });
+
+  it('requires a requested service date for every transport movement', async () => {
+    const repository = {
+      createBatch: jest.fn().mockResolvedValue('batch-4'), processRow: jest.fn(),
+      saveRowResult: jest.fn().mockResolvedValue(undefined), completeBatch: jest.fn().mockResolvedValue(undefined),
+      failBatch: jest.fn().mockResolvedValue(undefined), listBatches: jest.fn(),
+    } as unknown as jest.Mocked<ContainerIntakeRepository>;
+    const service = new ContainerIntakeService(repository);
+    const file = buildFile('CongTyVanChuyen', [{
+      container_number: 'EMCU8361795', container_type: '40HC', movement_type: 'truck_dropoff',
+      transport_company_name: 'Demo Logistics',
+    }]);
+
+    const result = await service.importExcel(file, 'transport_company', userId);
+
+    expect(result.failedRows).toBe(1);
+    expect(result.rows[0].errors.join(' ')).toContain('requestedServiceDate');
+    expect(repository.processRow).not.toHaveBeenCalled();
+  });
 });

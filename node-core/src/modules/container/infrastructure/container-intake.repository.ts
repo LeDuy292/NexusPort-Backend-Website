@@ -10,7 +10,7 @@ const compactReference = (value: string): string =>
   value.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 45);
 
 const visitReferenceFor = (row: ContainerIntakeRow): string => {
-  const datePart = (row.expectedArrivalAt || row.requestedPickupDate || new Date().toISOString()).slice(0, 10).replace(/-/g, '');
+  const datePart = (row.expectedArrivalAt || row.requestedServiceDate || row.requestedPickupDate || new Date().toISOString()).slice(0, 10).replace(/-/g, '');
   const sourcePart = row.sourceReference ? compactReference(row.sourceReference) : datePart;
   return `${row.sourceType === 'port_vessel' ? 'PORT' : 'TC'}-${row.containerNumber}-${sourcePart}`.slice(0, 100);
 };
@@ -63,6 +63,8 @@ export class ContainerIntakeRepository {
     const client = await getClient();
     try {
       await client.query('BEGIN');
+      const requestedServiceDate = row.requestedServiceDate ?? row.requestedPickupDate ?? null;
+      const legacyRequestedPickupDate = row.movementType === 'pickup_request' ? requestedServiceDate : null;
       const typeResult = await client.query(
         'SELECT id FROM container_types WHERE upper(code) = upper($1) LIMIT 1',
         [row.containerTypeCode],
@@ -111,21 +113,21 @@ export class ContainerIntakeRepository {
           `UPDATE container_visits SET
              source_reference=$2, seal_number=$3, load_status=$4, cargo_type=$5,
              gross_weight_kg=$6, vessel_call_id=$7, expected_arrival_at=$8,
-             expected_available_at=$9, requested_pickup_date=$10, bl_booking_no=$11,
-             customer_name=$12, transport_company_name=$13,
-             data_status=$14, updated_at=now()
+             expected_available_at=$9, requested_service_date=$10, requested_pickup_date=$11,
+             bl_booking_no=$12, customer_name=$13, transport_company_name=$14,
+             data_status=$15, updated_at=now()
            WHERE id=$1 AND (
              source_reference IS DISTINCT FROM $2 OR seal_number IS DISTINCT FROM $3 OR
              load_status IS DISTINCT FROM $4 OR cargo_type IS DISTINCT FROM $5::cargo_type OR
              gross_weight_kg IS DISTINCT FROM $6 OR vessel_call_id IS DISTINCT FROM $7 OR
              expected_arrival_at IS DISTINCT FROM $8 OR expected_available_at IS DISTINCT FROM $9 OR
-             requested_pickup_date IS DISTINCT FROM $10 OR bl_booking_no IS DISTINCT FROM $11 OR
-             customer_name IS DISTINCT FROM $12 OR transport_company_name IS DISTINCT FROM $13 OR
-             data_status IS DISTINCT FROM $14
+             requested_service_date IS DISTINCT FROM $10 OR requested_pickup_date IS DISTINCT FROM $11 OR
+             bl_booking_no IS DISTINCT FROM $12 OR customer_name IS DISTINCT FROM $13 OR
+             transport_company_name IS DISTINCT FROM $14 OR data_status IS DISTINCT FROM $15
            ) RETURNING id`,
           [visitId, row.sourceReference ?? null, row.sealNumber ?? null, row.loadStatus ?? 'unknown', row.cargoType ?? 'general',
            row.grossWeightKg ?? null, vesselCallId, row.expectedArrivalAt ?? null, row.expectedAvailableAt ?? null,
-           row.requestedPickupDate ?? null, row.blBookingNumber ?? null, row.customerName ?? null,
+           requestedServiceDate, legacyRequestedPickupDate, row.blBookingNumber ?? null, row.customerName ?? null,
            row.transportCompanyName ?? null, row.sourceType === 'port_vessel' ? 'verified' : 'pending_verification'],
         );
         status = updated.rows[0] ? 'updated_visit' : 'duplicate';
@@ -136,15 +138,15 @@ export class ContainerIntakeRepository {
              id, visit_reference, container_id, vessel_call_id, visit_status, load_status,
              cargo_type, gross_weight_kg, bl_booking_no, customer_name, transport_company_name,
              source_type, movement_type, data_status, source_reference, seal_number,
-             expected_arrival_at, expected_available_at, requested_pickup_date,
+             expected_arrival_at, expected_available_at, requested_service_date, requested_pickup_date,
              declared_by, import_batch_id, source_row_number
-           ) VALUES ($1,$2,$3,$4,'planned',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
+           ) VALUES ($1,$2,$3,$4,'planned',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
           [visitId, visitReference, container.id, vesselCallId, row.loadStatus ?? 'unknown', row.cargoType ?? 'general',
            row.grossWeightKg ?? null, row.blBookingNumber ?? null, row.customerName ?? null,
            row.transportCompanyName ?? null, row.sourceType, row.movementType,
            row.sourceType === 'port_vessel' ? 'verified' : 'pending_verification', row.sourceReference ?? null,
            row.sealNumber ?? null, row.expectedArrivalAt ?? null, row.expectedAvailableAt ?? null,
-           row.requestedPickupDate ?? null, userId, batchId ?? null, rowNumber ?? null],
+           requestedServiceDate, legacyRequestedPickupDate, userId, batchId ?? null, rowNumber ?? null],
         );
         status = createdMaster ? 'created_master' : 'created_visit';
       }
@@ -178,13 +180,15 @@ export class ContainerIntakeRepository {
               cv.movement_type AS "movementType", cv.data_status AS "dataStatus",
               cv.seal_number AS "sealNumber", cv.load_status AS "loadStatus",
               cv.cargo_type AS "cargoType", cv.gross_weight_kg AS "grossWeightKg",
-              cv.requested_pickup_date AS "requestedPickupDate",
+              COALESCE(cv.requested_service_date, cv.requested_pickup_date) AS "requestedServiceDate",
               cv.bl_booking_no AS "blBookingNumber", cv.customer_name AS "customerName",
               cv.transport_company_name AS "transportCompanyName",
+              cv.booking_id AS "bookingId", b.booking_code AS "bookingCode",
               cv.created_at AS "createdAt", cv.updated_at AS "updatedAt"
          FROM container_visits cv
          JOIN containers c ON c.id = cv.container_id
          JOIN container_types ct ON ct.id = c.container_type_id
+         LEFT JOIN bookings b ON b.id = cv.booking_id
         WHERE cv.source_type = 'transport_company' AND cv.declared_by = $1
         ORDER BY cv.created_at DESC`,
       [userId],

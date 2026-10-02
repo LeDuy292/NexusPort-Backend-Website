@@ -16,6 +16,8 @@ export interface ContainerIntakeRow {
   vesselCallCode?: string | null;
   expectedArrivalAt?: string | null;
   expectedAvailableAt?: string | null;
+  requestedServiceDate?: string | null;
+  /** Legacy input kept so older clients/templates remain compatible. */
   requestedPickupDate?: string | null;
   blBookingNumber?: string | null;
   customerName?: string | null;
@@ -57,8 +59,10 @@ export interface TransportContainerDeclaration {
   loadStatus: 'full' | 'empty' | 'unknown';
   cargoType: CargoType;
   grossWeightKg: number | null;
-  requestedPickupDate: string | null;
+  requestedServiceDate: string | null;
   blBookingNumber: string | null;
+  bookingId: string | null;
+  bookingCode: string | null;
   customerName: string | null;
   transportCompanyName: string | null;
   createdAt: Date;

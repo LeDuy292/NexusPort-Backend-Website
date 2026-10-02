@@ -34,6 +34,7 @@ export const containerIntakeSchema = z.object({
   vesselCallCode: optionalText(80).optional(),
   expectedArrivalAt: optionalDateTime.optional(),
   expectedAvailableAt: optionalDateTime.optional(),
+  requestedServiceDate: optionalDate.optional(),
   requestedPickupDate: optionalDate.optional(),
   blBookingNumber: optionalText(150).optional(),
   customerName: optionalText(250).optional(),
@@ -54,8 +55,8 @@ export const containerIntakeSchema = z.object({
     if (!value.transportCompanyName) {
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['transportCompanyName'], message: 'Phải có tên công ty vận chuyển.' });
     }
-    if (value.movementType === 'pickup_request' && !value.requestedPickupDate) {
-      context.addIssue({ code: z.ZodIssueCode.custom, path: ['requestedPickupDate'], message: 'Yêu cầu nhận Container phải có ngày dự kiến.' });
+    if (!value.requestedServiceDate) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ['requestedServiceDate'], message: 'Phải có ngày mong muốn thực hiện.' });
     }
   }
   if (value.expectedArrivalAt && value.expectedAvailableAt &&

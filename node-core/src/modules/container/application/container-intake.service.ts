@@ -19,7 +19,8 @@ const HEADERS: Record<string, keyof ContainerIntakeRow> = {
   vessel_call_code: 'vesselCallCode', vesselcallcode: 'vesselCallCode', machuyentau: 'vesselCallCode',
   expected_arrival_at: 'expectedArrivalAt', expectedarrivalat: 'expectedArrivalAt', thoigiandenkien: 'expectedArrivalAt',
   expected_available_at: 'expectedAvailableAt', expectedavailableat: 'expectedAvailableAt', thoigiansansangdukien: 'expectedAvailableAt',
-  requested_pickup_date: 'requestedPickupDate', requestedpickupdate: 'requestedPickupDate', ngaymongmuonnhan: 'requestedPickupDate',
+  requested_service_date: 'requestedServiceDate', requestedservicedate: 'requestedServiceDate', ngaymongmuonthuchien: 'requestedServiceDate',
+  requested_pickup_date: 'requestedServiceDate', requestedpickupdate: 'requestedServiceDate', ngaymongmuonnhan: 'requestedServiceDate',
   bl_booking_number: 'blBookingNumber', blbookingnumber: 'blBookingNumber', soblbooking: 'blBookingNumber',
   customer_name: 'customerName', customername: 'customerName', tenkhachhang: 'customerName',
   transport_company_name: 'transportCompanyName', transportcompanyname: 'transportCompanyName', tencongtyvanchuyen: 'transportCompanyName',
@@ -68,11 +69,17 @@ const applyIntakeDefaults = (row: ContainerIntakeRow): ContainerIntakeRow => {
   };
 };
 
+const normalizeLegacyFields = (raw: unknown): Record<string, unknown> => {
+  const row = { ...((raw ?? {}) as Record<string, unknown>) };
+  row.requestedServiceDate = row.requestedServiceDate || row.requestedPickupDate || null;
+  return row;
+};
+
 export class ContainerIntakeService {
   constructor(private readonly repository = new ContainerIntakeRepository()) {}
 
   async createManual(raw: unknown, sourceType: ContainerIntakeSource, userId: string) {
-    const parsed = containerIntakeSchema.safeParse({ ...(raw as object), sourceType });
+    const parsed = containerIntakeSchema.safeParse({ ...normalizeLegacyFields(raw), sourceType });
     if (!parsed.success) {
       const details = parsed.error.issues.reduce<Record<string, string[]>>((result, issue) => {
         const field = issue.path.join('.') || 'request';
@@ -117,15 +124,15 @@ export class ContainerIntakeService {
       for (const [header, value] of Object.entries(raw)) {
         const key = HEADERS[normalizeHeader(header)];
         if (key) {
-          const normalizedValue = ['expectedArrivalAt', 'expectedAvailableAt', 'requestedPickupDate'].includes(key)
-            ? dateValue(value, key === 'requestedPickupDate') : value;
+          const normalizedValue = ['expectedArrivalAt', 'expectedAvailableAt', 'requestedServiceDate', 'requestedPickupDate'].includes(key)
+            ? dateValue(value, ['requestedServiceDate', 'requestedPickupDate'].includes(key)) : value;
           mapped[key] = normalizeEnum(key, normalizedValue);
         }
       }
       mapped.sourceType = sourceType;
       mapped.movementType = sourceType === 'port_vessel' ? 'vessel_discharge' : (mapped.movementType || 'pickup_request');
       const rowNumber = index + 2;
-      const parsed = containerIntakeSchema.safeParse(mapped);
+      const parsed = containerIntakeSchema.safeParse(normalizeLegacyFields(mapped));
       let result: ContainerIntakeResult;
       if (!parsed.success) {
         result = {
