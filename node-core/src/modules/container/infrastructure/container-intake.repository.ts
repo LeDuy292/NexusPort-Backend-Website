@@ -3,7 +3,7 @@ import { getClient, query } from '../../../infrastructure/database/db';
 import { AppError } from '../../../shared/errors/app-error';
 import {
   ContainerImportBatchSummary, ContainerIntakeResult, ContainerIntakeRow,
-  ContainerIntakeSource,
+  ContainerIntakeSource, TransportContainerDeclaration,
 } from '../application/container-intake.dto';
 
 const compactReference = (value: string): string =>
@@ -168,5 +168,27 @@ export class ContainerIntakeRepository {
       [limit],
     );
     return result.rows as ContainerImportBatchSummary[];
+  }
+
+  async listTransportDeclarations(userId: string): Promise<TransportContainerDeclaration[]> {
+    const result = await query(
+      `SELECT cv.id, cv.visit_reference AS "visitReference",
+              cv.source_reference AS "sourceReference", c.id AS "containerId",
+              c.container_no AS "containerNumber", ct.code AS "containerTypeCode",
+              cv.movement_type AS "movementType", cv.data_status AS "dataStatus",
+              cv.seal_number AS "sealNumber", cv.load_status AS "loadStatus",
+              cv.cargo_type AS "cargoType", cv.gross_weight_kg AS "grossWeightKg",
+              cv.requested_pickup_date AS "requestedPickupDate",
+              cv.bl_booking_no AS "blBookingNumber", cv.customer_name AS "customerName",
+              cv.transport_company_name AS "transportCompanyName",
+              cv.created_at AS "createdAt", cv.updated_at AS "updatedAt"
+         FROM container_visits cv
+         JOIN containers c ON c.id = cv.container_id
+         JOIN container_types ct ON ct.id = c.container_type_id
+        WHERE cv.source_type = 'transport_company' AND cv.declared_by = $1
+        ORDER BY cv.created_at DESC`,
+      [userId],
+    );
+    return result.rows as TransportContainerDeclaration[];
   }
 }

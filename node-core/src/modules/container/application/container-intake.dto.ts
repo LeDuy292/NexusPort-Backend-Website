@@ -43,3 +43,24 @@ export interface ContainerImportBatchSummary {
   createdAt: Date;
   completedAt: Date | null;
 }
+
+export interface TransportContainerDeclaration {
+  id: string;
+  visitReference: string;
+  sourceReference: string | null;
+  containerId: string;
+  containerNumber: string;
+  containerTypeCode: string;
+  movementType: ContainerMovementType;
+  dataStatus: 'pending_verification' | 'verified' | 'rejected';
+  sealNumber: string | null;
+  loadStatus: 'full' | 'empty' | 'unknown';
+  cargoType: CargoType;
+  grossWeightKg: number | null;
+  requestedPickupDate: string | null;
+  blBookingNumber: string | null;
+  customerName: string | null;
+  transportCompanyName: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}

@@ -158,4 +158,6 @@ export class ContainerIntakeService {
   }
 
   listImports() { return this.repository.listBatches(); }
+
+  listTransportDeclarations(userId: string) { return this.repository.listTransportDeclarations(userId); }
 }

@@ -104,6 +104,11 @@ export class ContainerController {
     catch (error) { next(error); }
   };
 
+  listTransportDeclarations = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
+    try { sendSuccess(res, await this.intakeService.listTransportDeclarations(req.containerUser!.id)); }
+    catch (error) { next(error); }
+  };
+
   getAll = async (req: Request, res: Response, next: NextFunction) => {
     try { sendSuccess(res, await this.service.getAll(parse(containerSearchSchema, req.query) as ContainerSearchDto)); }
     catch (error) { next(error); }
@@ -170,6 +175,7 @@ export const createContainerRouter = (): Router => {
   router.use(authenticateContainerUser);
   router.get('/types', allowRoles(...readers), controller.getTypes);
   router.get('/intake/imports', allowRoles('Administrator', 'Dispatcher'), controller.listImports);
+  router.get('/intake/transport/declarations', allowRoles('Carrier'), controller.listTransportDeclarations);
   router.post('/intake/port/manual', allowRoles('Administrator', 'Dispatcher'), controller.createPortIntake);
   router.post('/intake/port/import', allowRoles('Administrator', 'Dispatcher'), upload.single('file'), controller.importPortExcel);
   router.post('/intake/transport/manual', allowRoles('Carrier'), controller.createTransportIntake);
