@@ -26,6 +26,8 @@ using NexusPort.Modules.Yard.Application.Services;
 using NexusPort.Modules.Yard.Infrastructure.Repositories;
 using NexusPort.Modules.Gate.Application.Interfaces;
 using NexusPort.Modules.Gate.Application.Services;
+using NexusPort.Modules.Gate.Domain.Rules;
+using NexusPort.Modules.Gate.Domain.Rules.Concrete;
 using NexusPort.Modules.Gate.Infrastructure.Repositories;
 using NexusPort.Modules.Dispatcher.Application.Interfaces;
 using NexusPort.Modules.Dispatcher.Application.Services;
@@ -40,6 +42,9 @@ using NexusPort.Modules.Equipment.Application.Interfaces;
 using NexusPort.Modules.Equipment.Application.Services;
 using NexusPort.Modules.Equipment.Infrastructure.Repositories;
 
+using NexusPort.Infrastructure.Notifications.Interfaces;
+using NexusPort.Infrastructure.Notifications.Services;
+
 namespace NexusPort.Api.Extensions;
 
 public static class ServiceCollectionExtensions
@@ -47,10 +52,18 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddNexusPortInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection") 
-            ?? "Host=localhost;Port=5432;Database=nexusport;Username=postgres;Password=pgadmin4";
+            ?? "Host=localhost;Port=5432;Database=nexusport;Username=postgres;Password=120104";
+
+        var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>("driver_status");
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus>("truck_status");
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingType>("booking_type");
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingStatus>("booking_status");
+
+        var dataSource = dataSourceBuilder.Build();
 
         services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(connectionString));
+            options.UseNpgsql(dataSource));
 
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
@@ -60,6 +73,8 @@ public static class ServiceCollectionExtensions
 
         services.AddScoped<IMessageBrokerService, MessageBrokerService>();
         services.AddScoped<IEmailService, EmailService>();
+        services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IS3StorageService, S3StorageService>();
 
         services.AddAuthentication(options =>
         {
@@ -105,6 +120,7 @@ public static class ServiceCollectionExtensions
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Vehicle.Infrastructure.Configurations.VehicleConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Driver.Infrastructure.Configurations.DriverConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Equipment.Infrastructure.Configurations.EquipmentConfiguration).Assembly);
+        AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Infrastructure.Notifications.Configurations.NotificationConfiguration).Assembly);
 
         // Identity
         services.AddScoped<IIdentityRepository, IdentityRepository>();
@@ -112,6 +128,7 @@ public static class ServiceCollectionExtensions
 
         // Booking
         services.AddScoped<IBookingRepository, BookingRepository>();
+        services.AddScoped<IBookingValidationService, BookingValidationService>();
         services.AddScoped<IBookingService, BookingService>();
 
         // Vessel
@@ -129,10 +146,25 @@ public static class ServiceCollectionExtensions
         // Yard
         services.AddScoped<IYardRepository, YardRepository>();
         services.AddScoped<IYardService, YardService>();
+        services.AddScoped<IYardReceivingService, YardReceivingService>();
+        services.AddScoped<IYardTaskService, YardTaskService>();
 
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();
         services.AddScoped<IGateService, GateService>();
+        services.AddScoped<IGateVerificationRepository, GateVerificationRepository>();
+        services.AddScoped<IGateVerificationService, GateVerificationService>();
+
+        // Gate Rule Engine & Rules (Extensible Pipeline)
+        services.AddScoped<IGateRuleEngine, GateRuleEngine>();
+        services.AddScoped<IGateRule, BookingExistenceAndStatusRule>();
+        services.AddScoped<IGateRule, BookingTimeWindowRule>();
+        services.AddScoped<IGateRule, VehicleMatchAndStatusRule>();
+        services.AddScoped<IGateRule, DriverMatchAndStatusRule>();
+        services.AddScoped<IGateRule, ContainerMatchAndStatusRule>();
+        services.AddScoped<IGateRule, OperationMatchRule>();
+        services.AddScoped<IGateRule, DriverConfirmationRule>();
+        services.AddScoped<IGateRule, BillingAndPaymentStatusRule>();
 
         // Dispatcher
         services.AddScoped<IDispatcherRepository, DispatcherRepository>();
@@ -145,6 +177,7 @@ public static class ServiceCollectionExtensions
         // Driver
         services.AddScoped<IDriverRepository, DriverRepository>();
         services.AddScoped<IDriverService, DriverService>();
+        services.AddHttpClient<IOcrService, OcrService>();
 
         // Equipment
         services.AddScoped<IEquipmentRepository, EquipmentRepository>();

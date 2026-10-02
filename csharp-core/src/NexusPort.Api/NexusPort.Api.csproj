@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.8" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.7.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.8">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -30,6 +31,7 @@
     <ProjectReference Include="..\Modules\Vehicle\NexusPort.Modules.Vehicle.csproj" />
     <ProjectReference Include="..\Modules\Driver\NexusPort.Modules.Driver.csproj" />
     <ProjectReference Include="..\Modules\Equipment\NexusPort.Modules.Equipment.csproj" />
+    <ProjectReference Include="..\Modules\Carrier\NexusPort.Modules.Carrier.csproj" />
   </ItemGroup>
 
 </Project>
