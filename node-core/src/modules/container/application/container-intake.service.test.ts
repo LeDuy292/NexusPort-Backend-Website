@@ -25,6 +25,8 @@ describe('ContainerIntakeService', () => {
     const file = buildFile('Cang_Tau', [{
       container_number: 'EMCU8361795', container_type: '40HC',
       expected_arrival_at: '2026-04-02 16:59', load_status: 'full', cargo_type: 'general', gross_weight_kg: 26493,
+      vessel_call_code: 'LEGACY-VOYAGE', expected_available_at: '2026-04-03 18:00',
+      transport_company_name: 'Không dùng cho nguồn cảng',
     }]);
 
     const result = await service.importExcel(file, 'port_vessel', userId);
@@ -33,7 +35,8 @@ describe('ContainerIntakeService', () => {
     expect(repository.processRow).toHaveBeenCalledWith(expect.objectContaining({
       containerNumber: 'EMCU8361795', containerTypeCode: '40HC', sourceType: 'port_vessel',
       movementType: 'vessel_discharge', expectedArrivalAt: '2026-04-02T09:59:00.000Z',
-      grossWeightKg: 26493,
+      expectedAvailableAt: '2026-04-02T21:59:00.000Z', vesselCallCode: null,
+      transportCompanyName: null, grossWeightKg: 26493,
     }), userId, 'batch-1', 2);
   });
 

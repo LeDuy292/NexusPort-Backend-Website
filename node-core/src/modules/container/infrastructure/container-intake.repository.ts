@@ -81,8 +81,8 @@ export class ContainerIntakeRepository {
         `INSERT INTO containers (
            container_type_id, container_no, cargo_type, status, seal_no, gross_weight_kg,
            is_reefer, is_dangerous, is_perishable, is_oversized
-         ) SELECT $1,$2,$3,'expected',$4,$5,
-                  ct.category='reefer' OR $3='reefer', $3='dangerous', $3='perishable', $3='oversized'
+         ) SELECT $1,$2,$3::cargo_type,'expected',$4,$5,
+                  ct.category='reefer' OR $3::text='reefer', $3::text='dangerous', $3::text='perishable', $3::text='oversized'
              FROM container_types ct WHERE ct.id=$1
          ON CONFLICT (container_no) DO NOTHING RETURNING id`,
         [typeId, row.containerNumber, row.cargoType ?? 'general', row.sealNumber ?? null, row.grossWeightKg ?? null],

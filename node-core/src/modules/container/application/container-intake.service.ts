@@ -55,6 +55,19 @@ const normalizeEnum = (key: keyof ContainerIntakeRow, value: unknown): unknown =
   return value.trim();
 };
 
+const applyIntakeDefaults = (row: ContainerIntakeRow): ContainerIntakeRow => {
+  if (row.sourceType !== 'port_vessel') return row;
+  const expectedAvailableAt = row.expectedArrivalAt
+    ? new Date(new Date(row.expectedArrivalAt).getTime() + 12 * 60 * 60 * 1000).toISOString()
+    : null;
+  return {
+    ...row,
+    vesselCallCode: null,
+    transportCompanyName: null,
+    expectedAvailableAt,
+  };
+};
+
 export class ContainerIntakeService {
   constructor(private readonly repository = new ContainerIntakeRepository()) {}
 
@@ -68,7 +81,7 @@ export class ContainerIntakeService {
       }, {});
       throw new ValidationError('Thông tin tiếp nhận Container không hợp lệ.', details);
     }
-    return this.repository.processRow(parsed.data, userId);
+    return this.repository.processRow(applyIntakeDefaults(parsed.data), userId);
   }
 
   async importExcel(file: Express.Multer.File | undefined, sourceType: ContainerIntakeSource, userId: string) {
@@ -122,7 +135,7 @@ export class ContainerIntakeService {
           errors: parsed.error.issues.map((issue) => `${issue.path.join('.') || 'dòng'}: ${issue.message}`),
         };
       } else {
-        try { result = await this.repository.processRow(parsed.data, userId, batchId, rowNumber); }
+        try { result = await this.repository.processRow(applyIntakeDefaults(parsed.data), userId, batchId, rowNumber); }
         catch (error) {
           result = {
             rowNumber, containerNumber: parsed.data.containerNumber, status: 'rejected',
