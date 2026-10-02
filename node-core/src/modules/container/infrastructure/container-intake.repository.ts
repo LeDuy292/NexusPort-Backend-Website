@@ -65,6 +65,7 @@ export class ContainerIntakeRepository {
       await client.query('BEGIN');
       const requestedServiceDate = row.requestedServiceDate ?? row.requestedPickupDate ?? null;
       const legacyRequestedPickupDate = row.movementType === 'pickup_request' ? requestedServiceDate : null;
+      const dataStatus = row.sourceType === 'port_vessel' ? 'verified' : null;
       const typeResult = await client.query(
         'SELECT id FROM container_types WHERE upper(code) = upper($1) LIMIT 1',
         [row.containerTypeCode],
@@ -128,7 +129,7 @@ export class ContainerIntakeRepository {
           [visitId, row.sourceReference ?? null, row.sealNumber ?? null, row.loadStatus ?? 'unknown', row.cargoType ?? 'general',
            row.grossWeightKg ?? null, vesselCallId, row.expectedArrivalAt ?? null, row.expectedAvailableAt ?? null,
            requestedServiceDate, legacyRequestedPickupDate, row.blBookingNumber ?? null, row.customerName ?? null,
-           row.transportCompanyName ?? null, row.sourceType === 'port_vessel' ? 'verified' : 'pending_verification'],
+           row.transportCompanyName ?? null, dataStatus],
         );
         status = updated.rows[0] ? 'updated_visit' : 'duplicate';
       } else {
@@ -144,7 +145,7 @@ export class ContainerIntakeRepository {
           [visitId, visitReference, container.id, vesselCallId, row.loadStatus ?? 'unknown', row.cargoType ?? 'general',
            row.grossWeightKg ?? null, row.blBookingNumber ?? null, row.customerName ?? null,
            row.transportCompanyName ?? null, row.sourceType, row.movementType,
-           row.sourceType === 'port_vessel' ? 'verified' : 'pending_verification', row.sourceReference ?? null,
+           dataStatus, row.sourceReference ?? null,
            row.sealNumber ?? null, row.expectedArrivalAt ?? null, row.expectedAvailableAt ?? null,
            requestedServiceDate, legacyRequestedPickupDate, userId, batchId ?? null, rowNumber ?? null],
         );
@@ -177,7 +178,7 @@ export class ContainerIntakeRepository {
       `SELECT cv.id, cv.visit_reference AS "visitReference",
               cv.source_reference AS "sourceReference", c.id AS "containerId",
               c.container_no AS "containerNumber", ct.code AS "containerTypeCode",
-              cv.movement_type AS "movementType", cv.data_status AS "dataStatus",
+              cv.movement_type AS "movementType",
               cv.seal_number AS "sealNumber", cv.load_status AS "loadStatus",
               cv.cargo_type AS "cargoType", cv.gross_weight_kg AS "grossWeightKg",
               COALESCE(cv.requested_service_date, cv.requested_pickup_date) AS "requestedServiceDate",

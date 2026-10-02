@@ -54,7 +54,6 @@ export interface TransportContainerDeclaration {
   containerNumber: string;
   containerTypeCode: string;
   movementType: ContainerMovementType;
-  dataStatus: 'pending_verification' | 'verified' | 'rejected';
   sealNumber: string | null;
   loadStatus: 'full' | 'empty' | 'unknown';
   cargoType: CargoType;
