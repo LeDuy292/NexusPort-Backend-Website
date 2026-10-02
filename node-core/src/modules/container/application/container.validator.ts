@@ -30,7 +30,7 @@ const containerNumberSchema = z.string().transform(normalizeContainerNumber).ref
 export const createContainerSchema = z.object({
   containerNumber: containerNumberSchema,
   containerTypeId: z.string().uuid(),
-  sealNumber: z.string().trim().min(1).max(50),
+  sealNumber: z.string().trim().max(50).nullable().optional(),
   carrierId: nullableUuid,
   vesselCallId: nullableUuid,
   cargoType: z.enum(CARGO_TYPES).default('general'),

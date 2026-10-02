@@ -6,7 +6,7 @@ import {
 export interface CreateContainerDto {
   containerNumber: string;
   containerTypeId: string;
-  sealNumber: string;
+  sealNumber?: string | null;
   carrierId?: string | null;
   vesselCallId?: string | null;
   cargoType?: CargoType;
@@ -42,6 +42,17 @@ export interface ContainerListItem extends ContainerEntity {
   category: ContainerCategory;
   carrierName: string | null;
   bookingCount: number;
+  latestVisitReference: string | null;
+  latestVisitStatus: string | null;
+  latestLoadStatus: string | null;
+  latestEirReference: string | null;
+  latestActivity: 'in' | 'out' | null;
+  latestLocationCode: string | null;
+  latestPlateNumber: string | null;
+  latestCheckInAt: Date | null;
+  latestCheckOutAt: Date | null;
+  latestSealNumber: string | null;
+  latestGrossWeightKg: number | null;
 }
 
 export interface ContainerListResult {
