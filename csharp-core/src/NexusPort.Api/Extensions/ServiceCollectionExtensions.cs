@@ -54,8 +54,16 @@ public static class ServiceCollectionExtensions
         var connectionString = configuration.GetConnectionString("DefaultConnection") 
             ?? "Host=localhost;Port=5432;Database=NexusPort;Username=postgres;Password=pgadmin4";
 
+        var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>("driver_status");
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus>("truck_status");
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingType>("booking_type");
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingStatus>("booking_status");
+
+        var dataSource = dataSourceBuilder.Build();
+
         services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(connectionString));
+            options.UseNpgsql(dataSource));
 
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
@@ -66,6 +74,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMessageBrokerService, MessageBrokerService>();
         services.AddScoped<IEmailService, EmailService>();
         services.AddScoped<INotificationService, NotificationService>();
+        services.AddScoped<IS3StorageService, S3StorageService>();
 
         services.AddAuthentication(options =>
         {
@@ -137,6 +146,8 @@ public static class ServiceCollectionExtensions
         // Yard
         services.AddScoped<IYardRepository, YardRepository>();
         services.AddScoped<IYardService, YardService>();
+        services.AddScoped<IYardReceivingService, YardReceivingService>();
+        services.AddScoped<IYardTaskService, YardTaskService>();
 
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();
@@ -166,6 +177,7 @@ public static class ServiceCollectionExtensions
         // Driver
         services.AddScoped<IDriverRepository, DriverRepository>();
         services.AddScoped<IDriverService, DriverService>();
+        services.AddHttpClient<IOcrService, OcrService>();
 
         // Equipment
         services.AddScoped<IEquipmentRepository, EquipmentRepository>();

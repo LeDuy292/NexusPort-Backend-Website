@@ -103,4 +103,23 @@ public class Booking : BaseEntity, IAggregateRoot
     {
         Status = BookingStatus.Completed;
     }
+
+    public void AssignFleet(Guid driverId, string? driverName, Guid truckId, string? vehiclePlate, Guid? containerId = null)
+    {
+        DriverId = driverId;
+        if (!string.IsNullOrWhiteSpace(driverName)) DriverName = driverName;
+        TruckId = truckId;
+        VehicleId = truckId;
+        if (!string.IsNullOrWhiteSpace(vehiclePlate)) VehiclePlate = vehiclePlate;
+        if (containerId.HasValue && containerId.Value != Guid.Empty)
+        {
+            AddContainer(containerId.Value);
+        }
+        Status = BookingStatus.Ready;
+    }
+
+    public void MarkReady()
+    {
+        Status = BookingStatus.Ready;
+    }
 }

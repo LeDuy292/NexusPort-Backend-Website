@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using NexusPort.Modules.Vehicle.Domain.Enums;
 
 namespace NexusPort.Modules.Vehicle.Infrastructure.Configurations;
 
@@ -23,7 +25,14 @@ public class VehicleConfiguration : IEntityTypeConfiguration<NexusPort.Modules.V
         builder.Ignore(x => x.UpdatedBy);
         builder.Ignore(x => x.IsDeleted);
 
-        builder.HasIndex(x => x.PlateNumber);
-        builder.HasIndex(x => x.RfidTag);
+        // Trucks table does not have these columns — ignore them
+        builder.Property(x => x.DriverId).HasColumnName("driver_id");
+        builder.Ignore(x => x.CreatedBy);
+        builder.Ignore(x => x.UpdatedBy);
+        builder.Ignore(x => x.UpdatedAt);
+        builder.Ignore(x => x.IsDeleted);
+        builder.Ignore(x => x.Description);
+
+        builder.HasIndex(x => x.PlateNumber).IsUnique();
     }
 }

@@ -22,4 +22,12 @@ public interface IBookingService
     Task<BookingDto> CreateAsync(CreateBookingDto dto, CancellationToken cancellationToken = default);
     Task<BookingDto> UpdateAsync(Guid id, UpdateBookingDto dto, Guid? userCarrierId = null, CancellationToken cancellationToken = default);
     Task<BookingDto> CancelAsync(Guid id, CancelBookingDto dto, Guid? userCarrierId = null, CancellationToken cancellationToken = default);
+    Task<BookingDto> ApproveAsync(Guid id, Guid approvedBy, CancellationToken cancellationToken = default);
+    Task<BookingDto> RejectAsync(Guid id, string reason, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<DriverContainerOperationDto>> GetDriverOperationsAsync(Guid driverId, CancellationToken cancellationToken = default);
+    Task<ContainerConfirmationResultDto> ConfirmContainerAsync(ContainerConfirmationDto dto, Guid driverId, CancellationToken cancellationToken = default);
+    Task<BookingDto> AssignResourcesAsync(Guid id, AssignBookingResourcesDto dto, Guid? userCarrierId = null, CancellationToken cancellationToken = default);
+    Task<AvailableFleetResourcesDto> GetAvailableResourcesAsync(Guid? carrierId = null, CancellationToken cancellationToken = default);
+    Task<FleetRecommendationDto> RecommendFleetAsync(Guid? containerId = null, string? bookingType = null, Guid? carrierId = null, CancellationToken cancellationToken = default);
+    Task<PayloadEvaluationDto> EvaluatePayloadAsync(Guid? containerId = null, Guid? truckId = null, decimal? customGrossWeightTon = null, CancellationToken cancellationToken = default);
 }

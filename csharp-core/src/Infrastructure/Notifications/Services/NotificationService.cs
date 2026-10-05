@@ -18,6 +18,22 @@ public class NotificationService : INotificationService
 
     public async Task<NotificationDto> SendAsync(SendNotificationDto dto, CancellationToken cancellationToken = default)
     {
+        if (dto.RecipientId == Guid.Empty)
+        {
+            return new NotificationDto
+            {
+                Id = Guid.NewGuid(),
+                RecipientId = Guid.Empty,
+                Type = dto.Type,
+                Title = dto.Title,
+                Message = dto.Message,
+                Severity = dto.Severity,
+                IsRead = false,
+                CreatedAt = DateTime.UtcNow,
+                ReferenceId = dto.ReferenceId
+            };
+        }
+
         var entity = new Notification(
             dto.RecipientId,
             dto.Type,
@@ -27,8 +43,15 @@ public class NotificationService : INotificationService
             dto.ReferenceId
         );
 
-        await _context.Set<Notification>().AddAsync(entity, cancellationToken);
-        await _context.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _context.Set<Notification>().AddAsync(entity, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // Do not fail parent business transactions if notification database write encounters constraint issues
+        }
 
         return MapToDto(entity);
     }

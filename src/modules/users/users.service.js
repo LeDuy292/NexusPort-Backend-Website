@@ -278,6 +278,49 @@ async function deactivateUser(id, requesterId) {
   return user.toSafeObject();
 }
 
+/**
+ * Tạo tài khoản nhân viên cho công ty vận tải.
+ */
+async function createCarrierStaff({ username, email, password, fullName, carrierId }) {
+  // Tạo user
+  const user = await createUser({
+    username,
+    email,
+    password,
+    role: 'Carrier Staff',
+    fullName,
+    isActive: true,
+  });
+
+  // Gắn vào carrier_users
+  const { sequelize } = require('../../config/database');
+  await sequelize.query(
+    'INSERT INTO carrier_users (carrier_id, user_id) VALUES (:carrierId, :userId)',
+    {
+      replacements: { carrierId, userId: user.id },
+    }
+  );
+
+  return user;
+}
+
+/**
+ * Lấy danh sách nhân viên của một công ty vận tải.
+ */
+async function getCarrierStaffs(carrierId) {
+  const { sequelize } = require('../../config/database');
+  const [results] = await sequelize.query(`
+    SELECT u.id, u.username, u.email, u.full_name as "fullName", u.is_active as "isActive", u.created_at as "createdAt"
+    FROM users u
+    INNER JOIN carrier_users cu ON u.id = cu.user_id
+    WHERE cu.carrier_id = :carrierId AND u.role = 'Carrier Staff'
+    ORDER BY u.created_at DESC
+  `, {
+    replacements: { carrierId }
+  });
+  return results;
+}
+
 module.exports = {
   getUsers,
   getUserById,
@@ -286,4 +329,6 @@ module.exports = {
   assignRole,
   activateUser,
   deactivateUser,
+  createCarrierStaff,
+  getCarrierStaffs,
 };

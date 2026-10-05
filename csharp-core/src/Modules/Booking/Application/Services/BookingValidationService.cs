@@ -64,7 +64,7 @@ public class BookingValidationService : IBookingValidationService
                     AddError(nameof(dto.DriverId), $"Driver '{driver.FullName}' does not belong to the specified Transport Company (Carrier).");
                 }
 
-                if (!string.Equals(driver.Status, "active", StringComparison.OrdinalIgnoreCase))
+                if (driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive || driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned)
                 {
                     AddError(nameof(dto.DriverId), $"Driver '{driver.FullName}' is currently not active (Status: {driver.Status}).");
                 }
@@ -89,7 +89,7 @@ public class BookingValidationService : IBookingValidationService
                     AddError(nameof(dto.TruckId), $"Vehicle '{truck.PlateNumber}' does not belong to the specified Transport Company (Carrier).");
                 }
 
-                if (!string.Equals(truck.Status, "active", StringComparison.OrdinalIgnoreCase))
+                if (truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.inactive || truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.maintenance)
                 {
                     AddError(nameof(dto.TruckId), $"Vehicle '{truck.PlateNumber}' is currently not active (Status: {truck.Status}).");
                 }
@@ -132,11 +132,13 @@ public class BookingValidationService : IBookingValidationService
         }
 
         // 6. Duplicate / Overlapping Booking Validation
-        var activeStatuses = new[] { BookingStatus.Pending, BookingStatus.Approved, BookingStatus.CheckedIn };
         var overlappingBookings = await _context.Set<Domain.Entities.Booking>()
             .Include(b => b.BookingContainers)
             .AsNoTracking()
-            .Where(b => activeStatuses.Contains(b.Status) &&
+            .Where(b => b.Status != BookingStatus.Canceled &&
+                        b.Status != BookingStatus.Completed &&
+                        b.Status != BookingStatus.Expired &&
+                        b.Status != BookingStatus.Rejected &&
                         b.AppointmentStart < dto.AppointmentEnd &&
                         b.AppointmentEnd > dto.AppointmentStart)
             .ToListAsync(cancellationToken);

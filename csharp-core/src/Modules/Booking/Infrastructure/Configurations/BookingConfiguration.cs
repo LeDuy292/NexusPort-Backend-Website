@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using NexusPort.Modules.Booking.Domain.Enums;
 
 namespace NexusPort.Modules.Booking.Infrastructure.Configurations;
 
@@ -72,8 +73,7 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
             .HasColumnName("created_at")
             .IsRequired();
 
-        builder.Property(x => x.CreatedBy)
-            .HasColumnName("created_by");
+        builder.Ignore(x => x.CreatedBy);
 
         builder.Ignore(x => x.UpdatedAt);
         builder.Ignore(x => x.UpdatedBy);

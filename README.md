@@ -365,6 +365,21 @@ npm run dev
 ```
 - Node Service Base URL: `http://localhost:4000`
 - Health Check: `http://localhost:4000/api/v1/health`
+- Swagger UI: `http://localhost:4000/api-docs`
+- OpenAPI JSON: `http://localhost:4000/openapi.json`
+
+### 3. Khởi chạy JavaScript API và Swagger UI
+
+```bash
+npm install
+npm run dev
+```
+
+- JavaScript API: `http://localhost:3001`
+- JavaScript Swagger UI: `http://localhost:3001/api-docs`
+- JavaScript OpenAPI JSON: `http://localhost:3001/api-docs/openapi.json`
+
+Chạy `npm run openapi:check` và `npm run openapi:check --prefix node-core` để kiểm tra route thực tế có khớp với tài liệu OpenAPI trước khi push.
 
 ---
 

@@ -54,18 +54,10 @@ public class VehicleMatchAndStatusRule : IGateRule
         if (context.Vehicle != null)
         {
             var status = context.Vehicle.Status;
-            if (string.Equals(status, "Blacklisted", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status, "Suspended", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status, "Blocked", StringComparison.OrdinalIgnoreCase))
-            {
-                return Task.FromResult(GateRuleResult.Fail(
-                    RuleName,
-                    "VEHICLE_BLACKLISTED",
-                    $"Phương tiện '{context.VehiclePlate}' đang bị tạm khóa/cấm vào cảng (Trạng thái: {status})."));
-            }
-
-            if (string.Equals(status, "Maintenance", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(status, "Inactive", StringComparison.OrdinalIgnoreCase))
+            // "Blacklisted" / "Suspended" / "Blocked" don't exist in TruckStatus enum, skip that check
+            // Check for inactive/maintenance
+            if (status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.maintenance ||
+                status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.inactive)
             {
                 return Task.FromResult(GateRuleResult.Fail(
                     RuleName,

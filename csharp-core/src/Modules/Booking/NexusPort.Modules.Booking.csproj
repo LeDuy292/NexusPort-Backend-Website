@@ -11,6 +11,7 @@
     <ProjectReference Include="..\Driver\NexusPort.Modules.Driver.csproj" />
     <ProjectReference Include="..\Vehicle\NexusPort.Modules.Vehicle.csproj" />
     <ProjectReference Include="..\Container\NexusPort.Modules.Container.csproj" />
+    <ProjectReference Include="..\Yard\NexusPort.Modules.Yard.csproj" />
   </ItemGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

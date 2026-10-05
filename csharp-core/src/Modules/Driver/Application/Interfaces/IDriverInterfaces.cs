@@ -8,6 +8,7 @@ public interface IDriverRepository
     Task UpdateAsync(NexusPort.Modules.Driver.Domain.Entities.Driver entity, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> ExistsByLicenseAsync(Guid carrierId, string licenseNumber, Guid? excludeDriverId = null, CancellationToken cancellationToken = default);
+    Task UnassignVehiclesFromDriverAsync(Guid driverId, CancellationToken cancellationToken = default);
 }
 
 public interface IDriverService

@@ -18,11 +18,37 @@ public class DriverRepository : IDriverRepository
 
     public async Task<NexusPort.Modules.Driver.Domain.Entities.Driver?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        return await _dbSet.FindAsync(new object[] { id }, cancellationToken);
+        var driver = await _dbSet.FindAsync(new object[] { id }, cancellationToken);
+        if (driver != null && driver.LicenseExpiryDate.HasValue && driver.Status != NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned)
+        {
+            var threshold = DateTime.UtcNow.AddDays(15);
+            if (driver.LicenseExpiryDate.Value <= threshold)
+            {
+                driver.Status = NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned;
+                await _context.SaveChangesAsync(cancellationToken);
+            }
+        }
+        return driver;
     }
 
     public async Task<IReadOnlyList<NexusPort.Modules.Driver.Domain.Entities.Driver>> GetAllAsync(DriverFilterDto filter, CancellationToken cancellationToken = default)
     {
+        var now = DateTime.UtcNow;
+        var threshold = now.AddDays(15);
+        
+        var expiringDrivers = await _dbSet
+            .Where(d => d.LicenseExpiryDate.HasValue && d.LicenseExpiryDate.Value <= threshold && d.Status != NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned)
+            .ToListAsync(cancellationToken);
+            
+        if (expiringDrivers.Any())
+        {
+            foreach (var d in expiringDrivers)
+            {
+                d.Status = NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned;
+            }
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
         var query = _dbSet.AsQueryable();
 
         if (filter.CarrierId.HasValue)
@@ -32,8 +58,10 @@ public class DriverRepository : IDriverRepository
 
         if (!string.IsNullOrWhiteSpace(filter.Status))
         {
-            var status = filter.Status.ToLower();
-            query = query.Where(x => x.Status == status);
+            if (Enum.TryParse<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>(filter.Status, true, out var parsedStatus))
+            {
+                query = query.Where(x => x.Status == parsedStatus);
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(filter.SearchTerm))
@@ -79,5 +107,10 @@ public class DriverRepository : IDriverRepository
         }
 
         return await query.AnyAsync(cancellationToken);
+    }
+
+    public async Task UnassignVehiclesFromDriverAsync(Guid driverId, CancellationToken cancellationToken = default)
+    {
+        await _context.Database.ExecuteSqlRawAsync("UPDATE trucks SET driver_id = NULL WHERE driver_id = {0}", new object[] { driverId }, cancellationToken);
     }
 }
