@@ -43,3 +43,15 @@ export class ForbiddenError extends AppError {
     super(message, 403, 'FORBIDDEN');
   }
 }
+
+export class BadRequestError extends AppError {
+  constructor(message = 'Bad request.') {
+    super(message, 400, 'BAD_REQUEST');
+  }
+}
+
+export class ConflictError extends AppError {
+  constructor(message = 'Resource already exists.') {
+    super(message, 409, 'CONFLICT');
+  }
+}

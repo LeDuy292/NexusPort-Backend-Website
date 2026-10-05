@@ -346,6 +346,12 @@ public class BookingService : IBookingService
 
         if (entity.Status != BookingStatus.Pending && entity.Status != BookingStatus.Ready)
         {
+            if (entity.Status == BookingStatus.Approved)
+            {
+                var existingDto = MapToDto(entity);
+                await EnrichBookingDtosAsync(new List<BookingDto> { existingDto }, cancellationToken);
+                return existingDto;
+            }
             throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be approved.");
         }
 
@@ -379,6 +385,12 @@ public class BookingService : IBookingService
 
         if (entity.Status != BookingStatus.Pending && entity.Status != BookingStatus.Ready)
         {
+            if (entity.Status == BookingStatus.Rejected)
+            {
+                var existingDto = MapToDto(entity);
+                await EnrichBookingDtosAsync(new List<BookingDto> { existingDto }, cancellationToken);
+                return existingDto;
+            }
             throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be rejected.");
         }
 

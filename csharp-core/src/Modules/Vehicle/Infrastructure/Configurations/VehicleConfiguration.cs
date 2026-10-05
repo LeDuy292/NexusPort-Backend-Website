@@ -16,8 +16,11 @@ public class VehicleConfiguration : IEntityTypeConfiguration<NexusPort.Modules.V
         builder.Property(x => x.PlateNumber).HasColumnName("plate_number").IsRequired().HasMaxLength(100);
         builder.Property(x => x.RfidTag).HasColumnName("rfid_tag").HasMaxLength(100);
         builder.Property(x => x.VehicleType).HasColumnName("vehicle_type").HasMaxLength(50);
-        builder.Property(x => x.Status).HasColumnName("status").HasConversion<string>().IsRequired().HasMaxLength(50);
+        builder.Property(x => x.Status).HasColumnName("status").IsRequired();
         builder.Property(x => x.Description).HasColumnName("description").HasMaxLength(500);
+        builder.Property(x => x.PhotoUrl).HasColumnName("photo_url");
+        builder.Property(x => x.RegistrationImageUrl).HasColumnName("registration_image_url");
+        builder.Property(x => x.CurrentLocation).HasColumnName("current_location");
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
 
         builder.Ignore(x => x.CreatedBy);

@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { HealthController } from '../controllers/health.controller';
 import { createIdentityRouter } from '../../modules/identity/presentation/identity.controller';
+import { createAuthRouter } from '../../modules/identity/presentation/auth.controller';
+import { createUserRouter } from '../../modules/identity/presentation/user.controller';
 import { createBookingRouter } from '../../modules/booking/presentation/booking.controller';
 import { createVesselRouter } from '../../modules/vessel/presentation/vessel.controller';
 import { createBerthRouter } from '../../modules/berth/presentation/berth.controller';
@@ -23,6 +25,8 @@ export interface NodeCoreRouteModule {
 }
 
 export const nodeCoreRouteModules: NodeCoreRouteModule[] = [
+  { prefix: '/auth', tag: 'Auth', secured: false, router: createAuthRouter() },
+  { prefix: '/users', tag: 'Users', secured: false, router: createUserRouter() },
   { prefix: '/identity', tag: 'Identity', secured: false, router: createIdentityRouter() },
   { prefix: '/bookings', tag: 'Bookings', secured: false, router: createBookingRouter() },
   { prefix: '/vessels', tag: 'Vessels', secured: false, router: createVesselRouter() },

@@ -221,7 +221,7 @@ public class GateVerificationService : IGateVerificationService
                 Phone = driver?.Phone ?? "0901 234 567",
                 LicenseNumber = driver?.LicenseNumber ?? "B2-998877",
                 IdCardNumber = driver?.IdCardNumber ?? "079090012345",
-                Status = driver?.Status ?? "active",
+                Status = driver?.Status.ToString() ?? "active",
                 CarrierId = booking?.CarrierId,
                 CarrierName = "Công ty CP Vận tải Quốc tế Nexus"
             },

@@ -93,6 +93,16 @@ async function seed() {
         console.log(`  ⏭️  Bỏ qua (đã tồn tại): ${user.username}`);
         skipped++;
       }
+
+      // Tự động liên kết tài khoản Transport Company vào carrier_users
+      if (user.role === 'Transport Company') {
+        const { sequelize } = require('../config/database');
+        await sequelize.query(`
+          INSERT INTO carrier_users (carrier_id, user_id)
+          SELECT 'c1010101-0000-0000-0000-000000000001', :userId
+          ON CONFLICT DO NOTHING;
+        `, { replacements: { userId: user.id } });
+      }
     }
 
     console.log(`\n📊 Kết quả: ${created} tạo mới, ${skipped} bỏ qua`);
