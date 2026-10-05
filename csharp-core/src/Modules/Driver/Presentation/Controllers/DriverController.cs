@@ -29,8 +29,30 @@ public class DriverController : ControllerBase
 
     private Guid? GetCarrierIdFromToken()
     {
-        var carrierIdClaim = User.Claims.FirstOrDefault(c => c.Type == "CarrierId")?.Value;
+        var carrierIdClaim = User.Claims.FirstOrDefault(c => 
+            c.Type.Equals("CarrierId", StringComparison.OrdinalIgnoreCase) ||
+            c.Type.Equals("carrier_id", StringComparison.OrdinalIgnoreCase))?.Value;
         if (Guid.TryParse(carrierIdClaim, out var carrierId)) return carrierId;
+
+        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.Claims.FirstOrDefault(c => c.Type.Equals("sub", StringComparison.OrdinalIgnoreCase) || c.Type.Equals("id", StringComparison.OrdinalIgnoreCase))?.Value;
+        if (Guid.TryParse(userIdStr, out var userId))
+        {
+            var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
+            using var cmd = db.Database.GetDbConnection().CreateCommand();
+            if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                db.Database.GetDbConnection().Open();
+            cmd.CommandText = "SELECT carrier_id FROM carrier_users WHERE user_id = @userId LIMIT 1";
+            var param = cmd.CreateParameter();
+            param.ParameterName = "@userId";
+            param.Value = userId;
+            cmd.Parameters.Add(param);
+            var result = cmd.ExecuteScalar();
+            if (result != null && Guid.TryParse(result.ToString(), out var dbCarrierId))
+            {
+                return dbCarrierId;
+            }
+        }
         return null;
     }
 
@@ -40,7 +62,12 @@ public class DriverController : ControllerBase
             (c.Value.Equals("Administrator", StringComparison.OrdinalIgnoreCase) || 
              c.Value.Equals("admin", StringComparison.OrdinalIgnoreCase) ||
              c.Value.Equals("dispatcher", StringComparison.OrdinalIgnoreCase) ||
-             c.Value.Equals("operation", StringComparison.OrdinalIgnoreCase)));
+             c.Value.Equals("operation", StringComparison.OrdinalIgnoreCase) ||
+             c.Value.Equals("Gate Officer", StringComparison.OrdinalIgnoreCase) ||
+             c.Value.Equals("Gate", StringComparison.OrdinalIgnoreCase) ||
+             c.Value.Equals("Yard Operator", StringComparison.OrdinalIgnoreCase) ||
+             c.Value.Equals("Yard Staff", StringComparison.OrdinalIgnoreCase) ||
+             c.Value.Equals("Berth Staff", StringComparison.OrdinalIgnoreCase)));
     }
 
     [HttpPost("extract-cccd")]

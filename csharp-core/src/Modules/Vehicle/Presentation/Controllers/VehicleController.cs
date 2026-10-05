@@ -32,13 +32,43 @@ public class VehicleController : ControllerBase
     private bool IsPortStaff()
     {
         var role = User.FindFirst(ClaimTypes.Role)?.Value;
-        return role == "Administrator" || role == "Dispatcher" || role == "Operation";
+        if (string.IsNullOrEmpty(role)) return false;
+        return role.Equals("Administrator", StringComparison.OrdinalIgnoreCase) ||
+               role.Equals("admin", StringComparison.OrdinalIgnoreCase) ||
+               role.Equals("Dispatcher", StringComparison.OrdinalIgnoreCase) ||
+               role.Equals("Operation", StringComparison.OrdinalIgnoreCase) ||
+               role.Equals("Gate Officer", StringComparison.OrdinalIgnoreCase) ||
+               role.Equals("Gate", StringComparison.OrdinalIgnoreCase) ||
+               role.Equals("Yard Operator", StringComparison.OrdinalIgnoreCase) ||
+               role.Equals("Yard Staff", StringComparison.OrdinalIgnoreCase) ||
+               role.Equals("Berth Staff", StringComparison.OrdinalIgnoreCase);
     }
 
     private Guid? GetCarrierIdFromToken()
     {
-        var carrierIdStr = User.FindFirst("CarrierId")?.Value;
+        var carrierIdStr = User.FindFirst("CarrierId")?.Value 
+            ?? User.Claims.FirstOrDefault(c => c.Type.Equals("CarrierId", StringComparison.OrdinalIgnoreCase) || c.Type.Equals("carrier_id", StringComparison.OrdinalIgnoreCase))?.Value;
         if (Guid.TryParse(carrierIdStr, out var carrierId)) return carrierId;
+
+        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.Claims.FirstOrDefault(c => c.Type.Equals("sub", StringComparison.OrdinalIgnoreCase) || c.Type.Equals("id", StringComparison.OrdinalIgnoreCase))?.Value;
+        if (Guid.TryParse(userIdStr, out var userId))
+        {
+            var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
+            using var cmd = db.Database.GetDbConnection().CreateCommand();
+            if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                db.Database.GetDbConnection().Open();
+            cmd.CommandText = "SELECT carrier_id FROM carrier_users WHERE user_id = @userId LIMIT 1";
+            var param = cmd.CreateParameter();
+            param.ParameterName = "@userId";
+            param.Value = userId;
+            cmd.Parameters.Add(param);
+            var result = cmd.ExecuteScalar();
+            if (result != null && Guid.TryParse(result.ToString(), out var dbCarrierId))
+            {
+                return dbCarrierId;
+            }
+        }
         return null;
     }
 

@@ -24,8 +24,9 @@ export const createApp = (): Application => {
     swaggerOptions: { persistAuthorization: true },
   }));
 
-  // Base API routes
+  // Base API routes (mounted at /api/v1 and /api for full backward compatibility)
   app.use('/api/v1', routes);
+  app.use('/api', routes);
 
   // Global error handling
   app.use(errorHandler);
