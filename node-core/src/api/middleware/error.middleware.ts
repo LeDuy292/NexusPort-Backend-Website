@@ -4,7 +4,7 @@ import { sendError } from '../../shared/utils/response';
 import { logger } from '../../shared/utils/logger';
 import multer from 'multer';
 
-export const errorHandler = (err: Error, req: Request, res: Response, next: NextFunction) => {
+export const errorHandler = (err: Error, req: Request, res: Response, _next: NextFunction) => {
   logger.error(`Error processing ${req.method} ${req.path}:`, err);
 
   if (err instanceof AppError) {

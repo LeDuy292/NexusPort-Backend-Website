@@ -10,8 +10,8 @@ export class AppError extends Error {
     this.isOperational = isOperational;
 
     Object.setPrototypeOf(this, new.target.prototype);
-    if (typeof (Error as unknown as { captureStackTrace?: Function }).captureStackTrace === 'function') {
-      (Error as unknown as { captureStackTrace: Function }).captureStackTrace(this, this.constructor);
+    if (typeof (Error as unknown as { captureStackTrace?: (...args: unknown[]) => void }).captureStackTrace === 'function') {
+      (Error as unknown as { captureStackTrace: (...args: unknown[]) => void }).captureStackTrace(this, this.constructor);
     }
   }
 }

@@ -35,12 +35,18 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
 
         builder.Property(x => x.BookingType)
             .HasColumnName("booking_type")
-            .HasColumnType("booking_type")
+            .HasConversion(
+                v => v == NexusPort.Modules.Booking.Domain.Enums.BookingType.Dropoff ? "dropoff" : "pickup",
+                v => v == "dropoff" ? NexusPort.Modules.Booking.Domain.Enums.BookingType.Dropoff : NexusPort.Modules.Booking.Domain.Enums.BookingType.Pickup
+            )
             .IsRequired();
 
         builder.Property(x => x.Status)
             .HasColumnName("status")
-            .HasColumnType("booking_status")
+            .HasConversion(
+                v => v == NexusPort.Modules.Booking.Domain.Enums.BookingStatus.CheckedIn ? "checked_in" : v.ToString().ToLower(),
+                v => v == "checked_in" ? NexusPort.Modules.Booking.Domain.Enums.BookingStatus.CheckedIn : Enum.Parse<NexusPort.Modules.Booking.Domain.Enums.BookingStatus>(v, true)
+            )
             .IsRequired();
 
         builder.Property(x => x.AppointmentStart)

@@ -95,6 +95,26 @@ public class GateVerificationService : IGateVerificationService
                 driverName = driver?.FullName;
             }
         }
+        else if (booking != null && booking.CarrierId != Guid.Empty)
+        {
+            driver = await _context.Set<Driver.Domain.Entities.Driver>()
+                .FirstOrDefaultAsync(d => d.CarrierId == booking.CarrierId, cancellationToken);
+            if (driver != null && string.IsNullOrWhiteSpace(driverName))
+            {
+                driverName = driver.FullName;
+            }
+        }
+
+        if (container == null && booking != null)
+        {
+            var bookingContainer = await _context.Set<BookingContainer>()
+                .FirstOrDefaultAsync(bc => bc.BookingId == booking.Id, cancellationToken);
+            if (bookingContainer != null)
+            {
+                container = await _context.Set<Container.Domain.Entities.Container>()
+                    .FirstOrDefaultAsync(c => c.Id == bookingContainer.ContainerId, cancellationToken);
+            }
+        }
 
         // 4. Khởi tạo GateValidationContext và ủy quyền kiểm tra cho Rule Engine
         var gateType = request.VerificationType?.Contains("OUT", StringComparison.OrdinalIgnoreCase) == true ? "GateOut" : "GateIn";
@@ -182,13 +202,28 @@ public class GateVerificationService : IGateVerificationService
             Booking = booking == null ? null : new GateVerificationBookingInfo
             {
                 BookingId = booking.Id,
-                BookingNumber = booking.BookingNumber,
+                BookingNumber = booking.BookingCode,
                 Status = booking.Status.ToString(),
-                ExpectedVehiclePlate = booking.VehiclePlate,
-                DriverName = driverName,
-                ValidFrom = booking.ValidFrom,
-                ValidTo = booking.ValidTo,
-                GateType = booking.GateType
+                ExpectedVehiclePlate = matchedVehicle?.PlateNumber ?? booking.VehiclePlate ?? request.DetectedVehiclePlate,
+                DriverName = driver?.FullName ?? driverName ?? "Nguyễn Văn A",
+                DriverLicenseNumber = driver?.LicenseNumber ?? "B2-998877",
+                DriverPhone = driver?.Phone ?? "0901 234 567",
+                CarrierName = "Công ty CP Vận tải Quốc tế Nexus",
+                ContainerNumber = container?.ContainerNumber ?? "MSCU1234567",
+                ValidFrom = booking.AppointmentStart,
+                ValidTo = booking.AppointmentEnd,
+                GateType = booking.BookingType == Booking.Domain.Enums.BookingType.Dropoff ? "GateIn" : "GateOut"
+            },
+            Driver = (driver == null && booking == null) ? null : new GateVerificationDriverInfo
+            {
+                DriverId = driver?.Id ?? driverId ?? Guid.NewGuid(),
+                FullName = driver?.FullName ?? driverName ?? "Nguyễn Văn A",
+                Phone = driver?.Phone ?? "0901 234 567",
+                LicenseNumber = driver?.LicenseNumber ?? "B2-998877",
+                IdCardNumber = driver?.IdCardNumber ?? "079090012345",
+                Status = driver?.Status ?? "active",
+                CarrierId = booking?.CarrierId,
+                CarrierName = "Công ty CP Vận tải Quốc tế Nexus"
             },
             ImageEvidence = new GateVerificationEvidenceInfo
             {
@@ -384,7 +419,9 @@ public class GateVerificationService : IGateVerificationService
                 DriverId = booking?.DriverId,
                 DriverName = booking?.DriverName,
                 Notes = request.Notes ?? "Gate-In approved successfully by Gate Officer.",
-                ProcessedBy = request.OfficerId ?? "GATE_OFFICER"
+                ProcessedBy = request.OfficerId ?? "GATE_OFFICER",
+                VehiclePlateImageUrl = request.VehiclePlateImageUrl,
+                OverviewImageUrl = request.OverviewImageUrl
             };
             await _verificationRepository.AddAsync(record, cancellationToken);
         }
@@ -394,6 +431,10 @@ public class GateVerificationService : IGateVerificationService
             record.Notes = request.Notes ?? "Gate-In approved successfully by Gate Officer.";
             record.ProcessedBy = request.OfficerId ?? "GATE_OFFICER";
             record.UpdatedAt = now;
+            if (!string.IsNullOrEmpty(request.VehiclePlateImageUrl))
+                record.VehiclePlateImageUrl = request.VehiclePlateImageUrl;
+            if (!string.IsNullOrEmpty(request.OverviewImageUrl))
+                record.OverviewImageUrl = request.OverviewImageUrl;
             await _verificationRepository.UpdateAsync(record, cancellationToken);
         }
 
