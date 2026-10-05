@@ -156,6 +156,7 @@ public class GateVerificationResultDto
     public bool VehicleDetected { get; set; }
 
     public GateVerificationBookingInfo? Booking { get; set; }
+    public GateVerificationDriverInfo? Driver { get; set; }
     public GateVerificationEvidenceInfo? ImageEvidence { get; set; }
 }
 
@@ -166,9 +167,25 @@ public class GateVerificationBookingInfo
     public string? Status { get; set; }
     public string? ExpectedVehiclePlate { get; set; }
     public string? DriverName { get; set; }
+    public string? DriverLicenseNumber { get; set; }
+    public string? DriverPhone { get; set; }
+    public string? CarrierName { get; set; }
+    public string? ContainerNumber { get; set; }
     public DateTime? ValidFrom { get; set; }
     public DateTime? ValidTo { get; set; }
     public string? GateType { get; set; }
+}
+
+public class GateVerificationDriverInfo
+{
+    public Guid? DriverId { get; set; }
+    public string? FullName { get; set; }
+    public string? Phone { get; set; }
+    public string? LicenseNumber { get; set; }
+    public string? IdCardNumber { get; set; }
+    public string? Status { get; set; }
+    public Guid? CarrierId { get; set; }
+    public string? CarrierName { get; set; }
 }
 
 public class GateVerificationEvidenceInfo
@@ -283,6 +300,8 @@ public class GateInApprovalRequestDto
     public string? LaneCode { get; set; } = "LANE_01";
     public string? OfficerId { get; set; }
     public string? Notes { get; set; }
+    public string? VehiclePlateImageUrl { get; set; }
+    public string? OverviewImageUrl { get; set; }
 }
 
 /// <summary>

@@ -3,7 +3,7 @@ import { AppError } from '../../shared/errors/app-error';
 import { sendError } from '../../shared/utils/response';
 import { logger } from '../../shared/utils/logger';
 
-export const errorHandler = (err: Error, req: Request, res: Response, next: NextFunction) => {
+export const errorHandler = (err: Error, req: Request, res: Response, _next: NextFunction) => {
   logger.error(`Error processing ${req.method} ${req.path}:`, err);
 
   if (err instanceof AppError) {

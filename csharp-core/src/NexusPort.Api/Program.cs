@@ -21,7 +21,7 @@ builder.Services.AddControllers()
 // Add Infrastructure & Domain Modules
 builder.Services.AddNexusPortInfrastructure(builder.Configuration);
 builder.Services.AddNexusPortModules();
-builder.Services.AddCarrierModule(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Host=localhost;Port=5432;Database=nexusport;Username=postgres;Password=120104");
+builder.Services.AddCarrierModule(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Host=localhost;Port=5432;Database=NexusPort;Username=postgres;Password=pgadmin4");
 builder.Services.AddSwaggerDocumentation();
 
 var app = builder.Build();

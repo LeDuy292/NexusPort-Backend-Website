@@ -52,7 +52,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddNexusPortInfrastructure(this IServiceCollection services, IConfiguration configuration)
     {
         var connectionString = configuration.GetConnectionString("DefaultConnection") 
-            ?? "Host=localhost;Port=5432;Database=nexusport;Username=postgres;Password=120104";
+            ?? "Host=localhost;Port=5432;Database=NexusPort;Username=postgres;Password=pgadmin4";
 
         services.AddDbContext<AppDbContext>(options =>
             options.UseNpgsql(connectionString));

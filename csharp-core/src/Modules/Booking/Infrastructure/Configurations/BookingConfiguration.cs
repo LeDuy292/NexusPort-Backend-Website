@@ -34,12 +34,18 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
 
         builder.Property(x => x.BookingType)
             .HasColumnName("booking_type")
-            .HasConversion<string>()
+            .HasConversion(
+                v => v == NexusPort.Modules.Booking.Domain.Enums.BookingType.Dropoff ? "dropoff" : "pickup",
+                v => v == "dropoff" ? NexusPort.Modules.Booking.Domain.Enums.BookingType.Dropoff : NexusPort.Modules.Booking.Domain.Enums.BookingType.Pickup
+            )
             .IsRequired();
 
         builder.Property(x => x.Status)
             .HasColumnName("status")
-            .HasConversion<string>()
+            .HasConversion(
+                v => v == NexusPort.Modules.Booking.Domain.Enums.BookingStatus.CheckedIn ? "checked_in" : v.ToString().ToLower(),
+                v => v == "checked_in" ? NexusPort.Modules.Booking.Domain.Enums.BookingStatus.CheckedIn : Enum.Parse<NexusPort.Modules.Booking.Domain.Enums.BookingStatus>(v, true)
+            )
             .IsRequired();
 
         builder.Property(x => x.AppointmentStart)
@@ -69,14 +75,9 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
         builder.Property(x => x.CreatedBy)
             .HasColumnName("created_by");
 
-        builder.Property(x => x.UpdatedAt)
-            .HasColumnName("updated_at");
-
-        builder.Property(x => x.UpdatedBy)
-            .HasColumnName("updated_by");
-
-        builder.Property(x => x.IsDeleted)
-            .HasColumnName("is_deleted");
+        builder.Ignore(x => x.UpdatedAt);
+        builder.Ignore(x => x.UpdatedBy);
+        builder.Ignore(x => x.IsDeleted);
 
         // Ignore unmapped helper properties for DB-first schema compatibility
         builder.Ignore(x => x.BookingNumber);
