@@ -27,3 +27,5 @@ test_db.js
 init_db.js
 
 schema.sql
+*.backup
+*.dump
