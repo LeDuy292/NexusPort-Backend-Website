@@ -35,6 +35,51 @@ const parameterSchema = (path: string) => [...path.matchAll(/\{([A-Za-z0-9_]+)\}
 }));
 
 const operationOverrides: Record<string, Record<string, unknown>> = {
+  'GET /api/v1/yard/containers/{containerId}/available-slots': {
+    summary: 'List compatible Yard slots for a Container',
+    security: [{ BearerAuth: [] }],
+    responses: { 200: { description: 'Compatible slots' }, 404: { description: 'Container not found' } },
+  },
+  'POST /api/v1/yard/containers/{containerId}/reception': {
+    summary: 'Confirm Container reception after checking ID, seal and condition',
+    security: [{ BearerAuth: [] }],
+    requestBody: {
+      required: true,
+      content: { 'application/json': { schema: {
+        type: 'object', required: ['containerNumber', 'sealNumber', 'condition'], additionalProperties: false,
+        properties: {
+          containerNumber: { type: 'string', example: 'EMCU8361795' }, sealNumber: { type: 'string' },
+          condition: { type: 'string', enum: ['sound', 'damaged'] },
+          conditionNotes: { type: 'string', nullable: true },
+        },
+      } } },
+    },
+    responses: { 200: { description: 'Reception confirmed' }, 409: { description: 'ID/seal mismatch or invalid state' } },
+  },
+  'PUT /api/v1/yard/containers/{containerId}/reservation': {
+    summary: 'Reserve a compatible Yard slot for an arriving Container',
+    security: [{ BearerAuth: [] }],
+    requestBody: {
+      required: true,
+      content: { 'application/json': { schema: {
+        type: 'object', required: ['slotId'], additionalProperties: false,
+        properties: { slotId: { type: 'string', format: 'uuid' } },
+      } } },
+    },
+    responses: { 200: { description: 'Slot reserved' }, 409: { description: 'Slot unavailable or incompatible' } },
+  },
+  'PUT /api/v1/yard/containers/{containerId}/placement': {
+    summary: 'Place a received Container in a compatible Yard slot',
+    security: [{ BearerAuth: [] }],
+    requestBody: {
+      required: true,
+      content: { 'application/json': { schema: {
+        type: 'object', required: ['slotId'], additionalProperties: false,
+        properties: { slotId: { type: 'string', format: 'uuid' } },
+      } } },
+    },
+    responses: { 200: { description: 'Position saved and slot occupied' }, 409: { description: 'Not received or slot incompatible' } },
+  },
   'GET /api/v1/dispatcher/bookings/ready': {
     summary: 'List approved bookings and their containers, driver and vehicle for dispatch',
     security: [{ BearerAuth: [] }],
