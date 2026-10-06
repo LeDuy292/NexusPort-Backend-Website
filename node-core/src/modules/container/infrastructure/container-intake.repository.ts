@@ -32,7 +32,7 @@ export class ContainerIntakeRepository {
          container_id, container_visit_id, raw_data, errors
        ) VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb)`,
       [batchId, result.rowNumber, result.containerNumber, result.status,
-       result.containerId ?? null, result.visitId ?? null, JSON.stringify(rawData), JSON.stringify(result.errors)],
+        result.containerId ?? null, result.visitId ?? null, JSON.stringify(rawData), JSON.stringify(result.errors)],
     );
   }
 
@@ -127,9 +127,9 @@ export class ContainerIntakeRepository {
              transport_company_name IS DISTINCT FROM $14 OR data_status IS DISTINCT FROM $15
            ) RETURNING id`,
           [visitId, row.sourceReference ?? null, row.sealNumber ?? null, row.loadStatus ?? 'unknown', row.cargoType ?? 'general',
-           row.grossWeightKg ?? null, vesselCallId, row.expectedArrivalAt ?? null, row.expectedAvailableAt ?? null,
-           requestedServiceDate, legacyRequestedPickupDate, row.blBookingNumber ?? null, row.customerName ?? null,
-           row.transportCompanyName ?? null, dataStatus],
+            row.grossWeightKg ?? null, vesselCallId, row.expectedArrivalAt ?? null, row.expectedAvailableAt ?? null,
+            requestedServiceDate, legacyRequestedPickupDate, row.blBookingNumber ?? null, row.customerName ?? null,
+            row.transportCompanyName ?? null, dataStatus],
         );
         status = updated.rows[0] ? 'updated_visit' : 'duplicate';
       } else {
@@ -143,11 +143,11 @@ export class ContainerIntakeRepository {
              declared_by, import_batch_id, source_row_number
            ) VALUES ($1,$2,$3,$4,'planned',$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
           [visitId, visitReference, container.id, vesselCallId, row.loadStatus ?? 'unknown', row.cargoType ?? 'general',
-           row.grossWeightKg ?? null, row.blBookingNumber ?? null, row.customerName ?? null,
-           row.transportCompanyName ?? null, row.sourceType, row.movementType,
-           dataStatus, row.sourceReference ?? null,
-           row.sealNumber ?? null, row.expectedArrivalAt ?? null, row.expectedAvailableAt ?? null,
-           requestedServiceDate, legacyRequestedPickupDate, userId, batchId ?? null, rowNumber ?? null],
+            row.grossWeightKg ?? null, row.blBookingNumber ?? null, row.customerName ?? null,
+            row.transportCompanyName ?? null, row.sourceType, row.movementType,
+            dataStatus, row.sourceReference ?? null,
+            row.sealNumber ?? null, row.expectedArrivalAt ?? null, row.expectedAvailableAt ?? null,
+            requestedServiceDate, legacyRequestedPickupDate, userId, batchId ?? null, rowNumber ?? null],
         );
         status = createdMaster ? 'created_master' : 'created_visit';
       }

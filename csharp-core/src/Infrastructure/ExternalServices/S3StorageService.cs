@@ -122,6 +122,22 @@ public class S3StorageService : IS3StorageService
 
         try
         {
+            if (string.IsNullOrEmpty(_accessKey) || string.IsNullOrEmpty(_secretKey))
+            {
+                _logger.LogWarning("AWS Credentials not configured. Saving locally to wwwroot/uploads for {Key}", key);
+                var uploadPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", folder ?? "drivers");
+                Directory.CreateDirectory(uploadPath);
+                
+                var localFilePath = Path.Combine(uploadPath, fileName);
+                stream.Position = 0;
+                using (var fileStream = new FileStream(localFilePath, FileMode.Create, FileAccess.Write))
+                {
+                    await stream.CopyToAsync(fileStream, cancellationToken);
+                }
+                
+                return $"http://localhost:5000/uploads/{(folder ?? "drivers")}/{fileName}";
+            }
+
             await _s3Client.PutObjectAsync(request, cancellationToken);
             var presignedUrl = GetPresignedUrl(key, 7);
             _logger.LogInformation("Successfully uploaded file to AWS S3: {Key}, Presigned URL generated", key);
