@@ -62,6 +62,22 @@ The script reads migration files in filename order, skips versions already
 recorded, stops on the first error, and verifies the version row after every
 successful migration. It never runs files in `database/samples/`.
 
+## Reset development data to default accounts
+
+This is a destructive maintenance operation, not a migration. It creates a
+restorable Aiven backup first, empties every application table while preserving
+`nexusport_schema_versions`, then recreates only the seven accounts declared in
+`src/scripts/seed.js`. It also creates the single carrier and `carrier_users`
+link required for `carrier01` to work.
+
+```powershell
+.\scripts\reset-aiven-data.ps1 -ConfirmReset
+```
+
+Do not add this command to CI/CD or normal application startup. Use it only for
+an explicitly approved environment reset. The SQL lives in
+`database/maintenance/`, outside the ordered migration directory.
+
 ## Application connection values
 
 Use deployment-platform secrets rather than committed configuration files.
