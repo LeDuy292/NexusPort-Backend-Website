@@ -44,6 +44,54 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
       403: { description: 'Only Dispatcher or Administrator can access this list' },
     },
   },
+  'GET /api/v1/dispatcher/yard/destinations': {
+    summary: 'List Yard destinations with Block, Bay, Row, Tier for Dispatcher selection',
+    security: [{ BearerAuth: [] }],
+    parameters: [{
+      name: 'status', in: 'query', required: false,
+      schema: { type: 'string', enum: ['empty', 'reserved', 'occupied', 'maintenance'] },
+    }],
+    responses: {
+      200: { description: 'Yard destinations' },
+      401: { description: 'Missing or invalid token' },
+      403: { description: 'Only Dispatcher or Administrator can view Yard destinations' },
+      422: { description: 'Invalid status filter' },
+    },
+  },
+  'GET /api/v1/dispatcher/operations/{operationId}/destination': {
+    summary: 'Get the destination currently linked to an Operation',
+    security: [{ BearerAuth: [] }],
+    responses: {
+      200: { description: 'Destination assignment' },
+      404: { description: 'Operation has no destination assignment' },
+    },
+  },
+  'PUT /api/v1/dispatcher/operations/{operationId}/destination': {
+    summary: 'Assign an available Yard destination to an Operation and its Driver',
+    security: [{ BearerAuth: [] }],
+    requestBody: {
+      required: true,
+      content: { 'application/json': { schema: {
+        type: 'object', required: ['slotId'], additionalProperties: false,
+        properties: { slotId: { type: 'string', format: 'uuid' } },
+      } } },
+    },
+    responses: {
+      200: { description: 'Destination saved and linked to the Operation' },
+      404: { description: 'Operation or Yard slot not found' },
+      409: { description: 'Operation cannot be assigned or destination is unavailable' },
+      422: { description: 'Invalid request' },
+    },
+  },
+  'GET /api/v1/drivers/me/destinations': {
+    summary: 'List immutable destination assignments for the authenticated Driver',
+    security: [{ BearerAuth: [] }],
+    responses: {
+      200: { description: 'Assigned Operations and their Block, Bay, Row, Tier destinations' },
+      401: { description: 'Missing or invalid Driver token' },
+      403: { description: 'Token does not have Driver role' },
+    },
+  },
   'GET /api/v1/drivers/me/routes': {
     summary: 'List Gate-In routes for the authenticated Driver and their Containers',
     security: [{ BearerAuth: [] }],
