@@ -3,7 +3,6 @@ import { Router, NextFunction } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import { DriverRepository } from '../infrastructure/driver.repository';
 import { DriverRouteService } from '../application/driver-route.service';
-import { DriverDestinationRepository } from '../infrastructure/driver-destination.repository';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '../../../shared/errors/app-error';
 import { sendSuccess, sendCreated } from '../../../shared/utils/response';
 
@@ -30,12 +29,6 @@ const authenticateDriver = (req: DriverRequest, _res: Response, next: NextFuncti
 export class DriverController {
   private repository = new DriverRepository();
   private routeService = new DriverRouteService();
-  private destinationRepository = new DriverDestinationRepository();
-
-  getMyDestinations = async (req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
-    try { sendSuccess(res, await this.destinationRepository.findForDriver(req.driverId!)); }
-    catch (error) { next(error); }
-  };
 
   getMyRoutes = async (req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
     try { sendSuccess(res, await this.routeService.list(req.driverId!)); }
@@ -79,7 +72,6 @@ export const createDriverRouter = (): Router => {
 
   router.get('/me/routes', authenticateDriver, controller.getMyRoutes);
   router.get('/me/routes/:containerId', authenticateDriver, controller.getMyContainerRoute);
-  router.get('/me/destinations', authenticateDriver, controller.getMyDestinations);
   router.get('/', controller.getAll);
   router.get('/:id', controller.getById);
   router.post('/', controller.create);
