@@ -96,3 +96,20 @@ ConnectionStrings__DefaultConnection=Host=<host>;Port=<port>;Database=<database>
 
 Keep the Node.js pool at no more than 5 connections. Aiven Free PostgreSQL has
 a 20-connection limit, so this leaves capacity for the .NET API and maintenance.
+
+## Run local backends against Aiven
+
+Keep all Aiven credentials only in ignored `.env` files. In the repository root,
+set `DB_TARGET=aiven`; the legacy Node backend then reads the `AIVEN_DB_*`
+values. In `node-core/.env`, use the Aiven `DATABASE_URL` with
+`uselibpqcompat=true&sslmode=require` and set `DB_POOL_MAX=5`.
+
+Run the C# API through the local launcher so its connection string is assembled
+from the root `.env` without writing credentials to tracked appsettings files:
+
+```powershell
+.\scripts\run-csharp-aiven.ps1
+```
+
+The launcher sets `Maximum Pool Size=8`. Together, the two Node pools and the
+C# pool must stay within Aiven Free PostgreSQL's 20-connection limit.

@@ -3,6 +3,7 @@ import { logger } from '../../shared/utils/logger';
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL || 'postgresql://postgres:120104@localhost:5432/nexusport',
+  max: Number(process.env.DB_POOL_MAX || 5),
 });
 
 pool.on('error', (err) => {
