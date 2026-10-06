@@ -148,6 +148,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IYardService, YardService>();
         services.AddScoped<IYardReceivingService, YardReceivingService>();
         services.AddScoped<IYardTaskService, YardTaskService>();
+        services.AddScoped<IYardRestackService, YardRestackService>();
 
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();
