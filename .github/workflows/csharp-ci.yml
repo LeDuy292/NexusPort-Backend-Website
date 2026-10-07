@@ -1,0 +1,45 @@
+name: NexusPort CSharp CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'csharp-core/**'
+      - '.github/workflows/csharp-ci.yml'
+
+  pull_request:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'csharp-core/**'
+      - '.github/workflows/csharp-ci.yml'
+
+jobs:
+  build-csharp:
+    name: Build & Test C# Core
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: csharp-core
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore NuGet packages
+        run: dotnet restore NexusPort.sln
+
+      - name: Build Solution
+        run: dotnet build NexusPort.sln --configuration Release --no-restore
+
+      - name: Run Tests
+        run: dotnet test NexusPort.sln --configuration Release --no-build --verbosity normal

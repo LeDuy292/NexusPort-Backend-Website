@@ -10,8 +10,8 @@ export class AppError extends Error {
     this.isOperational = isOperational;
 
     Object.setPrototypeOf(this, new.target.prototype);
-    if (typeof (Error as unknown as { captureStackTrace?: Function }).captureStackTrace === 'function') {
-      (Error as unknown as { captureStackTrace: Function }).captureStackTrace(this, this.constructor);
+    if (typeof (Error as unknown as { captureStackTrace?: (...args: unknown[]) => void }).captureStackTrace === 'function') {
+      (Error as unknown as { captureStackTrace: (...args: unknown[]) => void }).captureStackTrace(this, this.constructor);
     }
   }
 }
@@ -41,5 +41,17 @@ export class UnauthorizedError extends AppError {
 export class ForbiddenError extends AppError {
   constructor(message = 'Access forbidden.') {
     super(message, 403, 'FORBIDDEN');
+  }
+}
+
+export class BadRequestError extends AppError {
+  constructor(message = 'Bad request.') {
+    super(message, 400, 'BAD_REQUEST');
+  }
+}
+
+export class ConflictError extends AppError {
+  constructor(message = 'Resource already exists.') {
+    super(message, 409, 'CONFLICT');
   }
 }

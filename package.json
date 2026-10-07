@@ -7,7 +7,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "dev:csharp": "powershell -NoProfile -ExecutionPolicy Bypass -File csharp-core/run.ps1",
     "test": "jest --runInBand --forceExit --detectOpenHandles",
+    "openapi:check": "jest tests/openapi.contract.test.js --runInBand --forceExit",
     "test:coverage": "jest --runInBand --forceExit --detectOpenHandles --coverage",
     "seed": "node src/scripts/seed.js",
     "lint": "eslint src/ --ext .js"

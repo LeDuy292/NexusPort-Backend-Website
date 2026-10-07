@@ -1,14 +1,14 @@
 'use strict';
 
 const express = require('express');
+const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const swaggerUi = require('swagger-ui-express');
 const { swaggerSpec } = require('./docs/swagger');
 const { errorHandler } = require('./middlewares/errorHandler');
-const authRoutes = require('./modules/auth/auth.routes');
-const protectedRoutes = require('./modules/protected/protected.routes');
+const { mountedRouters } = require('./routes');
 const { nodeEnv } = require('./config/env');
 
 const app = express();
@@ -31,11 +31,15 @@ app.use(
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Serve uploaded files statically
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
 if (nodeEnv !== 'test') {
   app.use(morgan('dev'));
 }
 
 // ─── Swagger API Docs ────────────────────────────────────────────────────────
+app.get('/api-docs/openapi.json', (_req, res) => res.json(swaggerSpec));
 app.use(
   '/api-docs',
   swaggerUi.serve,
@@ -47,19 +51,8 @@ app.use(
   })
 );
 
-// ─── Health Check ────────────────────────────────────────────────────────────
-app.get('/api/health', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'NexusPort API đang hoạt động.',
-    timestamp: new Date().toISOString(),
-    environment: nodeEnv,
-  });
-});
-
 // ─── API Routes ──────────────────────────────────────────────────────────────
-app.use('/api/auth', authRoutes);
-app.use('/api', protectedRoutes);       // RBAC protected demo routes
+for (const route of mountedRouters) app.use(route.prefix, route.router);
 
 // ─── 404 Handler ─────────────────────────────────────────────────────────────
 app.use((req, res) => {

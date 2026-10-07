@@ -18,11 +18,11 @@ export class RedisClient {
     this.isConnected = true;
   }
 
-  public async get(key: string): Promise<string | null> {
+  public async get(_key: string): Promise<string | null> {
     return null;
   }
 
-  public async set(key: string, value: string, ttlSeconds?: number): Promise<void> {
+  public async set(key: string, _value: string, _ttlSeconds?: number): Promise<void> {
     logger.debug(`[RedisClient] SET ${key}`);
   }
 }
