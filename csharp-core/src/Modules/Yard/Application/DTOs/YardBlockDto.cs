@@ -29,6 +29,9 @@ public class CreateYardBlockDto
 {
     public string BlockCode { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public int MaxBays { get; set; } = 10;
+    public int MaxRows { get; set; } = 6;
+    public int MaxTiers { get; set; } = 4;
 }
 
 public class CompleteYardOperationDto
