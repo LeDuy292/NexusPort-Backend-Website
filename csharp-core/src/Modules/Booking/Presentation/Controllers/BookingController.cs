@@ -236,6 +236,36 @@ public class BookingController : ControllerBase
         return Ok(item);
     }
 
+    /// <summary>
+    /// Lấy chi tiết thông tin cước phí & thanh toán VietQR cho Booking
+    /// </summary>
+    [HttpGet("{id:guid}/payment")]
+    [ProducesResponseType(typeof(BookingPaymentInfoDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<BookingPaymentInfoDto>> GetPaymentInfo(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.GetPaymentInfoAsync(id, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Thực hiện / Xác nhận thanh toán cước cảng qua VietQR Napas 24/7
+    /// </summary>
+    [HttpPost("{id:guid}/payment")]
+    [ProducesResponseType(typeof(BookingPaymentInfoDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<BookingPaymentInfoDto>> ProcessPayment(
+        Guid id,
+        [FromBody] ProcessBookingPaymentDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.ProcessPaymentAsync(id, dto, cancellationToken);
+        return Ok(result);
+    }
+
     private bool IsCarrierRole()
     {
         var role = _currentUser.Role;
