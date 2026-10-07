@@ -32,18 +32,18 @@ public class BookingValidationService : IBookingValidationService
         // 1. Time Slot Validation
         if (dto.AppointmentStart >= dto.AppointmentEnd)
         {
-            AddError(nameof(dto.AppointmentStart), "AppointmentStart must be earlier than AppointmentEnd.");
+            AddError(nameof(dto.AppointmentStart), "Khung giờ bắt đầu hẹn phải sớm hơn khung giờ kết thúc.");
         }
 
         if (dto.AppointmentStart < DateTime.UtcNow.AddMinutes(-10))
         {
-            AddError(nameof(dto.AppointmentStart), "AppointmentStart cannot be in the past.");
+            AddError(nameof(dto.AppointmentStart), "Khung giờ hẹn vào cổng không được ở trong quá khứ.");
         }
 
         // 2. Carrier Validation
         if (dto.CarrierId == Guid.Empty)
         {
-            AddError(nameof(dto.CarrierId), "CarrierId is required and cannot be empty.");
+            AddError(nameof(dto.CarrierId), "Thông tin Hãng vận tải (CarrierId) là bắt buộc và không được để trống.");
         }
 
         // 3. Driver Validation
@@ -55,18 +55,18 @@ public class BookingValidationService : IBookingValidationService
 
             if (driver == null)
             {
-                AddError(nameof(dto.DriverId), $"Driver with ID '{dto.DriverId}' was not found.");
+                AddError(nameof(dto.DriverId), $"Không tìm thấy thông tin tài xế (Mã: '{dto.DriverId}') trong hệ thống cảng.");
             }
             else
             {
                 if (driver.CarrierId != dto.CarrierId)
                 {
-                    AddError(nameof(dto.DriverId), $"Driver '{driver.FullName}' does not belong to the specified Transport Company (Carrier).");
+                    AddError(nameof(dto.DriverId), $"Tài xế '{driver.FullName}' không thuộc quản lý của Hãng vận tải đã chọn.");
                 }
 
                 if (driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive || driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned)
                 {
-                    AddError(nameof(dto.DriverId), $"Driver '{driver.FullName}' is currently not active (Status: {driver.Status}).");
+                    AddError(nameof(dto.DriverId), $"Tài xế '{driver.FullName}' hiện không ở trạng thái sẵn sàng (Trạng thái hiện tại: {driver.Status}).");
                 }
             }
         }
@@ -80,18 +80,18 @@ public class BookingValidationService : IBookingValidationService
 
             if (truck == null)
             {
-                AddError(nameof(dto.TruckId), $"Vehicle with ID '{dto.TruckId}' was not found.");
+                AddError(nameof(dto.TruckId), $"Không tìm thấy thông tin xe đầu kéo (Mã: '{dto.TruckId}') trong hệ thống cảng.");
             }
             else
             {
                 if (truck.CarrierId != dto.CarrierId)
                 {
-                    AddError(nameof(dto.TruckId), $"Vehicle '{truck.PlateNumber}' does not belong to the specified Transport Company (Carrier).");
+                    AddError(nameof(dto.TruckId), $"Xe đầu kéo '{truck.PlateNumber}' không thuộc đội xe của Hãng vận tải đã chọn.");
                 }
 
                 if (truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.inactive || truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.maintenance)
                 {
-                    AddError(nameof(dto.TruckId), $"Vehicle '{truck.PlateNumber}' is currently not active (Status: {truck.Status}).");
+                    AddError(nameof(dto.TruckId), $"Xe đầu kéo '{truck.PlateNumber}' hiện không ở trạng thái sẵn sàng (Trạng thái hiện tại: {truck.Status}).");
                 }
             }
         }
@@ -109,7 +109,7 @@ public class BookingValidationService : IBookingValidationService
             {
                 var foundIds = containers.Select(c => c.Id).ToHashSet();
                 var missingIds = distinctContainerIds.Where(id => !foundIds.Contains(id));
-                AddError(nameof(dto.ContainerIds), $"The following Container IDs were not found: {string.Join(", ", missingIds)}");
+                AddError(nameof(dto.ContainerIds), $"Không tìm thấy các Container sau trong bãi cảng: {string.Join(", ", missingIds)}");
             }
             else
             {
@@ -117,15 +117,15 @@ public class BookingValidationService : IBookingValidationService
                 {
                     if (dto.BookingType == BookingType.Dropoff && string.Equals(container.Status, "gate_in", StringComparison.OrdinalIgnoreCase))
                     {
-                        AddError(nameof(dto.ContainerIds), $"Container '{container.ContainerNumber}' is already inside the port (Status: {container.Status}).");
+                        AddError(nameof(dto.ContainerIds), $"Container '{container.ContainerNumber}' đã nằm trong bãi cảng (Trạng thái: {container.Status}). Không thể tạo lịch hạ container.");
                     }
                     else if (dto.BookingType == BookingType.Pickup && string.Equals(container.Status, "gate_out", StringComparison.OrdinalIgnoreCase))
                     {
-                        AddError(nameof(dto.ContainerIds), $"Container '{container.ContainerNumber}' has already exited the port (Status: {container.Status}).");
+                        AddError(nameof(dto.ContainerIds), $"Container '{container.ContainerNumber}' đã rời khỏi cảng (Trạng thái: {container.Status}). Không thể tạo lịch lấy container.");
                     }
                     else if (string.Equals(container.Status, "canceled", StringComparison.OrdinalIgnoreCase))
                     {
-                        AddError(nameof(dto.ContainerIds), $"Container '{container.ContainerNumber}' is canceled and cannot be booked.");
+                        AddError(nameof(dto.ContainerIds), $"Container '{container.ContainerNumber}' đã bị hủy trên hệ thống và không thể đặt lịch.");
                     }
                 }
             }
@@ -148,13 +148,13 @@ public class BookingValidationService : IBookingValidationService
             if (dto.DriverId.HasValue && dto.DriverId.Value != Guid.Empty &&
                 overlappingBookings.Any(b => b.DriverId == dto.DriverId.Value))
             {
-                AddError(nameof(dto.DriverId), "Driver already has an active booking during this overlapping time slot.");
+                AddError(nameof(dto.DriverId), "Tài xế đã có một lịch hẹn đặt chỗ khác đang hoạt động trong khung giờ bị trùng lặp này.");
             }
 
             if (dto.TruckId.HasValue && dto.TruckId.Value != Guid.Empty &&
                 overlappingBookings.Any(b => b.TruckId == dto.TruckId.Value))
             {
-                AddError(nameof(dto.TruckId), "Vehicle (Truck) already has an active booking during this overlapping time slot.");
+                AddError(nameof(dto.TruckId), "Xe đầu kéo đã có một lịch hẹn đặt chỗ khác đang hoạt động trong khung giờ bị trùng lặp này.");
             }
 
             if (dto.ContainerIds != null && dto.ContainerIds.Any())
@@ -167,7 +167,7 @@ public class BookingValidationService : IBookingValidationService
                 var duplicateContainers = dto.ContainerIds.Where(id => reservedContainerIds.Contains(id)).ToList();
                 if (duplicateContainers.Any())
                 {
-                    AddError(nameof(dto.ContainerIds), $"Containers '{string.Join(", ", duplicateContainers)}' are already reserved in an active booking during this time slot.");
+                    AddError(nameof(dto.ContainerIds), $"Các Container sau đã được giữ chỗ trong một lịch hẹn khác trong khung giờ này: {string.Join(", ", duplicateContainers)}");
                 }
             }
         }

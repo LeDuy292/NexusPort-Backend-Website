@@ -192,7 +192,7 @@ public class BookingService : IBookingService
         // Business Rule Check: Only Pending bookings can be updated by Transport Company
         if (entity.Status != BookingStatus.Pending)
         {
-            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be updated.");
+            throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể cập nhật.");
         }
 
         // Re-validate updated request values
@@ -262,12 +262,12 @@ public class BookingService : IBookingService
         // Business Rule Check: Cannot cancel if already checked-in or completed
         if (entity.Status == BookingStatus.CheckedIn || entity.Status == BookingStatus.Completed)
         {
-            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be canceled.");
+            throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể hủy.");
         }
 
         if (entity.Status == BookingStatus.Canceled)
         {
-            throw new ValidationException("Status", "Booking is already canceled.");
+            throw new ValidationException("Status", "Lịch hẹn đã bị hủy trước đó.");
         }
 
         entity.Cancel();
@@ -352,7 +352,7 @@ public class BookingService : IBookingService
                 await EnrichBookingDtosAsync(new List<BookingDto> { existingDto }, cancellationToken);
                 return existingDto;
             }
-            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be approved.");
+            throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể duyệt.");
         }
 
         entity.Approve(approvedBy);
@@ -391,7 +391,7 @@ public class BookingService : IBookingService
                 await EnrichBookingDtosAsync(new List<BookingDto> { existingDto }, cancellationToken);
                 return existingDto;
             }
-            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be rejected.");
+            throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể từ chối.");
         }
 
         entity.Reject(reason);
@@ -624,7 +624,7 @@ public class BookingService : IBookingService
 
         if (entity.Status is not (BookingStatus.Pending or BookingStatus.Ready or BookingStatus.Approved))
         {
-            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be re-assigned.");
+            throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể điều phối lại phương tiện.");
         }
 
         // Validate Driver
@@ -633,11 +633,11 @@ public class BookingService : IBookingService
             .FirstOrDefaultAsync(d => d.Id == dto.DriverId, cancellationToken);
         if (driver == null)
         {
-            throw new ValidationException("DriverId", $"Driver with ID '{dto.DriverId}' does not exist.");
+            throw new ValidationException("DriverId", $"Không tìm thấy thông tin tài xế trong hệ thống.");
         }
         if (driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive || driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned)
         {
-            throw new ValidationException("DriverId", $"Driver '{driver.FullName}' is not active.");
+            throw new ValidationException("DriverId", $"Tài xế '{driver.FullName}' hiện không ở trạng thái sẵn sàng hoạt động.");
         }
 
         // Validate Vehicle / Truck
@@ -646,11 +646,11 @@ public class BookingService : IBookingService
             .FirstOrDefaultAsync(v => v.Id == dto.TruckId, cancellationToken);
         if (truck == null)
         {
-            throw new ValidationException("TruckId", $"Vehicle with ID '{dto.TruckId}' does not exist.");
+            throw new ValidationException("TruckId", $"Không tìm thấy thông tin xe đầu kéo trong hệ thống.");
         }
         if (truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.inactive || truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.maintenance)
         {
-            throw new ValidationException("TruckId", $"Vehicle '{truck.PlateNumber}' is not active.");
+            throw new ValidationException("TruckId", $"Xe đầu kéo '{truck.PlateNumber}' hiện không ở trạng thái sẵn sàng hoạt động.");
         }
 
         // Validate Container
@@ -668,7 +668,7 @@ public class BookingService : IBookingService
 
         if (!containerIds.Any())
         {
-            throw new ValidationException("ContainerIds", "At least one valid container must be assigned.");
+            throw new ValidationException("ContainerIds", "Phải chỉ định ít nhất một container hợp lệ cho lịch hẹn.");
         }
 
         var existingContainers = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
@@ -677,7 +677,7 @@ public class BookingService : IBookingService
             .ToListAsync(cancellationToken);
         if (existingContainers.Count != containerIds.Count)
         {
-            throw new ValidationException("ContainerIds", "One or more assigned container IDs do not exist.");
+            throw new ValidationException("ContainerIds", "Một hoặc nhiều container được chỉ định không tồn tại trong hệ thống cảng.");
         }
 
         // Check overlapping bookings
@@ -693,7 +693,7 @@ public class BookingService : IBookingService
                            b.AppointmentEnd > entity.AppointmentStart, cancellationToken);
         if (overlapping)
         {
-            throw new ValidationException("Overlap", "Driver or Vehicle already has an active booking during this overlapping time slot.");
+            throw new ValidationException("Overlap", "Tài xế hoặc xe đầu kéo đã có một lịch hẹn đặt chỗ khác đang hoạt động trong khung giờ bị trùng lặp này.");
         }
 
         entity.DriverId = dto.DriverId;
@@ -1217,7 +1217,211 @@ public class BookingService : IBookingService
                     .Select(cid => containersDict.TryGetValue(cid, out var cNum) ? cNum : cid.ToString())
                     .ToList();
             }
+
+            if (dto.Status == BookingStatus.Ready || dto.Status == BookingStatus.CheckedIn || dto.Status == BookingStatus.Completed)
+            {
+                dto.PaymentStatus = "Paid";
+            }
         }
+    }
+
+    public async Task<BookingPaymentInfoDto> GetPaymentInfoAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var booking = await _repository.GetByIdWithContainersAsync(id, cancellationToken);
+        if (booking == null)
+        {
+            throw new NotFoundException("Booking", id.ToString());
+        }
+
+        // Determine fee based on booking container size
+        bool is40Ft = false;
+        if (booking.BookingContainers.Any())
+        {
+            var cIds = booking.BookingContainers.Select(bc => bc.ContainerId).ToList();
+            var contNumbers = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+                .Where(c => cIds.Contains(c.Id))
+                .Select(c => c.ContainerNumber)
+                .ToListAsync(cancellationToken);
+            is40Ft = contNumbers.Any(n => n != null && (n.Contains("40") || n.Contains("45") || n.StartsWith("TEMU")));
+        }
+
+        decimal handlingFee = is40Ft ? 650000m : 450000m;
+        decimal weighingFee = 50000m;
+        decimal infrastructureFee = 40000m;
+        decimal subtotal = handlingFee + weighingFee + infrastructureFee;
+        decimal taxAmount = Math.Round(subtotal * 0.08m, 0);
+        decimal totalAmount = subtotal + taxAmount;
+
+        // Check if invoice or payment already exists in DB
+        string status = (booking.Status == BookingStatus.Completed || booking.Status == BookingStatus.CheckedIn) ? "Paid" : "Unpaid";
+        string? invoiceNo = null;
+        string? txnRef = null;
+        DateTime? paidAt = null;
+
+        try
+        {
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+            {
+                await conn.OpenAsync(cancellationToken);
+            }
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT i.invoice_no, p.transaction_ref, p.paid_at, p.status::text as payment_status
+                FROM invoices i
+                LEFT JOIN payments p ON p.invoice_id = i.id
+                WHERE i.invoice_no = @invNo OR i.invoice_no LIKE @invPattern
+                LIMIT 1";
+            
+            var p1 = cmd.CreateParameter();
+            p1.ParameterName = "@invNo";
+            p1.Value = $"INV-NP-{booking.BookingCode}";
+            cmd.Parameters.Add(p1);
+
+            var p2 = cmd.CreateParameter();
+            p2.ParameterName = "@invPattern";
+            p2.Value = $"%{booking.BookingCode}%";
+            cmd.Parameters.Add(p2);
+
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                invoiceNo = reader.IsDBNull(0) ? null : reader.GetString(0);
+                txnRef = reader.IsDBNull(1) ? null : reader.GetString(1);
+                paidAt = reader.IsDBNull(2) ? null : reader.GetDateTime(2);
+                var pStat = reader.IsDBNull(3) ? null : reader.GetString(3);
+                if (pStat == "success" || pStat == "paid")
+                {
+                    status = "Paid";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not query invoices/payments table for booking {BookingCode}", booking.BookingCode);
+        }
+
+        string transferContent = $"NP {booking.BookingCode}";
+        string qrUrl = $"https://img.vietqr.io/image/MB-190388668899-compact2.png?amount={totalAmount:0}&addInfo={Uri.EscapeDataString(transferContent)}&accountName={Uri.EscapeDataString("CONG TY CP CANG QUOC TE NEXUSPORT")}";
+
+        return new BookingPaymentInfoDto
+        {
+            BookingId = booking.Id,
+            BookingCode = booking.BookingCode,
+            PaymentStatus = status,
+            HandlingFee = handlingFee,
+            WeighingFee = weighingFee,
+            InfrastructureFee = infrastructureFee,
+            Subtotal = subtotal,
+            TaxAmount = taxAmount,
+            TotalAmount = totalAmount,
+            InvoiceNo = invoiceNo ?? $"INV-NP-{booking.BookingCode}",
+            TransactionRef = txnRef ?? (status == "Paid" ? $"TXN-NP-{booking.BookingCode}" : null),
+            PaidAt = paidAt ?? (status == "Paid" ? booking.CreatedAt : null),
+            PaymentMethod = "VietQR",
+            BankName = "MB Bank (Ngân Hàng TMCP Quân Đội)",
+            AccountNo = "190388668899",
+            AccountName = "CÔNG TY CP CẢNG QUỐC TẾ NEXUSPORT",
+            TransferContent = transferContent,
+            QrUrl = qrUrl
+        };
+    }
+
+    public async Task<BookingPaymentInfoDto> ProcessPaymentAsync(Guid id, ProcessBookingPaymentDto dto, CancellationToken cancellationToken = default)
+    {
+        var booking = await _repository.GetByIdWithContainersAsync(id, cancellationToken);
+        if (booking == null)
+        {
+            throw new NotFoundException("Booking", id.ToString());
+        }
+
+        // Get payment calculation
+        var info = await GetPaymentInfoAsync(id, cancellationToken);
+        var txnRef = !string.IsNullOrWhiteSpace(dto.TransactionRef) 
+            ? dto.TransactionRef 
+            : $"TXN-NP-{DateTime.UtcNow:yyyyMMddHHmmss}-{Random.Shared.Next(1000, 9999)}";
+        var invoiceNo = $"INV-NP-{booking.BookingCode}";
+        var now = DateTime.UtcNow;
+
+        try
+        {
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+            {
+                await conn.OpenAsync(cancellationToken);
+            }
+
+            // 1. Create or get invoice
+            var invoiceId = Guid.NewGuid();
+            using (var cmdInv = conn.CreateCommand())
+            {
+                cmdInv.CommandText = @"
+                    INSERT INTO invoices (id, carrier_id, invoice_no, status, subtotal, tax_amount, total_amount, paid_amount, issued_by, issued_at, due_date, created_at)
+                    VALUES (@id, @carrierId, @invNo, 'paid'::invoice_status, @subtotal, @tax, @total, @paid, @issuedBy, @issuedAt, @dueDate, @createdAt)
+                    ON CONFLICT (id) DO NOTHING;";
+                
+                var pId = cmdInv.CreateParameter(); pId.ParameterName = "@id"; pId.Value = invoiceId; cmdInv.Parameters.Add(pId);
+                var pCarrier = cmdInv.CreateParameter(); pCarrier.ParameterName = "@carrierId"; pCarrier.Value = booking.CarrierId; cmdInv.Parameters.Add(pCarrier);
+                var pInvNo = cmdInv.CreateParameter(); pInvNo.ParameterName = "@invNo"; pInvNo.Value = invoiceNo; cmdInv.Parameters.Add(pInvNo);
+                var pSub = cmdInv.CreateParameter(); pSub.ParameterName = "@subtotal"; pSub.Value = info.Subtotal; cmdInv.Parameters.Add(pSub);
+                var pTax = cmdInv.CreateParameter(); pTax.ParameterName = "@tax"; pTax.Value = info.TaxAmount; cmdInv.Parameters.Add(pTax);
+                var pTot = cmdInv.CreateParameter(); pTot.ParameterName = "@total"; pTot.Value = info.TotalAmount; cmdInv.Parameters.Add(pTot);
+                var pPaid = cmdInv.CreateParameter(); pPaid.ParameterName = "@paid"; pPaid.Value = info.TotalAmount; cmdInv.Parameters.Add(pPaid);
+                var pBy = cmdInv.CreateParameter(); pBy.ParameterName = "@issuedBy"; pBy.Value = booking.CarrierId; cmdInv.Parameters.Add(pBy);
+                var pAt = cmdInv.CreateParameter(); pAt.ParameterName = "@issuedAt"; pAt.Value = now; cmdInv.Parameters.Add(pAt);
+                var pDue = cmdInv.CreateParameter(); pDue.ParameterName = "@dueDate"; pDue.Value = now.Date; cmdInv.Parameters.Add(pDue);
+                var pCr = cmdInv.CreateParameter(); pCr.ParameterName = "@createdAt"; pCr.Value = now; cmdInv.Parameters.Add(pCr);
+
+                await cmdInv.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            // 2. Insert payment record
+            using (var cmdPay = conn.CreateCommand())
+            {
+                cmdPay.CommandText = @"
+                    INSERT INTO payments (id, invoice_id, method, status, amount, transaction_ref, paid_at, created_at)
+                    VALUES (@id, @invoiceId, 'vietqr'::payment_method, 'success'::payment_status, @amount, @txnRef, @paidAt, @createdAt);";
+
+                var pId = cmdPay.CreateParameter(); pId.ParameterName = "@id"; pId.Value = Guid.NewGuid(); cmdPay.Parameters.Add(pId);
+                var pInvId = cmdPay.CreateParameter(); pInvId.ParameterName = "@invoiceId"; pInvId.Value = invoiceId; cmdPay.Parameters.Add(pInvId);
+                var pAmt = cmdPay.CreateParameter(); pAmt.ParameterName = "@amount"; pAmt.Value = info.TotalAmount; cmdPay.Parameters.Add(pAmt);
+                var pTxn = cmdPay.CreateParameter(); pTxn.ParameterName = "@txnRef"; pTxn.Value = txnRef; cmdPay.Parameters.Add(pTxn);
+                var pPaidAt = cmdPay.CreateParameter(); pPaidAt.ParameterName = "@paidAt"; pPaidAt.Value = now; cmdPay.Parameters.Add(pPaidAt);
+                var pCr = cmdPay.CreateParameter(); pCr.ParameterName = "@createdAt"; pCr.Value = now; cmdPay.Parameters.Add(pCr);
+
+                await cmdPay.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not write to raw invoices/payments table: {Message}", ex.Message);
+        }
+
+        // 3. Update booking status: If Approved or Pending -> Ready (Ready for Gate-In)
+        if (booking.Status == BookingStatus.Approved || booking.Status == BookingStatus.Pending)
+        {
+            booking.MarkReady();
+            await _repository.UpdateAsync(booking, cancellationToken);
+        }
+
+        // 4. Send Notification to Carrier
+        await _notificationService.SendAsync(new SendNotificationDto
+        {
+            RecipientId = booking.CarrierId,
+            Title = $"Thanh toán thành công Booking {booking.BookingCode}",
+            Message = $"Đã quyết toán cước cảng {info.TotalAmount:N0} VNĐ cho Booking {booking.BookingCode} qua VietQR Napas 24/7. Vé điện tử e-Pass vào cổng đã sẵn sàng!",
+            Type = NotificationType.BookingApproved,
+            Severity = NotificationSeverity.Success,
+            ReferenceId = booking.BookingCode
+        }, cancellationToken);
+
+        info.PaymentStatus = "Paid";
+        info.TransactionRef = txnRef;
+        info.PaidAt = now;
+        info.InvoiceNo = invoiceNo;
+
+        return info;
     }
 
     private static BookingDto MapToDto(Domain.Entities.Booking entity)
@@ -1246,7 +1450,8 @@ public class BookingService : IBookingService
             DriverName = entity.DriverName,
             ValidFrom = entity.ValidFrom ?? entity.AppointmentStart,
             ValidTo = entity.ValidTo ?? entity.AppointmentEnd,
-            GateType = entity.GateType
+            PaymentStatus = (entity.Status == BookingStatus.Ready || entity.Status == BookingStatus.CheckedIn || entity.Status == BookingStatus.Completed) ? "Paid" : "Unpaid",
+            TotalAmount = 583200m
         };
     }
 }

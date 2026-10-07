@@ -31,6 +31,13 @@ public class BookingDto
     public DateTime CreatedAt { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
     public List<string> ContainerNumbers { get; set; } = new();
+
+    // Payment & TOS Tariff details
+    public string PaymentStatus { get; set; } = "Unpaid";
+    public decimal TotalAmount { get; set; } = 583200m;
+    public string? InvoiceNo { get; set; }
+    public string? TransactionRef { get; set; }
+    public DateTime? PaidAt { get; set; }
 }
 
 public class CreateBookingDto
@@ -203,4 +210,35 @@ public class PayloadEvaluationDto
     public string WarningMessage { get; set; } = string.Empty;
     public bool IsSafe { get; set; } = true;
 }
+
+public class BookingPaymentInfoDto
+{
+    public Guid BookingId { get; set; }
+    public string BookingCode { get; set; } = string.Empty;
+    public string PaymentStatus { get; set; } = "Unpaid";
+    public decimal HandlingFee { get; set; } = 450000m;
+    public decimal WeighingFee { get; set; } = 50000m;
+    public decimal InfrastructureFee { get; set; } = 40000m;
+    public decimal Subtotal { get; set; } = 540000m;
+    public decimal TaxAmount { get; set; } = 43200m;
+    public decimal TotalAmount { get; set; } = 583200m;
+    public string? InvoiceNo { get; set; }
+    public string? TransactionRef { get; set; }
+    public string? PaymentMethod { get; set; } = "VietQR";
+    public DateTime? PaidAt { get; set; }
+    public string BankName { get; set; } = "MB Bank (Ngân Hàng TMCP Quân Đội)";
+    public string AccountNo { get; set; } = "190388668899";
+    public string AccountName { get; set; } = "CONG TY CP CANG QUOC TE NEXUSPORT";
+    public string TransferContent { get; set; } = string.Empty;
+    public string QrUrl { get; set; } = string.Empty;
+}
+
+public class ProcessBookingPaymentDto
+{
+    public string? Method { get; set; } = "vietqr";
+    public string? TransactionRef { get; set; }
+    public decimal? Amount { get; set; }
+    public string? Note { get; set; }
+}
+
 
