@@ -184,9 +184,114 @@ public class YardService : IYardService
 
     public async Task<YardBlockDto> CreateAsync(CreateYardBlockDto dto, CancellationToken cancellationToken = default)
     {
-        var entity = new YardBlock(dto.BlockCode, dto.Description ?? "") { Zone = "Active", MaxCapacity = 200 };
+        var existing = await _context.Set<YardBlock>().FirstOrDefaultAsync(b => b.Code == dto.BlockCode, cancellationToken);
+        if (existing != null)
+        {
+            throw new ArgumentException($"Block with code '{dto.BlockCode}' already exists.");
+        }
+
+        var entity = new YardBlock(dto.BlockCode, dto.Description ?? "") { Zone = "Active", MaxCapacity = dto.MaxBays * dto.MaxRows * dto.MaxTiers };
+        
         await _repository.AddAsync(entity, cancellationToken);
+
+        // Insert slots using raw SQL to bypass the text to yard_slot_status cast issue in EF Core
+        var sql = new System.Text.StringBuilder("INSERT INTO yard_slots (id, block_id, bay, row_no, tier, status, has_reefer_plug) VALUES ");
+        var parameters = new List<object>();
+        int paramIndex = 0;
+
+        for (int bay = 1; bay <= dto.MaxBays; bay++)
+        {
+            for (int row = 1; row <= dto.MaxRows; row++)
+            {
+                for (int tier = 1; tier <= dto.MaxTiers; tier++)
+                {
+                    if (paramIndex > 0) sql.Append(", ");
+                    sql.Append($"({{{paramIndex}}}, {{{paramIndex + 1}}}, {{{paramIndex + 2}}}, {{{paramIndex + 3}}}, {{{paramIndex + 4}}}, 'empty'::yard_slot_status, false)");
+                    
+                    parameters.Add(Guid.NewGuid());
+                    parameters.Add(entity.Id);
+                    parameters.Add(bay);
+                    parameters.Add(row);
+                    parameters.Add(tier);
+                    
+                    paramIndex += 5;
+                }
+            }
+        }
+
+        if (paramIndex > 0)
+        {
+            await _context.Database.ExecuteSqlRawAsync(sql.ToString(), parameters.ToArray());
+        }
+
         return MapToDto(entity);
+    }
+
+    public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        // Delete slots first
+        await _context.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM yard_slots WHERE block_id = {id}", cancellationToken);
+        
+        // Delete block
+        await _repository.DeleteAsync(id, cancellationToken);
+    }
+
+    public async Task<YardSlotDto?> ReserveSlotAsync(Guid blockId, CancellationToken cancellationToken = default)
+    {
+        var emptySlot = await _context.Set<YardSlot>()
+            .Where(s => s.YardBlockId == blockId && s.Status == "empty")
+            .OrderBy(s => s.Tier)
+            .ThenBy(s => s.Row)
+            .ThenBy(s => s.Bay)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (emptySlot == null)
+            return null; // No empty slots available in this block
+
+        emptySlot.Status = "reserved";
+        _context.Entry(emptySlot).State = EntityState.Unchanged; // Keep EF Core from generating normal UPDATE
+        
+        // Raw SQL because EF Core has issues casting to the custom enum 'yard_slot_status'
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE yard_slots SET status = 'reserved'::yard_slot_status WHERE id = {emptySlot.Id}", 
+            cancellationToken);
+            
+        return new YardSlotDto
+        {
+            Id = emptySlot.Id,
+            YardBlockId = emptySlot.YardBlockId,
+            Bay = emptySlot.Bay,
+            Row = emptySlot.Row,
+            Tier = emptySlot.Tier,
+            Status = "reserved"
+        };
+    }
+
+    public async Task<YardSlotDto?> ReserveSpecificSlotAsync(Guid slotId, CancellationToken cancellationToken = default)
+    {
+        var emptySlot = await _context.Set<YardSlot>()
+            .FirstOrDefaultAsync(s => s.Id == slotId && s.Status == "empty", cancellationToken);
+
+        if (emptySlot == null)
+            return null; // Slot not found or not empty
+
+        emptySlot.Status = "reserved";
+        _context.Entry(emptySlot).State = EntityState.Unchanged; // Keep EF Core from generating normal UPDATE
+        
+        // Raw SQL because EF Core has issues casting to the custom enum 'yard_slot_status'
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE yard_slots SET status = 'reserved'::yard_slot_status WHERE id = {emptySlot.Id}", 
+            cancellationToken);
+            
+        return new YardSlotDto
+        {
+            Id = emptySlot.Id,
+            YardBlockId = emptySlot.YardBlockId,
+            Bay = emptySlot.Bay,
+            Row = emptySlot.Row,
+            Tier = emptySlot.Tier,
+            Status = "reserved"
+        };
     }
 
     public async Task<YardOperationCompletionDto> CompleteOperationAsync(Guid operationId, CompleteYardOperationDto dto, CancellationToken cancellationToken = default)

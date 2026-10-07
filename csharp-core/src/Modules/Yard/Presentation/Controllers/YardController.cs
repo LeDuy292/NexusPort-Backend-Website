@@ -25,8 +25,42 @@ public class YardController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<YardBlockDto>> Create([FromBody] CreateYardBlockDto dto, CancellationToken cancellationToken)
     {
-        var item = await _service.CreateAsync(dto, cancellationToken);
-        return CreatedAtAction(nameof(GetById), new { id = item.Id }, item);
+        try
+        {
+            var item = await _service.CreateAsync(dto, cancellationToken);
+            return CreatedAtAction(nameof(GetById), new { id = item.Id }, item);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<ActionResult> Delete(Guid id, CancellationToken cancellationToken)
+    {
+        await _service.DeleteAsync(id, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPost("Block/{id:guid}/Reserve")]
+    public async Task<ActionResult<YardSlotDto>> ReserveSlot(Guid id, CancellationToken cancellationToken)
+    {
+        var slot = await _service.ReserveSlotAsync(id, cancellationToken);
+        if (slot == null)
+            return BadRequest(new { message = "No empty slots available in this block." });
+            
+        return Ok(slot);
+    }
+
+    [HttpPost("Slots/{id:guid}/Reserve")]
+    public async Task<ActionResult<YardSlotDto>> ReserveSpecificSlot(Guid id, CancellationToken cancellationToken)
+    {
+        var slot = await _service.ReserveSpecificSlotAsync(id, cancellationToken);
+        if (slot == null)
+            return BadRequest(new { message = "Slot not found or is not empty." });
+            
+        return Ok(slot);
     }
 
     [HttpGet("Map")]
