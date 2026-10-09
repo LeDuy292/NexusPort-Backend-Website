@@ -37,7 +37,7 @@ const router = Router();
 router.get(
   '/driver/trips',
   authenticate,
-  authorize('Driver', 'Administrator', 'Dispatcher'),
+  authorize('Driver', 'Administrator'),
   ctrl.getMyTrips
 );
 
@@ -63,7 +63,7 @@ router.get(
 router.get(
   '/driver/trips/:id',
   authenticate,
-  authorize('Driver', 'Administrator', 'Dispatcher'),
+  authorize('Driver', 'Administrator'),
   ctrl.getTripById
 );
 
