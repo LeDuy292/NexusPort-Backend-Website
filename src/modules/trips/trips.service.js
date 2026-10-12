@@ -3,6 +3,7 @@
 const { Op } = require('sequelize');
 const { sequelize } = require('../../config/database');
 const { TransportTrip, TransportTripHistory, NEXT_STATUS_MAP, TRIP_STATUS_ORDER } = require('../../models/TransportTrip');
+const { emitTripStatusUpdated, emitTripAssigned } = require('../../config/socket');
 
 /**
  * Tạo lịch sử khi thay đổi trạng thái chuyến.
@@ -158,7 +159,7 @@ async function confirmContainerPickup(tripId, driverId, note) {
  * Gate In và chuyển sang In Transit trong 1 bước.
  */
 async function confirmGateIn(tripId, driverId, note) {
-  return sequelize.transaction(async (t) => {
+  const result = await sequelize.transaction(async (t) => {
     const trip = await findAndValidateTrip(tripId, driverId, 'Container Picked Up', t);
     const fromStatus = trip.status;
     const now = new Date();
@@ -173,6 +174,9 @@ async function confirmGateIn(tripId, driverId, note) {
 
     return { ...formatTrip(trip), nextStep: NEXT_STATUS_MAP['In Transit'] };
   });
+
+  emitTripStatusUpdated(result, 'In Transit');
+  return result;
 }
 
 /**
@@ -187,7 +191,7 @@ async function confirmArrivedAtYard(tripId, driverId, note) {
  */
 async function confirmContainerDelivery(tripId, driverId, deliveryData = {}) {
   const note = typeof deliveryData === 'string' ? deliveryData : deliveryData.note;
-  return sequelize.transaction(async (t) => {
+  const result = await sequelize.transaction(async (t) => {
     const trip = await findAndValidateTrip(tripId, driverId, 'Arrived at Yard', t);
     const fromStatus = trip.status;
 
@@ -211,6 +215,9 @@ async function confirmContainerDelivery(tripId, driverId, deliveryData = {}) {
 
     return { ...formatTrip(trip), nextStep: NEXT_STATUS_MAP['Container Delivered'] || null };
   });
+
+  emitTripStatusUpdated(result, 'Container Delivered');
+  return result;
 }
 
 /**
@@ -225,7 +232,7 @@ async function confirmGateOut(tripId, driverId, note) {
  * Trả xe và hoàn thành chuyến trong 1 bước.
  */
 async function confirmVehicleReturn(tripId, driverId, note) {
-  return sequelize.transaction(async (t) => {
+  const result = await sequelize.transaction(async (t) => {
     const trip = await findAndValidateTrip(tripId, driverId, 'Gate Out Completed', t);
     const fromStatus = trip.status;
     const now = new Date();
@@ -240,6 +247,9 @@ async function confirmVehicleReturn(tripId, driverId, note) {
 
     return { ...formatTrip(trip), nextStep: null };
   });
+
+  emitTripStatusUpdated(result, 'Completed');
+  return result;
 }
 
 /**
@@ -281,7 +291,9 @@ async function createTrip(data) {
 
   await recordHistory(trip.id, null, 'Assigned', data.assignedBy, 'Chuyến được tạo và giao cho tài xế');
 
-  return formatTrip(trip);
+  const formatted = formatTrip(trip);
+  emitTripAssigned(formatted);
+  return formatted;
 }
 
 /**
@@ -487,7 +499,7 @@ async function findAndValidateTrip(tripId, driverId, expectedStatus, transaction
  * Utility: advance trạng thái theo 1 bước đơn giản.
  */
 async function advanceStatus(tripId, driverId, requiredStatus, newStatus, timeField, note = null) {
-  return sequelize.transaction(async (t) => {
+  const result = await sequelize.transaction(async (t) => {
     const trip = await findAndValidateTrip(tripId, driverId, requiredStatus, t);
     const fromStatus = trip.status;
 
@@ -499,6 +511,9 @@ async function advanceStatus(tripId, driverId, requiredStatus, newStatus, timeFi
 
     return { ...formatTrip(trip), nextStep: NEXT_STATUS_MAP[newStatus] || null };
   });
+
+  emitTripStatusUpdated(result, newStatus);
+  return result;
 }
 
 /**

@@ -3,9 +3,11 @@
 // Load env & validate trước khi làm gì khác
 require('./src/config/env');
 
+const http = require('http');
 const app = require('./src/app');
 const { connectDB, syncDB } = require('./src/config/database');
 const { port, nodeEnv } = require('./src/config/env');
+const { initSocket } = require('./src/config/socket');
 
 // Preload tất cả models để Sequelize nhận diện khi syncDB
 require('./src/models/User');
@@ -21,8 +23,11 @@ async function startServer() {
       await syncDB({ alter: true });
     }
 
-    // 3. Khởi động HTTP server
-    app.listen(port, () => {
+    // 3. Khởi động HTTP server & Socket.IO
+    const server = http.createServer(app);
+    initSocket(server);
+
+    server.listen(port, () => {
       console.log('');
       console.log('╔══════════════════════════════════════════════════════════════════╗');
       console.log('║                  NexusPort API Server                            ║');
@@ -31,7 +36,7 @@ async function startServer() {
       console.log(`║  Port        : ${String(port).padEnd(50)}║`);
       console.log(`║  API Base    : ${`http://localhost:${port}/api`.padEnd(50)}║`);
       console.log(`║  Swagger JS  : ${`http://localhost:${port}/api-docs`.padEnd(50)}║`);
-      console.log('║  Swagger TS  : http://localhost:4000/api-docs                    ║');
+      console.log(`║  Realtime    : ${`ws://localhost:${port} (Socket.IO enabled)`.padEnd(50)}║`);
       console.log('╚══════════════════════════════════════════════════════════════════╝');
       console.log('');
     });
