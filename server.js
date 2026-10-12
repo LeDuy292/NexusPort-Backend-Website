@@ -7,6 +7,10 @@ const app = require('./src/app');
 const { connectDB, syncDB } = require('./src/config/database');
 const { port, nodeEnv } = require('./src/config/env');
 
+// Preload tất cả models để Sequelize nhận diện khi syncDB
+require('./src/models/User');
+require('./src/models/TransportTrip');
+
 async function startServer() {
   try {
     // 1. Kết nối database
