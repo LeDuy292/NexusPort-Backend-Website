@@ -209,9 +209,23 @@ async function getAnyTripById(req, res, next) {
   }
 }
 
+/**
+ * GET /api/driver/trips/:id/yard-navigation
+ * Driver lấy thông tin địa điểm Yard cần đến và điều hướng.
+ */
+async function getYardNavigation(req, res, next) {
+  try {
+    const result = await tripsService.getYardNavigation(req.params.id, req.user.id, req.user.role);
+    return res.status(200).json({ success: true, data: result });
+  } catch (err) {
+    handleError(err, res, next);
+  }
+}
+
 module.exports = {
   getMyTrips,
   getTripById,
+  getYardNavigation,
   acknowledgeTrip,
   pickupVehicle,
   pickupContainer,

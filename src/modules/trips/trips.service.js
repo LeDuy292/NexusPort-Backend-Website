@@ -229,6 +229,10 @@ async function createTrip(data) {
     yard_slot: data.yardSlot || null,
     yard_zone: data.yardZone || null,
     yard_instructions: data.yardInstructions || (data.yardBlock ? `Vào Cổng ${data.gateInCode || 'A1'} ➔ Rẽ theo làn xe tải ➔ Đến ${data.yardBlock} ➔ Đỗ đúng vị trí ô ${data.yardSlot || ''}` : null),
+    yard_name: data.yardName || (data.yardBlock ? `Bãi Container Cảng Tiên Sa - ${data.yardBlock}` : 'Bãi Container Cảng Tiên Sa'),
+    yard_address: data.yardAddress || 'Số 01 Yết Kiêu, Phường Thọ Quang, Quận Sơn Trà, TP. Đà Nẵng',
+    yard_lat: data.yardLat || 16.1265000,
+    yard_lng: data.yardLng || 108.2225000,
     seal_no: data.sealNo || null,
     container_condition: data.containerCondition || null,
     recipient_name: data.recipientName || null,
@@ -275,6 +279,127 @@ async function getAllTrips({ driverId, status, page = 1, limit = 20 } = {}) {
     page: pageNum,
     limit: limitNum,
     totalPages: Math.ceil(count / limitNum),
+  };
+}
+
+/**
+ * Lấy thông tin Yard và điều hướng cho chuyến vận chuyển.
+ * - Hiển thị tên Yard, địa chỉ, tọa độ, vị trí bãi.
+ * - Kiểm tra chuyến có ở trạng thái In Transit không để cho phép điều hướng.
+ * - Cảnh báo nếu thông tin Yard không đầy đủ hoặc không hợp lệ.
+ *
+ * @param {string} tripId
+ * @param {string} driverId
+ * @param {string} [userRole]
+ */
+async function getYardNavigation(tripId, driverId, userRole = null) {
+  const where = { id: tripId };
+  if (userRole !== 'Administrator' && userRole !== 'Dispatcher') {
+    where.driver_id = driverId;
+  }
+
+  const trip = await TransportTrip.findOne({ where });
+  if (!trip) {
+    const err = new Error('Không tìm thấy chuyến vận chuyển hoặc bạn không có quyền truy cập.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // 1. Kiểm tra trạng thái chuyến:
+  // "Chỉ cho phép điều hướng đến Yard khi Driver đã nhận container và chuyến đang ở trạng thái IN_TRANSIT."
+  const isNavigable = trip.status === 'In Transit';
+  let navigationBlockReason = null;
+
+  if (!isNavigable) {
+    switch (trip.status) {
+      case 'Assigned':
+      case 'Acknowledged':
+      case 'Vehicle Picked Up':
+        navigationBlockReason = 'Chưa nhận container. Hệ thống chỉ cho phép điều hướng khi chuyến đang ở trạng thái Đang vận chuyển (In Transit).';
+        break;
+      case 'Container Picked Up':
+        navigationBlockReason = 'Đã nhận container nhưng chưa thực hiện Gate In. Vui lòng xác nhận Gate In để bắt đầu vận chuyển.';
+        break;
+      case 'Arrived at Yard':
+        navigationBlockReason = 'Xe đã đến Yard. Vui lòng tiến hành giao container tại bãi.';
+        break;
+      case 'Container Delivered':
+      case 'Gate Out Completed':
+      case 'Vehicle Returned':
+      case 'Completed':
+        navigationBlockReason = 'Chuyến vận chuyển đã hoàn tất giao hàng.';
+        break;
+      case 'Cancelled':
+        navigationBlockReason = 'Chuyến vận chuyển đã bị hủy.';
+        break;
+      default:
+        navigationBlockReason = `Trạng thái hiện tại "${trip.status}" không cho phép điều hướng. Chỉ cho phép khi chuyến đang ở trạng thái In Transit.`;
+    }
+  }
+
+  // 2. Tọa độ mặc định theo từng block tại Cảng Tiên Sa (Đà Nẵng):
+  const BLOCK_COORDINATES = {
+    'Block A': { lat: 16.1265, lng: 108.2225 },
+    'Block B': { lat: 16.1272, lng: 108.2238 },
+    'Block C': { lat: 16.1258, lng: 108.2215 },
+    'Block D': { lat: 16.1280, lng: 108.2250 },
+    'Block E': { lat: 16.1245, lng: 108.2200 },
+  };
+
+  const blockCoord = BLOCK_COORDINATES[trip.yard_block] || { lat: 16.1265, lng: 108.2225 };
+  const lat = trip.yard_lat != null ? parseFloat(trip.yard_lat) : blockCoord.lat;
+  const lng = trip.yard_lng != null ? parseFloat(trip.yard_lng) : blockCoord.lng;
+
+  // 3. Kiểm tra tính hợp lệ và đầy đủ của thông tin Yard:
+  // "Hiển thị thông báo nếu thông tin Yard không đầy đủ hoặc không hợp lệ."
+  const hasYardBlock = Boolean(trip.yard_block && String(trip.yard_block).trim());
+  const hasCoordinates = !isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0;
+  const isYardValid = hasYardBlock && hasCoordinates;
+
+  let validationMessage = null;
+  if (!hasYardBlock) {
+    validationMessage = 'Thông tin vị trí bãi (Block) chưa được phân công hoặc không đầy đủ. Vui lòng liên hệ Dispatcher.';
+  } else if (!hasCoordinates) {
+    validationMessage = 'Tọa độ vị trí bãi không hợp lệ. Vui lòng liên hệ điều phối viên cảng.';
+  }
+
+  const yardName = trip.yard_name || (trip.yard_block ? `Bãi Container Cảng Tiên Sa - ${trip.yard_block}` : 'Bãi Container Cảng Tiên Sa');
+  const yardAddress = trip.yard_address || 'Số 01 Yết Kiêu, Phường Thọ Quang, Quận Sơn Trà, TP. Đà Nẵng';
+  const mapUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+
+  return {
+    tripId: trip.id,
+    tripCode: trip.trip_code,
+    status: trip.status,
+    canNavigate: isNavigable && isYardValid,
+    isNavigable,
+    navigationBlockReason,
+    isYardValid,
+    validationMessage,
+    yard: {
+      name: yardName,
+      address: yardAddress,
+      block: trip.yard_block || null,
+      slot: trip.yard_slot || null,
+      zone: trip.yard_zone || 'Bãi hàng Tiên Sa',
+      gateInCode: trip.gate_in_code || 'GATE-A1',
+      gateOutCode: trip.gate_out_code || null,
+      instructions: trip.yard_instructions || (trip.yard_block ? `Vào Cổng ${trip.gate_in_code || 'GATE-A1'} ➔ Rẽ theo làn xe tải ➔ Đến ${trip.yard_block} ➔ Đỗ đúng vị trí ô ${trip.yard_slot || ''}` : null),
+      coordinates: {
+        lat,
+        lng,
+      },
+      mapUrl,
+    },
+    container: {
+      containerNo: trip.container_no,
+      containerType: trip.container_type,
+      cargoType: trip.cargo_type,
+      sealNo: trip.seal_no,
+    },
+    vehicle: {
+      truckPlate: trip.truck_plate,
+    },
   };
 }
 
@@ -344,6 +469,17 @@ async function advanceStatus(tripId, driverId, requiredStatus, newStatus, timeFi
  * Format trip object trả về client.
  */
 function formatTrip(trip) {
+  const BLOCK_COORDINATES = {
+    'Block A': { lat: 16.1265, lng: 108.2225 },
+    'Block B': { lat: 16.1272, lng: 108.2238 },
+    'Block C': { lat: 16.1258, lng: 108.2215 },
+    'Block D': { lat: 16.1280, lng: 108.2250 },
+    'Block E': { lat: 16.1245, lng: 108.2200 },
+  };
+  const blockCoord = BLOCK_COORDINATES[trip.yard_block] || { lat: 16.1265, lng: 108.2225 };
+  const lat = trip.yard_lat != null ? parseFloat(trip.yard_lat) : blockCoord.lat;
+  const lng = trip.yard_lng != null ? parseFloat(trip.yard_lng) : blockCoord.lng;
+
   return {
     id: trip.id,
     tripCode: trip.trip_code,
@@ -362,6 +498,10 @@ function formatTrip(trip) {
     yardSlot: trip.yard_slot,
     yardZone: trip.yard_zone,
     yardInstructions: trip.yard_instructions || (trip.yard_block ? `Vào Cổng ${trip.gate_in_code || 'A1'} ➔ Rẽ theo làn xe tải ➔ Đến ${trip.yard_block} ➔ Đỗ đúng vị trí ô ${trip.yard_slot || ''}` : null),
+    yardName: trip.yard_name || (trip.yard_block ? `Bãi Container Cảng Tiên Sa - ${trip.yard_block}` : 'Bãi Container Cảng Tiên Sa'),
+    yardAddress: trip.yard_address || 'Số 01 Yết Kiêu, Phường Thọ Quang, Quận Sơn Trà, TP. Đà Nẵng',
+    yardCoordinates: { lat, lng },
+    mapUrl: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
     sealNo: trip.seal_no,
     containerCondition: trip.container_condition,
     recipientName: trip.recipient_name,
@@ -401,4 +541,5 @@ module.exports = {
   confirmVehicleReturn,
   createTrip,
   getAllTrips,
+  getYardNavigation,
 };
