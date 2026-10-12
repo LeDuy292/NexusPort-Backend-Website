@@ -69,6 +69,32 @@ router.get(
 
 /**
  * @openapi
+ * /api/driver/trips/{id}/yard-navigation:
+ *   get:
+ *     tags: [Driver Trips]
+ *     summary: "Lấy thông tin vị trí Yard, địa chỉ, tọa độ và điều hướng bản đồ"
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Thông tin vị trí bãi và trạng thái điều hướng
+ *       404:
+ *         description: Không tìm thấy chuyến
+ */
+router.get(
+  '/driver/trips/:id/yard-navigation',
+  authenticate,
+  authorize('Driver', 'Administrator', 'Dispatcher'),
+  ctrl.getYardNavigation
+);
+
+/**
+ * @openapi
  * /api/driver/trips/{id}/acknowledge:
  *   patch:
  *     tags: [Driver Trips]

@@ -140,6 +140,30 @@ TransportTrip.init(
       allowNull: true,
       comment: 'Hướng dẫn di chuyển & chỉ đường chi tiết đến bãi (Yard)',
     },
+    yard_name: {
+      type: DataTypes.STRING(150),
+      allowNull: true,
+      defaultValue: 'Bãi Container Cảng Tiên Sa',
+      comment: 'Tên bãi cần đến giao container',
+    },
+    yard_address: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      defaultValue: 'Số 01 Yết Kiêu, Phường Thọ Quang, Quận Sơn Trà, TP. Đà Nẵng',
+      comment: 'Địa chỉ bãi',
+    },
+    yard_lat: {
+      type: DataTypes.DECIMAL(10, 7),
+      allowNull: true,
+      defaultValue: 16.1265000,
+      comment: 'Vĩ độ GPS bãi',
+    },
+    yard_lng: {
+      type: DataTypes.DECIMAL(10, 7),
+      allowNull: true,
+      defaultValue: 108.2225000,
+      comment: 'Kinh độ GPS bãi',
+    },
     // Thông tin giao nhận container
     seal_no: {
       type: DataTypes.STRING(50),
