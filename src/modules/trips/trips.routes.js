@@ -23,7 +23,7 @@ const router = Router();
  *         name: status
  *         schema:
  *           type: string
- *           enum: [active, Assigned, Acknowledged, Vehicle Picked Up, Container Picked Up, Gate In, In Transit, Arrived at Yard, Container Delivered, Gate Out Completed, Vehicle Returned, Completed, Cancelled, all]
+ *           enum: [ASSIGNED, IN_PROGRESS, COMPLETED, CANCELLED, active, Assigned, Acknowledged, Vehicle Picked Up, Container Picked Up, Gate In, In Transit, Arrived at Yard, Container Delivered, Gate Out Completed, Vehicle Returned, Completed, Cancelled, all]
  *       - in: query
  *         name: page
  *         schema: { type: integer, default: 1 }
@@ -33,7 +33,7 @@ const router = Router();
  *     responses:
  *       200:
  *         description: Danh sách chuyến
- */
+ *  */
 router.get(
   '/driver/trips',
   authenticate,
@@ -65,6 +65,63 @@ router.get(
   authenticate,
   authorize('Driver', 'Administrator'),
   ctrl.getTripById
+);
+
+/**
+ * @openapi
+ * /api/driver/transport-orders:
+ *   get:
+ *     tags: [Driver Trips]
+ *     summary: Lấy danh sách lệnh vận chuyển được phân công cho tài xế
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [ASSIGNED, IN_PROGRESS, COMPLETED, CANCELLED, active, all]
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20 }
+ *     responses:
+ *       200:
+ *         description: Danh sách lệnh vận chuyển container
+ */
+router.get(
+  '/driver/transport-orders',
+  authenticate,
+  authorize('Driver', 'Administrator'),
+  ctrl.getTransportOrders
+);
+
+/**
+ * @openapi
+ * /api/driver/transport-orders/{id}:
+ *   get:
+ *     tags: [Driver Trips]
+ *     summary: Xem chi tiết lệnh vận chuyển container
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string, format: uuid }
+ *     responses:
+ *       200:
+ *         description: Chi tiết lệnh vận chuyển và thông tin liên quan
+ *       404:
+ *         description: Không tìm thấy
+ */
+router.get(
+  '/driver/transport-orders/:id',
+  authenticate,
+  authorize('Driver', 'Administrator'),
+  ctrl.getTransportOrderById
 );
 
 /**
