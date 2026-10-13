@@ -12,6 +12,7 @@ const { initSocket } = require('./src/config/socket');
 // Preload tất cả models để Sequelize nhận diện khi syncDB
 require('./src/models/User');
 require('./src/models/TransportTrip');
+require('./src/models/YardGateOutRequest');
 
 async function startServer() {
   try {
