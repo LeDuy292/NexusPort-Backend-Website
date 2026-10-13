@@ -31,7 +31,7 @@ async function getMyTrips(req, res, next) {
 async function getTripById(req, res, next) {
   try {
     const trip = await tripsService.getTripById(req.params.id, req.user.id);
-    return res.status(200).json({ success: true, data: { trip } });
+    return res.status(200).json({ success: true, data: { trip, order: trip } });
   } catch (err) {
     handleError(err, res, next);
   }
@@ -237,4 +237,6 @@ module.exports = {
   getAllTrips,
   createTrip,
   getAnyTripById,
+  getTransportOrders: getMyTrips,
+  getTransportOrderById: getTripById,
 };

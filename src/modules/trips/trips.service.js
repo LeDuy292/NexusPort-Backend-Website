@@ -3,6 +3,7 @@
 const { Op } = require('sequelize');
 const { sequelize } = require('../../config/database');
 const { TransportTrip, TransportTripHistory, NEXT_STATUS_MAP, TRIP_STATUS_ORDER } = require('../../models/TransportTrip');
+const { emitTripStatusUpdated, emitTripAssigned } = require('../../config/socket');
 
 /**
  * Tạo lịch sử khi thay đổi trạng thái chuyến.
@@ -18,20 +19,51 @@ async function recordHistory(tripId, fromStatus, toStatus, changedBy, note = nul
   }, { transaction });
 }
 
+const IN_PROGRESS_STATUSES = [
+  'Acknowledged',
+  'Vehicle Picked Up',
+  'Container Picked Up',
+  'Gate In',
+  'In Transit',
+  'Arrived at Yard',
+  'Container Delivered',
+  'Gate Out Completed',
+  'Vehicle Returned',
+];
+
+function resolveStatusGroup(status) {
+  if (status === 'Assigned') return 'ASSIGNED';
+  if (IN_PROGRESS_STATUSES.includes(status)) return 'IN_PROGRESS';
+  if (status === 'Completed') return 'COMPLETED';
+  if (status === 'Cancelled') return 'CANCELLED';
+  return 'OTHER';
+}
+
 /**
- * Lấy danh sách chuyến vận chuyển của Driver hiện tại.
+ * Lấy danh sách chuyến vận chuyển / lệnh vận chuyển của Driver hiện tại.
  * @param {string} driverId - UUID của Driver
  * @param {Object} query - { status, page, limit }
  */
 async function getMyTrips(driverId, { status, page = 1, limit = 20 } = {}) {
   const where = { driver_id: driverId };
 
-  if (status && status !== 'all') {
-    if (status === 'active') {
+  if (status && status !== 'all' && status !== 'ALL') {
+    const sLower = String(status).trim().toLowerCase();
+    if (sLower === 'active') {
       // Các chuyến đang hoạt động (chưa hoàn thành, chưa hủy)
       where.status = {
         [Op.notIn]: ['Completed', 'Cancelled'],
       };
+    } else if (sLower === 'assigned') {
+      where.status = 'Assigned';
+    } else if (sLower === 'in_progress' || sLower === 'in-progress' || sLower === 'inprogress') {
+      where.status = {
+        [Op.in]: IN_PROGRESS_STATUSES,
+      };
+    } else if (sLower === 'completed') {
+      where.status = 'Completed';
+    } else if (sLower === 'cancelled') {
+      where.status = 'Cancelled';
     } else {
       where.status = status;
     }
@@ -51,8 +83,11 @@ async function getMyTrips(driverId, { status, page = 1, limit = 20 } = {}) {
     offset,
   });
 
+  const formattedTrips = rows.map(formatTrip);
+
   return {
-    trips: rows.map(formatTrip),
+    trips: formattedTrips,
+    orders: formattedTrips,
     total: count,
     page: pageNum,
     limit: limitNum,
@@ -82,8 +117,10 @@ async function getTripById(tripId, driverId) {
     throw err;
   }
 
+  const formatted = formatTrip(trip);
   return {
-    ...formatTrip(trip),
+    ...formatted,
+    order: formatted,
     history: trip.history.map(h => ({
       id: h.id,
       fromStatus: h.from_status,
@@ -122,7 +159,7 @@ async function confirmContainerPickup(tripId, driverId, note) {
  * Gate In và chuyển sang In Transit trong 1 bước.
  */
 async function confirmGateIn(tripId, driverId, note) {
-  return sequelize.transaction(async (t) => {
+  const result = await sequelize.transaction(async (t) => {
     const trip = await findAndValidateTrip(tripId, driverId, 'Container Picked Up', t);
     const fromStatus = trip.status;
     const now = new Date();
@@ -137,6 +174,9 @@ async function confirmGateIn(tripId, driverId, note) {
 
     return { ...formatTrip(trip), nextStep: NEXT_STATUS_MAP['In Transit'] };
   });
+
+  emitTripStatusUpdated(result, 'In Transit');
+  return result;
 }
 
 /**
@@ -151,7 +191,7 @@ async function confirmArrivedAtYard(tripId, driverId, note) {
  */
 async function confirmContainerDelivery(tripId, driverId, deliveryData = {}) {
   const note = typeof deliveryData === 'string' ? deliveryData : deliveryData.note;
-  return sequelize.transaction(async (t) => {
+  const result = await sequelize.transaction(async (t) => {
     const trip = await findAndValidateTrip(tripId, driverId, 'Arrived at Yard', t);
     const fromStatus = trip.status;
 
@@ -175,6 +215,9 @@ async function confirmContainerDelivery(tripId, driverId, deliveryData = {}) {
 
     return { ...formatTrip(trip), nextStep: NEXT_STATUS_MAP['Container Delivered'] || null };
   });
+
+  emitTripStatusUpdated(result, 'Container Delivered');
+  return result;
 }
 
 /**
@@ -189,7 +232,7 @@ async function confirmGateOut(tripId, driverId, note) {
  * Trả xe và hoàn thành chuyến trong 1 bước.
  */
 async function confirmVehicleReturn(tripId, driverId, note) {
-  return sequelize.transaction(async (t) => {
+  const result = await sequelize.transaction(async (t) => {
     const trip = await findAndValidateTrip(tripId, driverId, 'Gate Out Completed', t);
     const fromStatus = trip.status;
     const now = new Date();
@@ -204,6 +247,9 @@ async function confirmVehicleReturn(tripId, driverId, note) {
 
     return { ...formatTrip(trip), nextStep: null };
   });
+
+  emitTripStatusUpdated(result, 'Completed');
+  return result;
 }
 
 /**
@@ -245,7 +291,9 @@ async function createTrip(data) {
 
   await recordHistory(trip.id, null, 'Assigned', data.assignedBy, 'Chuyến được tạo và giao cho tài xế');
 
-  return formatTrip(trip);
+  const formatted = formatTrip(trip);
+  emitTripAssigned(formatted);
+  return formatted;
 }
 
 /**
@@ -451,7 +499,7 @@ async function findAndValidateTrip(tripId, driverId, expectedStatus, transaction
  * Utility: advance trạng thái theo 1 bước đơn giản.
  */
 async function advanceStatus(tripId, driverId, requiredStatus, newStatus, timeField, note = null) {
-  return sequelize.transaction(async (t) => {
+  const result = await sequelize.transaction(async (t) => {
     const trip = await findAndValidateTrip(tripId, driverId, requiredStatus, t);
     const fromStatus = trip.status;
 
@@ -463,6 +511,9 @@ async function advanceStatus(tripId, driverId, requiredStatus, newStatus, timeFi
 
     return { ...formatTrip(trip), nextStep: NEXT_STATUS_MAP[newStatus] || null };
   });
+
+  emitTripStatusUpdated(result, newStatus);
+  return result;
 }
 
 /**
@@ -480,9 +531,12 @@ function formatTrip(trip) {
   const lat = trip.yard_lat != null ? parseFloat(trip.yard_lat) : blockCoord.lat;
   const lng = trip.yard_lng != null ? parseFloat(trip.yard_lng) : blockCoord.lng;
 
+  const statusGroup = resolveStatusGroup(trip.status);
+
   return {
     id: trip.id,
     tripCode: trip.trip_code,
+    orderCode: trip.trip_code,
     driverId: trip.driver_id,
     bookingId: trip.booking_id,
     bookingCode: trip.booking_code,
@@ -506,7 +560,45 @@ function formatTrip(trip) {
     containerCondition: trip.container_condition,
     recipientName: trip.recipient_name,
     status: trip.status,
+    statusGroup,
     nextStep: NEXT_STATUS_MAP[trip.status] || null,
+    mapping: {
+      driver: {
+        id: trip.driver_id,
+      },
+      vehicle: {
+        truckPlate: trip.truck_plate,
+        truckId: trip.truck_id,
+      },
+      container: {
+        containerNo: trip.container_no,
+        containerType: trip.container_type,
+        cargoType: trip.cargo_type,
+        sealNo: trip.seal_no,
+        condition: trip.container_condition,
+      },
+      booking: {
+        bookingId: trip.booking_id,
+        bookingCode: trip.booking_code,
+        bookingType: trip.booking_type,
+      },
+      yard: {
+        name: trip.yard_name || (trip.yard_block ? `Bãi Container Cảng Tiên Sa - ${trip.yard_block}` : 'Bãi Container Cảng Tiên Sa'),
+        address: trip.yard_address || 'Số 01 Yết Kiêu, Phường Thọ Quang, Quận Sơn Trà, TP. Đà Nẵng',
+        block: trip.yard_block,
+        slot: trip.yard_slot,
+        zone: trip.yard_zone,
+        gateInCode: trip.gate_in_code,
+        gateOutCode: trip.gate_out_code,
+        instructions: trip.yard_instructions || (trip.yard_block ? `Vào Cổng ${trip.gate_in_code || 'A1'} ➔ Rẽ theo làn xe tải ➔ Đến ${trip.yard_block} ➔ Đỗ đúng vị trí ô ${trip.yard_slot || ''}` : null),
+        coordinates: { lat, lng },
+        mapUrl: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
+      },
+      schedule: {
+        appointmentStart: trip.appointment_start,
+        appointmentEnd: trip.appointment_end,
+      },
+    },
     timeline: {
       acknowledged: trip.acknowledged_at,
       vehiclePickedUp: trip.vehicle_picked_up_at,
