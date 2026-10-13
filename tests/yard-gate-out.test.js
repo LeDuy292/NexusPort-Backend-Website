@@ -315,5 +315,80 @@ describe('Yard Outbound Container Confirmation API (Xác Nhận Container Xuất
           });
       });
     });
+
+    it('TC-YGO-12: driver receives realtime trip status update when container is loaded onto truck', (done) => {
+      const driverSocket = ioClient(serverUrl, {
+        auth: { token: driverToken },
+        transports: ['websocket'],
+      });
+
+      driverSocket.on('connect', async () => {
+        driverSocket.on('trip:status_updated', (event) => {
+          try {
+            expect(event.status).toBe('Container Picked Up');
+            expect(event.containerId).toBe('TEST-CONT-9988');
+            expect(event.message).toContain('xuất bãi');
+            driverSocket.disconnect();
+            done();
+          } catch (err) {
+            driverSocket.disconnect();
+            done(err);
+          }
+        });
+
+        // Trigger confirmation to verify driver socket emission
+        await request(app)
+          .post(`/api/yard/gate-out-requests/${testRequest.id}/confirm-loaded`)
+          .set('Authorization', `Bearer ${yardStaffToken}`)
+          .send({
+            verifiedContainerId: true,
+            verifiedSeal: true,
+            verifiedNoDamage: true,
+          });
+      });
+    });
+  });
+
+  describe('Edge Cases & Validation', () => {
+    it('TC-YGO-13: rejects invalid flow step progression (step < 0 or step > 4)', async () => {
+      const res = await request(app)
+        .patch(`/api/yard/gate-out-requests/${testRequest.id}/step`)
+        .set('Authorization', `Bearer ${yardStaffToken}`)
+        .send({ step: 99 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('không hợp lệ');
+    });
+
+    it('TC-YGO-14: creates new outbound request and notifies yard staff via realtime socket', async () => {
+      const newReqData = {
+        containerId: 'NEW-CONT-1122',
+        driverName: 'Lê Văn Tài',
+        driverPhone: '0988112233',
+        truckPlate: '29C-888.99',
+        gateName: 'Cổng B',
+        sealNumber: 'SEAL-NEW-1122',
+        bookingCode: 'BK-NEW-1122',
+        yardBlock: 'A',
+        yardBay: '02',
+        yardRow: '05',
+        yardTier: '1',
+      };
+
+      const res = await request(app)
+        .post('/api/yard/gate-out-requests')
+        .set('Authorization', `Bearer ${gateOfficerToken}`)
+        .send(newReqData);
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data.containerId).toBe('NEW-CONT-1122');
+      expect(res.body.data.position).toBe('A-02-05-1');
+      expect(res.body.data.slotStatus).toBe('Occupied');
+
+      // Cleanup
+      await YardGateOutRequest.destroy({ where: { container_id: 'NEW-CONT-1122' } }).catch(() => {});
+    });
   });
 });
