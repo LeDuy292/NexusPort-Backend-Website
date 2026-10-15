@@ -93,7 +93,8 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
     },
   },
   'GET /api/v1/drivers/me/routes': {
-    summary: 'List Gate-In routes for the authenticated Driver and their Containers',
+    summary: 'List Gate-In destinations and Smart Route availability for the authenticated Driver',
+    description: 'Preserves legacy route fields. Adds operation, target and navigation. navigation.status is available, unavailable or pending_destination. Refresh every 15 seconds; never follow a route whose navigation is unavailable.',
     security: [{ BearerAuth: [] }],
     responses: {
       200: { description: 'Routes with destination and directions when a Yard slot is assigned' },
@@ -102,14 +103,20 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
     },
   },
   'GET /api/v1/drivers/me/routes/{containerId}': {
-    summary: 'Get the destination and route linked to one Container after Gate-In PASS',
+    summary: 'Calculate a Smart Route to the current Operation/Yard destination after Gate-In',
+    description: 'Re-reads Operation, Yard destination and map conditions on every request. Returns destination even if no safe route exists (navigation.status=unavailable, reasonCode and message explain why). Legacy destination/route fields remain compatible.',
     security: [{ BearerAuth: [] }],
+    parameters: [
+      { name: 'containerId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+      { name: 'currentNodeId', in: 'query', required: false, description: 'Driver-confirmed map node. Omit to start from the actual Gate In gate.', schema: { type: 'string', minLength: 1, maxLength: 120 } },
+    ],
     responses: {
       200: { description: 'Container destination with Block, Bay, Row, Tier and directions' },
       401: { description: 'Missing or invalid Driver token' },
       403: { description: 'Token does not have Driver role' },
       404: { description: 'No passed Gate-In transaction for this Driver and Container' },
       409: { description: 'No Yard slot assigned to the Container yet' },
+      422: { description: 'Invalid container ID or currentNodeId' },
     },
   },
   'GET /api/v1/containers/{id}/status': {

@@ -38,14 +38,19 @@ export class DriverController {
   };
 
   getMyRoutes = async (req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
-    try { sendSuccess(res, await this.routeService.list(req.driverId!)); }
+    try { res.setHeader('Cache-Control', 'no-store'); sendSuccess(res, await this.routeService.list(req.driverId!)); }
     catch (error) { next(error); }
   };
 
   getMyContainerRoute = async (req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
       if (!uuidPattern.test(req.params.containerId)) throw new ValidationError('Container ID không hợp lệ.');
-      sendSuccess(res, await this.routeService.get(req.driverId!, req.params.containerId));
+      const currentNodeId = req.query.currentNodeId;
+      if (currentNodeId !== undefined && (typeof currentNodeId !== 'string' || !currentNodeId.trim() || currentNodeId.length > 120)) {
+        throw new ValidationError('Vị trí hiện tại không hợp lệ.');
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      sendSuccess(res, await this.routeService.get(req.driverId!, req.params.containerId, currentNodeId as string | undefined));
     } catch (error) { next(error); }
   };
 
