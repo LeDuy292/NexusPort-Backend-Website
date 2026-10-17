@@ -8,6 +8,7 @@ namespace NexusPort.Modules.Gate.Application.DTOs;
 /// </summary>
 public class GateRecognitionEventDto
 {
+    [MaxLength(500)] public string? ManualReason { get; set; }
     private string _gateId = "GATE_A";
     private string _vehiclePlate = string.Empty;
     private string? _laneId;
@@ -292,6 +293,7 @@ public class GateRulePreCheckRequestDto
 /// </summary>
 public class GateInApprovalRequestDto
 {
+    public bool PassageConfirmed { get; set; }
     public Guid? VerificationRecordId { get; set; }
     public string? BookingNumber { get; set; }
     public string? VehiclePlate { get; set; }

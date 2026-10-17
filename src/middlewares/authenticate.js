@@ -44,6 +44,8 @@ async function authenticate(req, res, next) {
     }
 
     req.user = decoded;
+    // Reuse this fresh DB read within this request; never cache across requests.
+    req.authenticatedAccount = user;
     next();
   } catch (error) {
     next(error);

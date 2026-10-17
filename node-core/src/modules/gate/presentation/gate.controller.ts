@@ -23,7 +23,7 @@ export class GateController {
     } catch (error) { next(error); }
   };
   locations = async (_req: Request, res: Response, next: import('express').NextFunction): Promise<void> => {
-    try { sendSuccess(res, (await query(`SELECT id,code,name,CASE WHEN code='GATE-03' THEN 'gate_out' ELSE 'gate_in' END AS "gateType",is_active AS "isActive" FROM gates ORDER BY code`)).rows); }
+    try { sendSuccess(res, (await query(`SELECT id,code,name,CASE WHEN code='GATE-03' THEN 'gate_out' ELSE 'gate_in' END AS "gateType",is_active AS "isActive" FROM gates WHERE is_active AND code IN ('GATE-01','GATE-03') ORDER BY code`)).rows); }
     catch (error) { next(error); }
   };
   private repository = new GateRepository();

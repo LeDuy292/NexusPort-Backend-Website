@@ -45,6 +45,12 @@ test('IDs are normalized before the membership check', async () => {
   expect(service.createUser).toHaveBeenCalledWith(expect.objectContaining({ carrierId }));
 });
 
+test('non-Driver accounts keep develop support for empty optional assignment fields', async () => {
+  const response = await request(app).post('/users').send({ ...payload, role: 'Dispatcher', carrierId: '', driverId: '' });
+  expect(response.status).toBe(201);
+  expect(service.createUser).toHaveBeenCalledWith(expect.objectContaining({ role: 'Dispatcher' }));
+});
+
 test.each(['not-a-guid', "';SELECT 1;--", '', null])('malformed company ID %s is rejected before account writes', async invalid => {
   expect((await request(app).post('/users').send({ ...payload, carrierId: invalid })).status).toBe(422);
   expect(service.createUser).not.toHaveBeenCalled();

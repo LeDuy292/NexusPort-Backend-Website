@@ -23,6 +23,7 @@ public class GateController : ControllerBase
     /// API tiếp nhận sự kiện nhận diện (Gate Recognition Event) từ AI Camera / YOLO / Cảm biến RFID và đối chiếu điều kiện qua Rule Engine
     /// </summary>
     [HttpPost("verify")]
+    [Authorize(Roles = "Administrator,Admin,Gate Officer,Gate")]
     [HttpPost("recognition-event")]
     [ProducesResponseType(typeof(GateVerificationResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -90,6 +91,7 @@ public class GateController : ControllerBase
     /// Ghi đè trạng thái xác thực thủ công bởi nhân viên kiểm soát cổng (Gate Officer)
     /// </summary>
     [HttpPost("verifications/{id:guid}/manual-override")]
+    [Authorize(Roles = "Administrator,Admin,Gate Officer,Gate")]
     [ProducesResponseType(typeof(GateVerificationRecordDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<GateVerificationRecordDto>> ManualOverride(
@@ -108,6 +110,7 @@ public class GateController : ControllerBase
     /// </summary>
     [Authorize(Roles = "Administrator,Admin,Gate Officer,Gate")]
     [HttpPost("approve-in")]
+    [HttpPost("passage-in")]
     [ProducesResponseType(typeof(GateInApprovalResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<GateInApprovalResultDto>> ApproveGateIn(

@@ -80,12 +80,12 @@ public class GateVerificationRecordConfiguration : IEntityTypeConfiguration<Gate
             .HasColumnName("verified_at");
 
         // Ignore unmapped fields
-        builder.Ignore(x => x.GateCode);
-        builder.Ignore(x => x.BookingNumber);
-        builder.Ignore(x => x.VehiclePlate);
-        builder.Ignore(x => x.DriverName);
-        builder.Ignore(x => x.ProcessedBy);
-        builder.Ignore(x => x.OcrRawData);
+        builder.Property(x => x.GateCode).HasColumnName("gate_code").HasMaxLength(50).IsRequired();
+        builder.Property(x => x.BookingNumber).HasColumnName("booking_number");
+        builder.Property(x => x.VehiclePlate).HasColumnName("vehicle_plate");
+        builder.Property(x => x.DriverName).HasColumnName("driver_name");
+        builder.Property(x => x.ProcessedBy).HasColumnName("processed_by");
+        builder.Property(x => x.OcrRawData).HasColumnName("ocr_raw_data");
         builder.Ignore(x => x.CreatedAt);
         builder.Ignore(x => x.CreatedBy);
         builder.Ignore(x => x.UpdatedAt);

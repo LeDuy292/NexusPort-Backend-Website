@@ -43,7 +43,10 @@ def health_check():
     vehicle_model_exists = os.path.exists(os.path.join(base_dir, "models", "yolov8n.pt"))
 
     return {
-        "status": "healthy",
+        "status": "healthy" if pipeline.ocr_service.azure_available else "degraded",
+        "recognition_ready": pipeline.ocr_service.azure_available,
+        "message": "OCR đã được cấu hình; kết nối Azure được kiểm tra khi nhận diện ảnh." if pipeline.ocr_service.azure_available
+          else "Chưa cấu hình Azure OCR. Kiểm tra AZURE_VISION_ENDPOINT và AZURE_VISION_KEY trong ai-service/.env hoặc .env của Backend.",
         "service": "NexusPort AI Smart Gate",
         "models": {
             "license_plate_onnx": plate_model_exists,
@@ -69,6 +72,8 @@ async def recognize_vehicle_at_gate(
     6. **Trả về Recognition Result** (chuẩn hóa tương thích Entity GateVerificationRecord của C# .NET)
     """
     try:
+        if not pipeline.ocr_service.azure_available:
+            raise HTTPException(status_code=503, detail="OCR chưa được cấu hình. Kiểm tra AZURE_VISION_ENDPOINT và AZURE_VISION_KEY rồi khởi động lại AI service.")
         contents = await file.read()
         if not contents:
             raise HTTPException(status_code=400, detail="File ảnh rỗng.")
@@ -81,6 +86,8 @@ async def recognize_vehicle_at_gate(
         )
 
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi xử lý nhận diện: {str(e)}")
 

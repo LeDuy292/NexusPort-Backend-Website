@@ -46,7 +46,11 @@ public class GateVerificationService : IGateVerificationService
 
     public async Task<GateVerificationResultDto> VerifyGateScanAsync(GateRecognitionEventDto request, CancellationToken cancellationToken = default)
     {
-        var verificationTime = request.Timestamp ?? DateTime.UtcNow;
+        var verificationTime = DateTime.UtcNow;
+        var manual=request.VerificationType?.StartsWith("MANUAL",StringComparison.OrdinalIgnoreCase)==true;
+        if(manual && string.IsNullOrWhiteSpace(request.ManualReason))
+            throw new NexusPort.Shared.Exceptions.ValidationException("Reason","Nhập lý do xác minh thủ công.");
+        var isGateOut = request.VerificationType?.Contains("OUT",StringComparison.OrdinalIgnoreCase)==true;
         var normalizedDetectedPlate = NormalizePlate(request.DetectedVehiclePlate);
 
         // 1. Tìm Booking tương ứng
@@ -67,10 +71,11 @@ public class GateVerificationService : IGateVerificationService
             booking = await _context.Set<Booking.Domain.Entities.Booking>()
                 .FirstOrDefaultAsync(b => b.BookingCode.ToUpper() == searchNumber, cancellationToken);
         }
-        else if (matchedVehicle != null)
+        else
         {
-            booking = await _context.Set<Booking.Domain.Entities.Booking>()
-                .FirstOrDefaultAsync(b => b.TruckId == matchedVehicle.Id && b.Status != BookingStatus.Canceled && b.Status != BookingStatus.Completed && b.Status != BookingStatus.Expired, cancellationToken);
+            var entryBookingId=await new GateEntryAccess(_context).ResolveBookingAsync(request.DetectedVehiclePlate,cancellationToken,isGateOut);
+            if(entryBookingId.HasValue) booking=await _context.Set<Booking.Domain.Entities.Booking>()
+                .FirstOrDefaultAsync(b=>b.Id==entryBookingId.Value,cancellationToken);
         }
 
         Container.Domain.Entities.Container? container = null;
@@ -81,7 +86,7 @@ public class GateVerificationService : IGateVerificationService
                 .FirstOrDefaultAsync(c => c.ContainerNumber.ToUpper() == containerNo, cancellationToken);
         }
 
-        var vehicleId = matchedVehicle?.Id ?? booking?.VehicleId;
+        var vehicleId = matchedVehicle?.Id ?? booking?.TruckId;
         var driverId = booking?.DriverId;
         var driverName = booking?.DriverName;
 
@@ -93,15 +98,6 @@ public class GateVerificationService : IGateVerificationService
             if (string.IsNullOrWhiteSpace(driverName))
             {
                 driverName = driver?.FullName;
-            }
-        }
-        else if (booking != null && booking.CarrierId != Guid.Empty)
-        {
-            driver = await _context.Set<Driver.Domain.Entities.Driver>()
-                .FirstOrDefaultAsync(d => d.CarrierId == booking.CarrierId, cancellationToken);
-            if (driver != null && string.IsNullOrWhiteSpace(driverName))
-            {
-                driverName = driver.FullName;
             }
         }
 
@@ -141,6 +137,7 @@ public class GateVerificationService : IGateVerificationService
         };
 
         var ruleEvalResult = await _ruleEngine.EvaluateAsync(validationContext, cancellationToken);
+        var entryOrder=booking==null || isGateOut ? null : await new GateEntryAccess(_context).LatestAsync(booking.Id,cancellationToken);
 
         var status = ruleEvalResult.Status;
         var failureReason = ruleEvalResult.FailureReason;
@@ -177,8 +174,8 @@ public class GateVerificationService : IGateVerificationService
             VehiclePlateImageUrl = request.VehiclePlateImageUrl,
             OverviewImageUrl = request.OverviewImageUrl,
 
-            Notes = message,
-            ProcessedBy = "AI_YOLO_SYSTEM"
+            Notes = manual ? $"[Manual: {request.ManualReason}] {message}" : message,
+            ProcessedBy = manual ? "GATE_OFFICER" : "AI_YOLO_SYSTEM"
         };
 
         await _verificationRepository.AddAsync(record, cancellationToken);
@@ -210,9 +207,9 @@ public class GateVerificationService : IGateVerificationService
                 DriverPhone = driver?.Phone ?? "0901 234 567",
                 CarrierName = "Công ty CP Vận tải Quốc tế Nexus",
                 ContainerNumber = container?.ContainerNumber ?? "MSCU1234567",
-                ValidFrom = booking.AppointmentStart,
-                ValidTo = booking.AppointmentEnd,
-                GateType = booking.BookingType == Booking.Domain.Enums.BookingType.Dropoff ? "GateIn" : "GateOut"
+                ValidFrom = GateEntryAccess.Utc(entryOrder?.ValidFrom ?? booking.AppointmentStart),
+                ValidTo = GateEntryAccess.Utc(entryOrder?.ValidUntil ?? booking.AppointmentEnd),
+                GateType = gateType
             },
             Driver = (driver == null && booking == null) ? null : new GateVerificationDriverInfo
             {
@@ -251,7 +248,7 @@ public class GateVerificationService : IGateVerificationService
 
     public async Task<GateRuleEvaluationResult> EvaluateRulesAsync(GateRulePreCheckRequestDto request, CancellationToken cancellationToken = default)
     {
-        var verificationTime = request.VerificationTime ?? DateTime.UtcNow;
+        var verificationTime = DateTime.UtcNow;
         var normalizedPlate = NormalizePlate(request.VehiclePlate);
 
         // 1. Tìm Vehicle
@@ -266,10 +263,11 @@ public class GateVerificationService : IGateVerificationService
             booking = await _context.Set<Booking.Domain.Entities.Booking>()
                 .FirstOrDefaultAsync(b => b.BookingCode.ToUpper() == searchNumber, cancellationToken);
         }
-        else if (vehicle != null)
+        else
         {
-            booking = await _context.Set<Booking.Domain.Entities.Booking>()
-                .FirstOrDefaultAsync(b => b.TruckId == vehicle.Id && b.Status != Booking.Domain.Enums.BookingStatus.Canceled && b.Status != Booking.Domain.Enums.BookingStatus.Completed && b.Status != Booking.Domain.Enums.BookingStatus.Expired, cancellationToken);
+            var bookingId=await new GateEntryAccess(_context).ResolveBookingAsync(request.VehiclePlate,cancellationToken,
+                string.Equals(request.GateType,"GateOut",StringComparison.OrdinalIgnoreCase));
+            if(bookingId.HasValue) booking=await _context.Set<Booking.Domain.Entities.Booking>().FirstOrDefaultAsync(b=>b.Id==bookingId.Value,cancellationToken);
         }
 
         // 3. Tìm Driver
@@ -335,6 +333,13 @@ public class GateVerificationService : IGateVerificationService
     public async Task<GateInApprovalResultDto> ApproveGateInAsync(GateInApprovalRequestDto request, CancellationToken cancellationToken = default)
     {
         var now = DateTime.UtcNow;
+        if(!request.PassageConfirmed || !request.VerificationRecordId.HasValue)
+            throw new NexusPort.Shared.Exceptions.ValidationException("Passage","Cần xác nhận xe đã qua cổng và mã xác minh.");
+        var evidence=await _verificationRepository.GetByIdAsync(request.VerificationRecordId.Value,cancellationToken);
+        if(evidence==null || evidence.VerificationStatus!="PASS" || evidence.GateCode!=request.GateCode.Trim().ToUpperInvariant() ||
+          evidence.VerificationType.Contains("OUT",StringComparison.OrdinalIgnoreCase) ||
+          NormalizePlate(evidence.DetectedPlate)!=NormalizePlate(request.VehiclePlate))
+            throw new NexusPort.Shared.Exceptions.ValidationException("Verification","Xác minh không hợp lệ cho xe và cổng này.");
 
         // 1. Tìm Booking tương ứng
         Booking.Domain.Entities.Booking? booking = null;
@@ -373,6 +378,8 @@ public class GateVerificationService : IGateVerificationService
 
         if (booking == null)
             throw new NexusPort.Shared.Exceptions.ValidationException("Booking", "Cần booking hợp lệ trước khi xác nhận vào cổng.");
+        if(evidence.BookingId!=booking.Id)
+            throw new NexusPort.Shared.Exceptions.ValidationException("Verification","Xác minh không thuộc booking này.");
         if (container != null && !await _context.Set<Booking.Domain.Entities.BookingContainer>()
             .AnyAsync(x => x.BookingId == booking.Id && x.ContainerId == container.Id && x.ContainerVisitId != null, cancellationToken))
             throw new NexusPort.Shared.Exceptions.ValidationException("Container", "Container không thuộc lượt bãi của booking này.");
@@ -380,11 +387,23 @@ public class GateVerificationService : IGateVerificationService
         await using var gateTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
         await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM bookings WHERE id={booking.Id} FOR UPDATE", cancellationToken);
         await _context.Entry(booking).ReloadAsync(cancellationToken);
+        var existingPassage=await _context.Database.SqlQueryRaw<Guid>(
+            "SELECT id AS \"Value\" FROM gate_transactions WHERE booking_id={0} AND gate_type='gate_in' AND status='completed'",booking.Id).ToListAsync(cancellationToken);
+        if(existingPassage.Count>0)
+        {
+            await gateTransaction.CommitAsync(cancellationToken);
+            return new GateInApprovalResultDto{Success=true,Message="Xe đã được ghi nhận Gate In.",GateRecordId=existingPassage[0],BookingStatus=booking.Status.ToString()};
+        }
         if (booking.Status != BookingStatus.Approved && booking.Status != BookingStatus.Ready && booking.Status != BookingStatus.CheckedIn)
             throw new NexusPort.Shared.Exceptions.ValidationException("Booking", "Booking cần được duyệt trước khi vào cổng.");
 
-        if (now < (booking.ValidFrom ?? booking.AppointmentStart).ToUniversalTime() || now > (booking.ValidTo ?? booking.AppointmentEnd).ToUniversalTime())
-            throw new NexusPort.Shared.Exceptions.ValidationException("Appointment", "Booking chưa tới hoặc đã hết khung giờ vào cổng.");
+        var entry=await new GateEntryAccess(_context).LatestAsync(booking.Id,cancellationToken);
+        var entryCheck=GateEntryAccess.Check(entry,booking,plate ?? "",now);
+        if(!entryCheck.IsSuccess) throw new NexusPort.Shared.Exceptions.ValidationException("EntryOrder",entryCheck.Message);
+        var opened=await _context.Database.SqlQueryRaw<int>(@"SELECT count(*)::int AS ""Value"" FROM gate_barrier_commands
+            WHERE verification_id={0} AND entry_order_id={1} AND gate_code={2} AND action='open' AND status IN ('simulated','acknowledged')",
+            evidence.Id,entry!.Id,request.GateCode.Trim().ToUpperInvariant()).SingleAsync(cancellationToken);
+        if(opened==0) throw new NexusPort.Shared.Exceptions.ValidationException("Barrier","Chưa có lệnh mở cổng được chấp nhận cho xác minh này.");
 
         // 4. Cập nhật các trạng thái nghiệp vụ theo Acceptance Criteria:
         // - Booking = CHECKED-IN
@@ -421,6 +440,8 @@ public class GateVerificationService : IGateVerificationService
             await _context.Database.ExecuteSqlInterpolatedAsync($@"INSERT INTO gate_transactions(id,booking_id,gate_id,driver_id,truck_id,gate_type,status,plate_number_detected,checked_at,completed_at)
               VALUES({gateRecordId},{booking.Id},{gateIds[0]},{booking.DriverId},{booking.TruckId},'gate_in','completed',{plate},{now},{now})", cancellationToken);
         }
+        await _context.Database.ExecuteSqlInterpolatedAsync($@"UPDATE gate_entry_orders SET status='consumed',
+          consumed_at={now},gate_transaction_id={gateRecordId} WHERE id={entry.Id} AND status='active'",cancellationToken);
         await _context.SaveChangesAsync(cancellationToken);
         await gateTransaction.CommitAsync(cancellationToken);
 

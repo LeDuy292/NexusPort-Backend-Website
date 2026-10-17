@@ -65,6 +65,14 @@ Times use local UI time and UTC API values; booking creation remains Pending.
 
 ## Migration and deployment
 
+Dispatcher-to-gate entry and simulated barrier commands use additive migration
+`20261018_018_dispatch_gate_entry_orders.sql`, evidence migration 019 and single
+entrance/exit map migration 020. Inspect missing prerequisites with
+`node --env-file=node-core/.env database/scripts/apply-gate-entry-orders.cjs`.
+Apply with `--apply` only after approval for the configured database. See
+`docs/gate-entry-and-barrier-api.md` for the entry permission, command and physical
+passage contracts. A simulated open command never creates a physical Gate In.
+
 NXP-114 Smart Route uses additive migration
 `20261017_017_smart_yard_routes.sql`. The runner checks `nexusport_schema_versions`
 and applies all missing migrations through 017 in filename order:

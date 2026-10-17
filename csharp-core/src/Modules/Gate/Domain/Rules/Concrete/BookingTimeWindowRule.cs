@@ -17,6 +17,11 @@ public class BookingTimeWindowRule : IGateRule
         }
 
         var booking = context.Booking;
+        // Entry is governed by the dispatch permission checked by GateEntryOrderRule.
+        if (string.Equals(context.GateType,"GateIn",StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(GateRuleResult.Pass(RuleName,"Thời hạn vào cổng theo lệnh điều độ."));
+        if (string.Equals(context.GateType,"GateOut",StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(GateRuleResult.Pass(RuleName,"Giờ ra theo hoàn tất giao nhận và lượt xe thực tế."));
         var checkTime = context.VerificationTime.ToUniversalTime();
 
         if (booking.ValidTo.HasValue && checkTime > booking.ValidTo.Value.ToUniversalTime())

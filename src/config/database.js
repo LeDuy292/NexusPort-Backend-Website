@@ -1,7 +1,7 @@
 'use strict';
 
 const { Sequelize } = require('sequelize');
-const { db, nodeEnv } = require('./env');
+const { db } = require('./env');
 
 const sequelize = new Sequelize(db.name, db.user, db.password, {
   host: db.host,
@@ -10,7 +10,8 @@ const sequelize = new Sequelize(db.name, db.user, db.password, {
   dialectOptions: db.sslMode === 'require'
     ? { ssl: { require: true, rejectUnauthorized: false } }
     : {},
-  logging: nodeEnv === 'development' ? (msg) => console.log(`[DB] ${msg}`) : false,
+  // SQL tracing is explicit; connection failures and application errors still log.
+  logging: db.logSql ? (msg) => console.log(`[DB] ${msg}`) : false,
   pool: {
     max: db.poolMax,
     min: 0,
