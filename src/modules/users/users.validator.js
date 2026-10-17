@@ -3,9 +3,14 @@
 const { body, query } = require('express-validator');
 const { VALID_ROLES } = require('../../models/User');
 
+// PostgreSQL and the configured company directory accept GUIDs without an RFC
+// UUID version/variant (for example c1010101-0000-0000-0000-000000000001).
+// Validate their shape here; assignDriverProfile verifies DB membership/ownership.
+const databaseGuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
 const driverAssignmentValidator = [
-  body('carrierId').optional().isUUID().withMessage('Mã công ty vận tải không hợp lệ.'),
-  body('driverId').optional().isUUID().withMessage('Mã hồ sơ tài xế không hợp lệ.'),
+  body('carrierId').optional().trim().matches(databaseGuid).withMessage('Mã công ty vận tải không hợp lệ.').toLowerCase(),
+  body('driverId').optional().trim().matches(databaseGuid).withMessage('Mã hồ sơ tài xế không hợp lệ.').toLowerCase(),
 ];
 
 /**
