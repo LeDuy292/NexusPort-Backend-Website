@@ -99,6 +99,10 @@ User.init(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    session_id: {
+      type: DataTypes.STRING(255),
+      allowNull: true,
+    },
   },
   {
     sequelize,
