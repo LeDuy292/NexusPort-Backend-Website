@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using NexusPort.Modules.Gate.Application.DTOs;
@@ -105,6 +106,7 @@ public class GateController : ControllerBase
     /// Phê duyệt Gate-In cho phương tiện vào cảng (Role: Gate Officer + Backend)
     /// Tự động cập nhật Booking=CheckedIn, Container=InYard, Vehicle=Inside, Lưu Timestamp và Gửi Notification
     /// </summary>
+    [Authorize(Roles = "Administrator,Admin,Gate Officer,Gate")]
     [HttpPost("approve-in")]
     [ProducesResponseType(typeof(GateInApprovalResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

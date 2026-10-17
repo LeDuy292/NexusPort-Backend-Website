@@ -59,44 +59,25 @@ public class YardReceivingService : IYardReceivingService
         var cleanContainerNo = dto.ContainerNo?.Trim().ToUpperInvariant() ?? string.Empty;
         var cleanActualSeal = dto.ActualSealNo?.Trim() ?? string.Empty;
 
-        // Query container details from Database
-        var container = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
-            .AsNoTracking()
-            .FirstOrDefaultAsync(c => c.ContainerNumber.ToUpper() == cleanContainerNo, cancellationToken);
-
-        string expectedSeal = "SEAL-889922";
-        string isoType = "40HC";
-        string weight = "24,500 kg";
-        string currentStatus = "GateIn_Approved";
-        Guid containerId = Guid.NewGuid();
-
-        if (container != null)
-        {
-            containerId = container.Id;
-            isoType = string.IsNullOrEmpty(container.CargoType) ? "40HC" : container.CargoType;
-            currentStatus = container.Status;
-            if (!string.IsNullOrEmpty(container.SealNumber))
-            {
-                expectedSeal = container.SealNumber;
-            }
-        }
-
-        bool isMatchingContainer = container != null || !string.IsNullOrWhiteSpace(cleanContainerNo);
-        bool isMatchingSeal = string.Equals(cleanActualSeal, expectedSeal, StringComparison.OrdinalIgnoreCase);
+        var snapshot = await YardContainerSnapshot.ReadAsync(_context,cleanContainerNo,cancellationToken);
+        if (snapshot?.VisitId == null) throw new NexusPort.Shared.Exceptions.ValidationException("Container", "Container chưa có lượt đang lưu bãi để tiếp nhận.");
+        string expectedSeal = snapshot.SealNumber ?? string.Empty;
+        bool isMatchingContainer = true;
+        bool isMatchingSeal = string.IsNullOrEmpty(expectedSeal) || string.Equals(cleanActualSeal,expectedSeal,StringComparison.OrdinalIgnoreCase);
 
         return new YardContainerVerificationResultDto
         {
-            ContainerId = containerId,
-            ContainerNo = string.IsNullOrEmpty(cleanContainerNo) ? "TCNU1234567" : cleanContainerNo,
+            ContainerId = snapshot.ContainerId,
+            ContainerNo = cleanContainerNo,
             ExpectedSealNo = expectedSeal,
             ActualSealNo = cleanActualSeal,
             IsMatchingContainer = isMatchingContainer,
             IsMatchingSeal = isMatchingSeal,
-            CurrentStatus = currentStatus,
-            IsoType = isoType,
-            Weight = "24,500 kg",
-            AssignedBlock = "Block A01",
-            AssignedLocation = "A01-05-02-3"
+            CurrentStatus = snapshot.Status,
+            IsoType = snapshot.TypeCode,
+            Weight = snapshot.GrossWeightKg.HasValue ? $"{snapshot.GrossWeightKg.Value:N2} kg" : "Chưa khai báo",
+            AssignedBlock = string.Empty,
+            AssignedLocation = string.Empty
         };
     }
 

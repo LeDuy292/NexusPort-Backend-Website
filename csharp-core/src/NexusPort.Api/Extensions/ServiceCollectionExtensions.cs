@@ -60,6 +60,7 @@ public static class ServiceCollectionExtensions
         dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingType>("booking_type");
         dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingStatus>("booking_status");
 
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Container.Domain.Enums.ContainerStorageStatus>("container_status");
         var dataSource = dataSourceBuilder.Build();
 
         services.AddDbContext<AppDbContext>(options =>

@@ -371,6 +371,21 @@ public class GateVerificationService : IGateVerificationService
                 .FirstOrDefaultAsync(c => c.ContainerNumber.ToUpper() == searchCont, cancellationToken);
         }
 
+        if (booking == null)
+            throw new NexusPort.Shared.Exceptions.ValidationException("Booking", "Cần booking hợp lệ trước khi xác nhận vào cổng.");
+        if (container != null && !await _context.Set<Booking.Domain.Entities.BookingContainer>()
+            .AnyAsync(x => x.BookingId == booking.Id && x.ContainerId == container.Id && x.ContainerVisitId != null, cancellationToken))
+            throw new NexusPort.Shared.Exceptions.ValidationException("Container", "Container không thuộc lượt bãi của booking này.");
+
+        await using var gateTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM bookings WHERE id={booking.Id} FOR UPDATE", cancellationToken);
+        await _context.Entry(booking).ReloadAsync(cancellationToken);
+        if (booking.Status != BookingStatus.Approved && booking.Status != BookingStatus.Ready && booking.Status != BookingStatus.CheckedIn)
+            throw new NexusPort.Shared.Exceptions.ValidationException("Booking", "Booking cần được duyệt trước khi vào cổng.");
+
+        if (now < (booking.ValidFrom ?? booking.AppointmentStart).ToUniversalTime() || now > (booking.ValidTo ?? booking.AppointmentEnd).ToUniversalTime())
+            throw new NexusPort.Shared.Exceptions.ValidationException("Appointment", "Booking chưa tới hoặc đã hết khung giờ vào cổng.");
+
         // 4. Cập nhật các trạng thái nghiệp vụ theo Acceptance Criteria:
         // - Booking = CHECKED-IN
         if (booking != null)
@@ -381,7 +396,8 @@ public class GateVerificationService : IGateVerificationService
         // - Container = IN-YARD
         if (container != null)
         {
-            container.Status = "InYard";
+            if (booking?.BookingType == Booking.Domain.Enums.BookingType.Dropoff)
+                container.Status = "gate_in";
             container.UpdatedAt = now;
         }
 
@@ -393,52 +409,20 @@ public class GateVerificationService : IGateVerificationService
         }
 
         // 5. Tạo hoặc cập nhật Gate-In Record (Lưu Timestamp)
-        GateVerificationRecord? record = null;
-        if (request.VerificationRecordId.HasValue)
+        var gateIds = await _context.Database.SqlQueryRaw<Guid>(
+            "SELECT id AS \"Value\" FROM gates WHERE code={0} AND is_active", request.GateCode.Trim().ToUpper()).ToListAsync(cancellationToken);
+        if (gateIds.Count != 1) throw new NexusPort.Shared.Exceptions.ValidationException("Gate", "Cổng không hợp lệ hoặc đã ngừng hoạt động.");
+        var previous = await _context.Database.SqlQueryRaw<Guid>(
+            "SELECT id AS \"Value\" FROM gate_transactions WHERE booking_id={0} AND gate_type='gate_in' AND status='completed'", booking.Id).ToListAsync(cancellationToken);
+        var gateRecordId = previous.FirstOrDefault();
+        if (gateRecordId == Guid.Empty)
         {
-            record = await _verificationRepository.GetByIdAsync(request.VerificationRecordId.Value, cancellationToken);
+            gateRecordId = Guid.NewGuid();
+            await _context.Database.ExecuteSqlInterpolatedAsync($@"INSERT INTO gate_transactions(id,booking_id,gate_id,driver_id,truck_id,gate_type,status,plate_number_detected,checked_at,completed_at)
+              VALUES({gateRecordId},{booking.Id},{gateIds[0]},{booking.DriverId},{booking.TruckId},'gate_in','completed',{plate},{now},{now})", cancellationToken);
         }
-
-        if (record == null)
-        {
-            var verificationCode = $"GVR-{now:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
-            record = new GateVerificationRecord
-            {
-                VerificationCode = verificationCode,
-                GateCode = request.GateCode.Trim().ToUpper(),
-                LaneCode = request.LaneCode?.Trim().ToUpper(),
-                VerificationType = "AI_GATE_IN",
-                VerificationStatus = "PASS",
-                VerificationTime = now,
-                DetectedPlate = plate ?? "UNKNOWN",
-                VehicleDetected = true,
-                BookingId = booking?.Id,
-                BookingNumber = booking?.BookingNumber,
-                VehicleId = vehicle?.Id,
-                VehiclePlate = plate,
-                DriverId = booking?.DriverId,
-                DriverName = booking?.DriverName,
-                Notes = request.Notes ?? "Gate-In approved successfully by Gate Officer.",
-                ProcessedBy = request.OfficerId ?? "GATE_OFFICER",
-                VehiclePlateImageUrl = request.VehiclePlateImageUrl,
-                OverviewImageUrl = request.OverviewImageUrl
-            };
-            await _verificationRepository.AddAsync(record, cancellationToken);
-        }
-        else
-        {
-            record.VerificationStatus = "PASS";
-            record.Notes = request.Notes ?? "Gate-In approved successfully by Gate Officer.";
-            record.ProcessedBy = request.OfficerId ?? "GATE_OFFICER";
-            record.UpdatedAt = now;
-            if (!string.IsNullOrEmpty(request.VehiclePlateImageUrl))
-                record.VehiclePlateImageUrl = request.VehiclePlateImageUrl;
-            if (!string.IsNullOrEmpty(request.OverviewImageUrl))
-                record.OverviewImageUrl = request.OverviewImageUrl;
-            await _verificationRepository.UpdateAsync(record, cancellationToken);
-        }
-
         await _context.SaveChangesAsync(cancellationToken);
+        await gateTransaction.CommitAsync(cancellationToken);
 
         // 6. Gửi thông báo cho Driver & Dispatcher
         bool driverNotified = false;
@@ -458,7 +442,7 @@ public class GateVerificationService : IGateVerificationService
                         Severity = NotificationSeverity.Success,
                         Title = "Cổng kiểm soát: Gate-In thành công",
                         Message = $"Phương tiện {plate} đã hoàn tất thủ tục Gate-In tại cổng {request.GateCode}. Vui lòng di chuyển đến vị trí bãi được chỉ định.",
-                        ReferenceId = record.VerificationCode
+                        ReferenceId = "GATE-" + gateRecordId
                     }, cancellationToken);
                     driverNotified = true;
                 }
@@ -474,7 +458,7 @@ public class GateVerificationService : IGateVerificationService
                         Severity = NotificationSeverity.Info,
                         Title = $"Thông báo Gate-In: {plate}",
                         Message = $"Xe {plate} chở container {container?.ContainerNumber ?? "N/A"} đã vào cổng {request.GateCode} lúc {now:HH:mm:ss}.",
-                        ReferenceId = record.VerificationCode
+                        ReferenceId = "GATE-" + gateRecordId
                     }, cancellationToken);
                     dispatcherNotified = true;
                 }
@@ -493,7 +477,7 @@ public class GateVerificationService : IGateVerificationService
             BookingStatus = booking?.Status.ToString() ?? "CheckedIn",
             ContainerStatus = container?.Status ?? "InYard",
             VehicleStatus = vehicle?.Status.ToString() ?? "active",
-            GateRecordId = record.Id,
+            GateRecordId = gateRecordId,
             DriverNotified = driverNotified,
             DispatcherNotified = dispatcherNotified
         };
