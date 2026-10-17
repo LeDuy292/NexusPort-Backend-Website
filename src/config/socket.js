@@ -3,6 +3,7 @@
 const http = require('http');
 const { Server } = require('socket.io');
 const { verifyToken } = require('../utils/jwt');
+const { User } = require('../models/User');
 
 let io = null;
 
@@ -22,7 +23,7 @@ function initSocket(server) {
   });
 
   // Middleware xác thực JWT token
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const authHeader = socket.handshake.headers?.authorization;
       const token =
@@ -34,9 +35,14 @@ function initSocket(server) {
       }
 
       const decoded = verifyToken(token);
+      const account = await User.findByPk(decoded.id);
+      if (!account?.is_active || account.role !== decoded.role) return next(new Error('Tài khoản hoặc vai trò không còn hợp lệ.'));
       socket.data.user = decoded;
       socket.data.driverId = decoded.id;
       socket.data.role = decoded.role;
+      const expiryTimer = setTimeout(() => socket.disconnect(true), Math.max(0, decoded.exp * 1000 - Date.now()));
+      expiryTimer.unref?.();
+      socket.once('disconnect', () => clearTimeout(expiryTimer));
       next();
     } catch (err) {
       next(new Error('Token xác thực không hợp lệ hoặc đã hết hạn.'));

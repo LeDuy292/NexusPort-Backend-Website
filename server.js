@@ -8,6 +8,7 @@ const app = require('./src/app');
 const { connectDB, syncDB } = require('./src/config/database');
 const { port, nodeEnv } = require('./src/config/env');
 const { initSocket } = require('./src/config/socket');
+const { startDispatchRealtime } = require('./src/modules/booking-dispatch/dispatch.realtime');
 
 // Preload tất cả models để Sequelize nhận diện khi syncDB
 require('./src/models/User');
@@ -27,6 +28,8 @@ async function startServer() {
     // 3. Khởi động HTTP server & Socket.IO
     const server = http.createServer(app);
     initSocket(server);
+    const stopDispatchRealtime = startDispatchRealtime();
+    server.on('close', stopDispatchRealtime);
 
     server.listen(port, () => {
       console.log('');
