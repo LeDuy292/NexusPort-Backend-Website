@@ -3,6 +3,11 @@
 const { body, query } = require('express-validator');
 const { VALID_ROLES } = require('../../models/User');
 
+const driverAssignmentValidator = [
+  body('carrierId').optional().isUUID().withMessage('Mã công ty vận tải không hợp lệ.'),
+  body('driverId').optional().isUUID().withMessage('Mã hồ sơ tài xế không hợp lệ.'),
+];
+
 /**
  * Validate query params cho GET /api/users
  */
@@ -32,6 +37,9 @@ const queryValidator = [
  * Validate body cho POST /api/users (tạo tài khoản mới)
  */
 const createUserValidator = [
+  ...driverAssignmentValidator,
+  body('carrierId').if(body('role').equals('Driver')).notEmpty().withMessage('Chọn công ty vận tải cho tài khoản Driver.'),
+  body('driverId').if(body('role').equals('Driver')).notEmpty().withMessage('Chọn hồ sơ tài xế thuộc công ty đã chọn.'),
   body('username')
     .trim()
     .notEmpty().withMessage('Username không được để trống.')
@@ -66,6 +74,7 @@ const createUserValidator = [
  * Validate body cho PUT /api/users/:id (cập nhật thông tin)
  */
 const updateUserValidator = [
+  ...driverAssignmentValidator,
   body('username')
     .optional()
     .trim()
@@ -88,6 +97,9 @@ const updateUserValidator = [
  * Validate body cho PATCH /api/users/:id/assign-role
  */
 const assignRoleValidator = [
+  ...driverAssignmentValidator,
+  body('carrierId').if(body('role').equals('Driver')).notEmpty().withMessage('Chọn công ty vận tải cho tài khoản Driver.'),
+  body('driverId').if(body('role').equals('Driver')).notEmpty().withMessage('Chọn hồ sơ tài xế thuộc công ty đã chọn.'),
   body('role')
     .notEmpty().withMessage('Role không được để trống.')
     .isIn(VALID_ROLES).withMessage(`Role phải là một trong: ${VALID_ROLES.join(', ')}`),
