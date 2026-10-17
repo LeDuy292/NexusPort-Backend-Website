@@ -102,6 +102,17 @@ export class DestinationRepository {
         throw new ConflictError('Không thể đổi destination của Operation đã kết thúc.');
       }
 
+      if (input.bookingId) {
+        const link = await client.query(`SELECT bc.container_visit_id FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id
+          WHERE b.id=$1 AND bc.container_id=$2 AND b.driver_id=$3 AND b.status::text IN ('approved','ready','checked_in')`,
+          [input.bookingId, operation.containerId, operation.driverId]);
+        if (link.rows.length !== 1 || !link.rows[0].container_visit_id) throw new ConflictError('Operation không thuộc Driver/container/lượt bãi của booking này.');
+        const bound = await client.query(`UPDATE yard_tasks SET booking_id=$2,container_visit_id=$3 WHERE "Id"=$1
+          AND (booking_id IS NULL OR booking_id=$2) AND (container_visit_id IS NULL OR container_visit_id=$3) RETURNING "Id"`,
+          [input.operationId, input.bookingId, link.rows[0].container_visit_id]);
+        if (!bound.rows.length) throw new ConflictError('Operation đã được liên kết với lượt giao nhận khác.');
+      }
+
       const slotResult = await client.query<SlotRow>(
         `SELECT ys.id AS "slotId", yb.id AS "blockId", yb.code AS block,
                 yb.name AS "blockName", yb.zone, ys.bay, ys.row_no AS row, ys.tier,

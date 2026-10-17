@@ -21,7 +21,7 @@ export class SmartRouteService {
 
   async create(row: DriverRouteRow, target: RouteTarget | null, currentNodeId?: string): Promise<SmartRoute> {
     const result: SmartRoute = {
-      status: target ? 'unavailable' : 'pending_destination', reasonCode: null, message: '',
+      map: null, status: target ? 'unavailable' : 'pending_destination', reasonCode: null, message: '',
       revision: '', generatedAt: new Date().toISOString(), refreshAfterSeconds: 15,
       mapVersion: null, origin: null, destinationNode: null, waypoints: [], segments: [], directions: [],
       distanceMeters: null, estimatedSeconds: null, rerouted: false,
@@ -36,17 +36,19 @@ export class SmartRouteService {
     };
     if (!target) return finish('YARD_LOCATION_NOT_ASSIGNED');
     if (target.type === 'area' && /^(.*)-([0-9]+)-([0-9]+)-([0-9]+)$/.test(target.location)) return finish('YARD_LOCATION_INVALID');
-    if (row.slotStatus === 'maintenance') return finish('DESTINATION_RESTRICTED');
     const snapshot = await this.maps.load(row.mapData);
     if (!snapshot.map) return finish(snapshot.errorCode ?? 'YARD_MAP_NOT_CONFIGURED');
     const map = snapshot.map;
+    result.map = map;
+    if (target.source !== 'gate' && row.slotStatus === 'maintenance') return finish('DESTINATION_RESTRICTED');
     result.mapVersion = map.version;
     const unique = (nodes: RouteNode[]) => nodes.length === 1 ? nodes[0] : null;
     result.origin = currentNodeId
       ? map.nodes.find(node => node.id === currentNodeId) ?? null
       : unique(map.nodes.filter(node => node.gateCode === row.gateCode));
     if (!result.origin) return finish(currentNodeId ? 'CURRENT_POSITION_NOT_MAPPED' : 'ORIGIN_NOT_MAPPED');
-    result.destinationNode = (target.slotId ? unique(map.nodes.filter(node => node.slotId === target.slotId)) : null)
+    result.destinationNode = (target.source === 'gate' ? unique(map.nodes.filter(node => node.gateCode === target.location)) : null)
+      ?? (target.slotId ? unique(map.nodes.filter(node => node.slotId === target.slotId)) : null)
       ?? unique(map.nodes.filter(node => node.location === target.location))
       ?? (target.type === 'area' ? unique(map.nodes.filter(node => node.blockCode === target.location && !node.slotId && !node.location)) : null)
       ?? (target.type === 'slot' ? unique(map.nodes.filter(node => node.blockCode === target.block && !node.slotId && !node.location)) : null);

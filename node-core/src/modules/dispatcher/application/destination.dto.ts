@@ -29,6 +29,7 @@ export interface DestinationAssignment {
 }
 
 export interface AssignDestinationInput {
+  bookingId?: string;
   operationId: string;
   slotId: string;
   dispatcherId: string | null;

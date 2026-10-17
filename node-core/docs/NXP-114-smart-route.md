@@ -1,62 +1,68 @@
-# NXP-114 — Smart Route
+# NXP-114 Smart Route — Gate In → giao nhận container → Gate Out
 
-## Phạm vi
+## Phạm vi và cách chạy
 
-BE chỉ thay đổi trong `node-core`, FE thay đổi các màn hình Driver và thêm service Driver trong repo frontend, theo phạm vi đã được cho phép. Không migration, không ghi DB, không chỉnh `csharp-core`, Gate, Yard hay Dispatcher. Giữ các endpoint và trường dữ liệu route cũ.
+Nhánh `feature/NXP-114-smart-route` của backend, web và app dùng develop mới nhất.
+Thay đổi mới nằm trong Node TypeScript, frontend, Expo app và migration SQL; không sửa C#.
 
-## Luồng dữ liệu
+Áp dụng mọi migration còn thiếu theo thứ tự filename trước khi chạy Node:
 
-1. Driver đăng nhập bằng JWT hiện có và gọi `GET /api/v1/drivers/me/routes`.
-2. Chỉ lấy container thuộc đúng Driver, đã Gate In (`allowed`/`completed`), chưa rời cảng/kết thúc. Cổng xuất phát lấy từ giao dịch Gate In thực tế, không dùng cổng ghi trong hướng dẫn cũ.
-3. Đọc Operation đang hoạt động trong `yard_tasks` của đúng Driver/container; ưu tiên Operation phân công gần nhất. `ToLocation` là nguồn điểm đích. Chuỗi `Block-Bay-Row-Tier` được đối chiếu với `yard_blocks`/`yard_slots`, chấp nhận số có zero đầu. Khu vực xử lý được ánh xạ bằng `node.location`.
-4. Nếu Operation chưa có `ToLocation`, đọc reservation gắn đúng Operation (`NXP-059 operation:<id>`). Khi không có Operation đang hoạt động, giữ tương thích với reservation/position hiện có. Không lấy reservation của Operation khác để thay thế một điểm đích Operation không hợp lệ.
-5. Thuật toán Dijkstra tìm tuyến có thời gian ước tính thấp nhất, tuân thủ đường một chiều, loại node/edge bị hạn chế. Chi phí cạnh = `travelSeconds * (1 + 4 * congestion)`, với congestion trong [0,1]. `rerouted` cho biết tuyến khác với tuyến tối ưu khi bỏ qua hạn chế/ùn tắc.
-6. FE tự đọc lại mỗi 15 giây và khi kết nối/trở lại cửa sổ. Destination/conditions thay đổi sẽ cập nhật revision và thông báo. Driver có thể xác nhận waypoint hiện tại; không mô phỏng GPS hay tự xác nhận đến bãi.
+```powershell
+node --env-file=node-core/.env database/scripts/apply-smart-yard-routes.cjs
+node --env-file=node-core/.env database/scripts/apply-smart-yard-routes.cjs --apply
+npm --prefix node-core run build
+npm --prefix node-core test -- --runInBand
+```
 
-## API tương thích
+## Dữ liệu và luồng
 
-- `GET /api/v1/drivers/me/routes`: danh sách container, điểm đến và khả năng tạo tuyến.
-- `GET /api/v1/drivers/me/routes/:containerId?currentNodeId=<map-node-id>`: tính lại tuyến. Bỏ `currentNodeId` để bắt đầu tại cổng Gate In. Các endpoint cũng có tại prefix `/api` hiện có.
-- Các trường cũ `containerId`, `containerNumber`, `bookingId`, `gateTransactionId`, `gateStatus`, `destination`, `route` được giữ nguyên. `route.directions` là hướng dẫn vị trí cũ; FE Smart Route chỉ hiển thị tuyến khi `navigation.status === 'available'`.
-- Bổ sung `operation`, `target` (`slot` hoặc `area`) và `navigation`.
-- `navigation` gồm status, reasonCode, message, revision, generatedAt, refreshAfterSeconds, mapVersion, origin, destinationNode, waypoints, segments, directions, distanceMeters, estimatedSeconds, rerouted.
-- Không có tuyến: HTTP 200, vẫn trả điểm đến, `navigation.status = unavailable`; UI hiển thị lý do. Chưa gán điểm đến: list trả `pending_destination`, endpoint chi tiết giữ HTTP 409 tương thích. Không có Gate In của Driver/container: HTTP 404. JWT sai/thiếu: 401; sai role: 403; tham số sai: 422.
-- `Cache-Control: no-store` trên API điều hướng.
+- Chỉ giao dịch `gate_transactions.gate_in/completed` xác nhận xe đã vào bãi. Gate Officer dùng chức năng Gate hiện tại. Trạng thái transport trip hoặc nút Driver không tạo xác nhận cổng.
+- Driver identity được resolve từ `drivers.user_id` của tài khoản JWT; hỗ trợ profile legacy có cùng ID và chưa liên kết. Driver không thể chọn ID tài xế khác.
+- Booking/container/stay được nối bằng `booking_containers`; không phụ thuộc `gate_transaction_containers`, vì luồng duyệt Gate hiện tại không ghi bảng đó.
+- Operation có `booking_id`/`container_visit_id` được ưu tiên và phải khớp đúng lượt bãi. Với operation legacy chưa liên kết, chỉ dùng khi đúng Driver/container, được tạo sau Gate In và booking hiện hành không mơ hồ. Operation phân công trước Gate In cần liên kết booking tường minh; API gán destination nhận thêm `bookingId` để lưu liên kết đã kiểm tra. Không lấy reservation của operation khác. Pickup không có operation có thể dùng vị trí hiện tại của đúng lượt bãi đang active.
+- Đích Operation `ToLocation` được đối chiếu Slot hoặc area trên map. Một Slot không tồn tại không được biến thành một area giả.
+- Driver xem đường, báo đã đến điểm giao nhận. Progress gắn transaction Gate In + container + destination key. Đổi điểm đến sẽ bỏ trạng thái đã đến cũ và tính đường từ vị trí cuối Driver đã báo.
+- Sau yard event `Completed` của operation đúng Driver/container, xảy ra sau Gate In, Driver mới được xác nhận container (`OK`, `DAMAGED`, `ISSUE`). Node ghi cùng `container_confirmation_audits` với luồng hiện có, không tạo một hệ trạng thái riêng. Booking chỉ completed khi mọi container đã xác nhận.
+- Sau khi booking hoàn tất, route chuyển tới GATE-03. Driver chỉ thấy chờ xác nhận cổng. Gate Officer xác nhận Node `POST /api/v1/gate/complete-out`; giao dịch thực tế đổi journey thành `exited`, trigger DB đóng đúng Pickup visit/phát hành EIR. Xe Dropoff rỗng ra cổng giữ nguyên lượt lưu bãi của container.
+- Dispatcher xem mọi xe đang trong bãi và xe đã ra trong 24 giờ, gồm booking, biển số, Driver, operation, điểm đến, thời điểm các bước và lý do không có tuyến.
 
-## Bản đồ đường nội bộ
+## API Node Core (port 4000)
 
-Dữ liệu hiện tại có bảng route instruction và JSONB `map_data` nhưng chưa có graph đường nội bộ. Cần bản đồ được xác nhận bởi đội vận hành trước khi dùng dẫn đường thật. Không suy diễn đường xe chạy từ tọa độ Block/Slot, không tự bật bản đồ ví dụ.
+Base `/api/v1` (alias `/api`). Web dùng proxy `/node-api`.
 
-Hai nguồn được hỗ trợ:
+| Method | Path | Quyền / ý nghĩa |
+| --- | --- | --- |
+| GET | `/drivers/me/routes` | Driver: tất cả lượt đã Gate In của mình |
+| GET | `/drivers/me/routes/:containerId?bookingId=...&currentNodeId=...` | Driver: chọn đúng booking; tính lại từ waypoint đã báo |
+| POST | `/drivers/me/routes/:containerId/progress` | Driver: `{bookingId,action:"arrive",currentNodeId?}` |
+| POST | `/drivers/me/routes/:containerId/confirm-container` | Driver: `{bookingId,condition:"OK",notes?}` |
+| GET | `/dispatcher/smart-routes` | Dispatcher/Administrator: `{routes,generatedAt}` |
+| PUT | `/dispatcher/smart-routes/conditions` | Dispatcher/Administrator: `{targetType:"edge"|"node",targetId,restricted,congestion,validUntil?}` |
+| GET | `/gate/locations` | Đọc cổng thật `{id,code,name,gateType,isActive}` |
+| POST | `/gate/complete-out` | Gate Officer/Gate/Administrator: `{bookingId,gateId}` xác nhận xe đã ra; Driver không được ghi |
 
-1. **Snapshot dùng chung cho Node**: đặt `SMART_ROUTE_MAP_PATH` trong môi trường chạy Node, trỏ đến file JSON bản đồ. Nên dùng đường dẫn tuyệt đối. File được đọc lại ở mỗi lần tính tuyến. Đổi file theo cách ghi file tạm rồi rename để tránh đọc dở dang. Đây là cấu hình ở Node, không phải schema DB.
-2. **Snapshot instruction hiện có**: nếu không đặt đường dẫn trên, đọc `driver_route_instructions.map_data.smartYardMap`. Instruction vẫn phải gắn đúng booking/Driver/container và block theo điều kiện SQL hiện có. Không có endpoint ghi instruction mới trong feature này.
+DTO giữ các trường route cũ, thêm `operation`, `target`, `navigation`, `journey`, Driver/biển số/booking.
+`journey.phase`: `to_yard`, `at_yard`, `ready_for_gate_out`, `exited`.
+`navigation` có cả map graph/layout, tuyến, hướng dẫn, khoảng cách/thời gian ước tính và revision.
+Mỗi refresh đọc lại đích, map và điều kiện. HTTP 200 vẫn trả điểm đến khi `unavailable`/`pending_destination`.
+Thiếu Gate In hoặc ngoài phạm vi Driver: 404. Token/role sai: 401/403. Payload sai: 422. Xung đột trạng thái: 409.
+API điều hướng đặt `Cache-Control: no-store`.
 
-Xem `config/smart-yard-map.example.json` để biết định dạng. File này chỉ là dữ liệu minh họa, không phải sơ đồ thật. Cần thay gateCode, blockCode, location, topology, chiều đường và chiều dài bằng dữ liệu bãi thực tế.
+## Bản đồ và điều kiện đường
 
-### Hợp đồng snapshot
+Migration 017 tạo map sơ đồ theo reference: Gate01/02 ở bắc, đường vòng một chiều, điểm giao nhận A-S1/A-S2 phía đông, Gate03 phía nam. Block/Slot/occupancy lấy từ Yard Location thật. Đây là sơ đồ nội bộ; tọa độ không phải GPS và thời gian/khoảng cách là ước tính theo cấu hình. Slot map biểu diễn điểm tiếp cận giao nhận, không dẫn xe chạy xuyên qua chồng container.
 
-- `version`: chuỗi phiên bản bắt buộc. `updatedAt`, `validUntil`: ISO UTC tùy chọn. Snapshot hết `validUntil` bị từ chối; bên cung cấp realtime cần đặt TTL thích hợp.
-- `nodes`: tối đa 2000, id duy nhất, label, tọa độ sơ đồ hữu hạn x/y. Tùy chọn gateCode, blockCode, slotId (UUID), location và restricted.
-- `edges`: tối đa 10000, id duy nhất, from/to phải tồn tại; distanceMeters và travelSeconds dương. Mặc định một chiều. `bidirectional: true` cho phép hai chiều. restricted mặc định false, congestion mặc định 0.
-- Điểm đầu khớp gateCode; điểm đích ưu tiên slotId, tiếp theo location; với slot có thể dừng tại node lối vào Block duy nhất (`blockCode`, không có slotId/location), rồi hướng dẫn đến Bay/Row và xử lý container ở Tier theo Yard. Operation chỉ gán mã Block cũng được ánh xạ vào lối vào Block. Nếu Operation dùng định dạng Block-Bay-Row-Tier nhưng Slot không tồn tại trong Yard, trả `YARD_LOCATION_INVALID`.
-- Khi cấu hình nhiều node cho cùng gate/block, cần gán điểm đến cụ thể bằng slotId/location để tránh mơ hồ. Endpoint không chọn ngẫu nhiên một lối vào.
-- `instruction` là hướng dẫn cạnh theo chiều from → to. Ở chiều ngược của cạnh bidirectional, hệ thống dùng hướng dẫn sinh từ waypoint để tránh đảo sai chỉ dẫn rẽ.
+`ConfiguredYardMapProvider` là boundary thay được bằng nguồn Smart Yard/IoT:
 
-## Điểm mở rộng Smart Yard / IoT
+1. `SMART_ROUTE_MAP_PATH` nếu cấu hình: đọc snapshot JSON ngoài mỗi request.
+2. Active `smart_yard_maps` và overlay `smart_yard_conditions`, occupancy hiện tại từ DB.
+3. Snapshot `driver_route_instructions.map_data.smartYardMap` tương thích khi không có active map.
 
-`YardMapProvider.load()` cung cấp một snapshot topology + hạn chế + congestion. Có thể thay provider bằng nguồn Smart Yard hoặc bộ tổng hợp IoT mà không đổi API Driver hay schema PostgreSQL. Nguồn file cấu hình ưu tiên hơn snapshot cũ trong instruction. Chưa triển khai feed IoT/Smart Yard bên ngoài; cần thống nhất dữ liệu và quyền sở hữu với module đó trước khi tích hợp.
+Đường một chiều mặc định; chỉ cạnh có `bidirectional` mới đi hai chiều. Node/edge restricted bị loại; congestion [0,1] tăng chi phí `travelSeconds * (1 + 4*congestion)`. Không có đường thay thế hợp lệ thì báo dừng nơi an toàn/liên hệ điều phối; không vẽ đường xuyên vùng cấm.
+Condition dispatcher mặc định hết hạn sau 30 phút, có thể đặt `validUntil`. Provider bỏ observation hết hạn. File map ngoài là nguồn ưu tiên và UI không ghi đè nó. Chưa kết nối một thiết bị IoT bên ngoài; adapter/schema đã sẵn để nhận observations cùng contract.
 
-## Các trạng thái cần thông báo
-
-`YARD_MAP_NOT_CONFIGURED`, `YARD_MAP_INVALID`, `YARD_MAP_EXPIRED`, `ORIGIN_NOT_MAPPED`, `CURRENT_POSITION_NOT_MAPPED`, `DESTINATION_NOT_MAPPED`, `DESTINATION_RESTRICTED`, `NO_SAFE_ROUTE`, `YARD_LOCATION_NOT_ASSIGNED`, `YARD_LOCATION_INVALID`. FE hiển thị thông báo tiếng Việt và nút thử lại; khi mất kết nối hoặc lỗi API sẽ ẩn tuyến chưa được xác nhận lại.
-
-## Liên quan module ngoài phạm vi
-
-Luồng `src/modules/trips/trips.service.js::confirmGateIn` thuộc backend JavaScript cũ chỉ cập nhật `transport_trips`/history; chưa tạo `gate_transactions` và `gate_transaction_containers`. Việc nhấn nút Gate In của luồng đó không tự tạo dữ liệu Gate In hợp lệ cho API Driver Route hiện có. Feature này không sửa module Trip, không xem trạng thái chuyến là giao dịch cổng, không tạo dữ liệu cổng thay module Gate. Cần phối hợp chủ module nếu muốn hợp nhất hai luồng; hiện dùng Gate In thật từ module Gate để nhận route. Màn Smart Route vẫn truy cập độc lập khi API thông tin chuyến cũ lỗi.
+Web/app refresh mỗi 15 giây và khi trở lại màn hình. Sự kiện yard hiện có có thể đánh thức refresh; polling đảm bảo cập nhật cả khi Gate không phát socket.
 
 ## Kiểm tra
 
-Chạy từ node-core: `npm run build`, `npm test -- --runInBand`. Kiểm tra có trọng tâm: tuyến ngắn nhất, một chiều/hai chiều, vùng hạn chế, ùn tắc, hết tuyến, đích khu vực, bảo trì, vị trí Driver, revision khi đích thay đổi, nguồn snapshot hỏng/hết hạn và trường route cũ.
-
-Chạy `npm run build` tại repo frontend. Smoke test với tài khoản Driver đã Gate In và bản đồ bãi được xác nhận: vào trang chủ Driver → Smart Route; đổi Operation destination từ chức năng điều phối hiện có; cập nhật congestion/restricted trong snapshot; xác nhận UI đổi tuyến ở lần refresh tiếp theo. Không cần chạy migration hoặc seed cho feature này.
+Node unit/API tests bao phủ Dijkstra, một chiều, restriction/congestion/no-route, map hỏng/hết hạn, auth linked account, arrival, thay đổi destination, confirmation và exit. Integration phải dùng database local cô lập; không tạo fixture trên DB cấu hình remote. Chạy thêm web build/lint, app TypeScript và auth/bookings tests.

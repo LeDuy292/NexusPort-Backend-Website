@@ -35,6 +35,46 @@ const parameterSchema = (path: string) => [...path.matchAll(/\{([A-Za-z0-9_]+)\}
 }));
 
 const operationOverrides: Record<string, Record<string, unknown>> = {
+  'GET /api/v1/gate/locations': {
+    summary: 'Read configured physical gate IDs, codes and directions',
+  },
+  'POST /api/v1/gate/complete-out': {
+    summary: 'Gate Officer confirms physical truck exit after every booked container is handed over',
+    security: [{ BearerAuth: [] }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['bookingId', 'gateId'], additionalProperties: false,
+      properties: { bookingId: { type: 'string', format: 'uuid' }, gateId: { type: 'string', format: 'uuid' } },
+    } } } },
+  },
+  'GET /api/v1/dispatcher/smart-routes': {
+    summary: 'Monitor actual Gate In, yard arrival, container handover and Gate Out for dispatched trucks',
+    security: [{ BearerAuth: [] }],
+  },
+  'PUT /api/v1/dispatcher/smart-routes/conditions': {
+    summary: 'Set a temporary road restriction or congestion observation on the active yard map',
+    security: [{ BearerAuth: [] }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['targetType', 'targetId', 'restricted'], additionalProperties: false,
+      properties: { targetType: { type: 'string', enum: ['node', 'edge'] }, targetId: { type: 'string', maxLength: 120 },
+        restricted: { type: 'boolean' }, congestion: { type: 'number', minimum: 0, maximum: 1 }, validUntil: { type: 'string', format: 'date-time' } },
+    } } } },
+  },
+  'POST /api/v1/drivers/me/routes/{containerId}/progress': {
+    summary: 'Driver reports arrival at the currently assigned handover point',
+    security: [{ BearerAuth: [] }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['bookingId', 'action'], additionalProperties: false,
+      properties: { bookingId: { type: 'string', format: 'uuid' }, action: { type: 'string', enum: ['arrive'] }, currentNodeId: { type: 'string', maxLength: 120 } },
+    } } } },
+  },
+  'POST /api/v1/drivers/me/routes/{containerId}/confirm-container': {
+    summary: 'Confirm the booked container after arrival and verified yard completion; return the next route',
+    security: [{ BearerAuth: [] }],
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['bookingId'], additionalProperties: false,
+      properties: { bookingId: { type: 'string', format: 'uuid' }, condition: { type: 'string', enum: ['OK', 'DAMAGED', 'ISSUE'] }, notes: { type: 'string', maxLength: 1000 } },
+    } } } },
+  },
   'GET /api/v1/dispatcher/bookings/ready': {
     summary: 'List approved bookings and their containers, driver and vehicle for dispatch',
     security: [{ BearerAuth: [] }],
@@ -73,7 +113,7 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
       required: true,
       content: { 'application/json': { schema: {
         type: 'object', required: ['slotId'], additionalProperties: false,
-        properties: { slotId: { type: 'string', format: 'uuid' } },
+        properties: { slotId: { type: 'string', format: 'uuid' }, bookingId: { type: 'string', format: 'uuid', description: 'Explicit booking link for preassigned operations; driver, container and visit are validated.' } },
       } } },
     },
     responses: {
@@ -108,6 +148,7 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
     security: [{ BearerAuth: [] }],
     parameters: [
       { name: 'containerId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+      { name: 'bookingId', in: 'query', required: false, description: 'Exact booking occurrence; required if more than one visit is visible for this container.', schema: { type: 'string', format: 'uuid' } },
       { name: 'currentNodeId', in: 'query', required: false, description: 'Driver-confirmed map node. Omit to start from the actual Gate In gate.', schema: { type: 'string', minLength: 1, maxLength: 120 } },
     ],
     responses: {
@@ -115,7 +156,7 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
       401: { description: 'Missing or invalid Driver token' },
       403: { description: 'Token does not have Driver role' },
       404: { description: 'No passed Gate-In transaction for this Driver and Container' },
-      409: { description: 'No Yard slot assigned to the Container yet' },
+      409: { description: 'Container has multiple visible bookings; select the exact booking' },
       422: { description: 'Invalid container ID or currentNodeId' },
     },
   },

@@ -27,6 +27,19 @@ export const yardMapSchema = z.object({
     congestion: z.number().finite().min(0).max(1).default(0),
     instruction: z.string().trim().min(1).max(500).optional(),
   })).max(10000),
+  layout: z.object({
+    blocks: z.array(z.object({
+      code: identifier, label: z.string().min(1).max(200),
+      x: z.number().finite(), y: z.number().finite(),
+      width: z.number().positive(), height: z.number().positive(),
+      bays: z.number().int().positive(), rows: z.number().int().positive(), tiers: z.number().int().positive(),
+    })).max(100),
+    slots: z.array(z.object({
+      id: z.string().uuid(), block: identifier,
+      bay: z.number().int().positive(), row: z.number().int().positive(), tier: z.number().int().positive(),
+      status: identifier, containerId: z.string().uuid().nullable().optional(),
+    })).max(20000),
+  }).optional(),
 }).superRefine((map, context) => {
   const nodeIds = new Set(map.nodes.map(node => node.id));
   const edgeIds = new Set(map.edges.map(edge => edge.id));
@@ -51,10 +64,11 @@ export interface RouteTarget {
   bay: number | null;
   row: number | null;
   tier: number | null;
-  source: 'operation' | 'reservation' | 'container_position';
+  source: 'operation' | 'reservation' | 'container_position' | 'gate';
 }
 
 export interface SmartRoute {
+  map: YardMap | null;
   status: 'available' | 'unavailable' | 'pending_destination';
   reasonCode: string | null;
   message: string;

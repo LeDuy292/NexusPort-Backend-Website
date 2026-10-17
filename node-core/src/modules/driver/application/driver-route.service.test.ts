@@ -1,5 +1,7 @@
 import { DriverRouteService } from './driver-route.service';
 import { DriverRouteRepository, DriverRouteRow } from '../infrastructure/driver-route.repository';
+import { SmartRouteService } from './smart-route.service';
+const navigation = new SmartRouteService({ load: async () => ({ map: null, errorCode: 'YARD_MAP_NOT_CONFIGURED' }) });
 
 const row: DriverRouteRow = {
   containerId: '11111111-1111-4111-8111-111111111111',
@@ -19,7 +21,7 @@ describe('Driver route after Gate-In PASS', () => {
     const repository = {
       findForDriverAndContainer: jest.fn().mockResolvedValue(row),
     } as unknown as DriverRouteRepository;
-    const route = await new DriverRouteService(repository).get(driverId, row.containerId);
+    const route = await new DriverRouteService(repository, navigation).get(driverId, row.containerId);
 
     expect(repository.findForDriverAndContainer).toHaveBeenCalledWith(driverId, row.containerId);
     expect(route.containerId).toBe(row.containerId);
@@ -35,8 +37,9 @@ describe('Driver route after Gate-In PASS', () => {
     const repository = {
       findForDriverAndContainer: jest.fn().mockResolvedValue({ ...row, slotId: null }),
     } as unknown as DriverRouteRepository;
-    await expect(new DriverRouteService(repository).get(driverId, row.containerId))
-      .rejects.toMatchObject({ statusCode: 409, errorCode: 'YARD_LOCATION_NOT_ASSIGNED' });
+    const route = await new DriverRouteService(repository, navigation).get(driverId, row.containerId);
+    expect(route.target).toBeNull();
+    expect(route.navigation).toMatchObject({ status: 'pending_destination', reasonCode: 'YARD_LOCATION_NOT_ASSIGNED' });
   });
 
   it('does not expose a container without a passed Gate-In for that driver', async () => {

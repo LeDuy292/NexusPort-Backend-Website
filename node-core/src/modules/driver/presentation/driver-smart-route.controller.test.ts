@@ -5,6 +5,7 @@ import { DriverRouteService, toDriverRoute } from '../application/driver-route.s
 import { AppError } from '../../../shared/errors/app-error';
 import { createServer, get as httpGet, IncomingHttpHeaders } from 'http';
 import { AddressInfo } from 'net';
+import { DriverRouteRepository } from '../infrastructure/driver-route.repository';
 
 const driverId = '55555555-5555-4555-8555-555555555555';
 const containerId = '11111111-1111-4111-8111-111111111111';
@@ -30,6 +31,7 @@ describe('Driver Smart Route API authentication and input', () => {
   beforeAll(async () => { await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve)); });
   afterAll(async () => { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); });
   afterEach(() => jest.restoreAllMocks());
+  beforeEach(() => { jest.spyOn(DriverRouteRepository.prototype, 'resolveDriverId').mockResolvedValue(driverId); });
 
   it('requires a valid Driver token', async () => {
     expect((await get('/drivers/me/routes')).status).toBe(401);
