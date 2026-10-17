@@ -22,6 +22,7 @@ function handleServiceError(error, res, next) {
 function checkValidation(req, res) {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
+    console.error(`[Validation Error 422] ${req.method} ${req.originalUrl}:`, JSON.stringify(errors.array()), 'Body:', req.body, 'Query:', req.query);
     res.status(422).json({
       success: false,
       message: errors.array()[0].msg,

@@ -4,8 +4,8 @@ const { body, query } = require('express-validator');
 const { VALID_ROLES } = require('../../models/User');
 
 const driverAssignmentValidator = [
-  body('carrierId').optional().isUUID().withMessage('Mã công ty vận tải không hợp lệ.'),
-  body('driverId').optional().isUUID().withMessage('Mã hồ sơ tài xế không hợp lệ.'),
+  body('carrierId').optional({ checkFalsy: true }).isUUID().withMessage('Mã công ty vận tải không hợp lệ.'),
+  body('driverId').optional({ checkFalsy: true }).isUUID().withMessage('Mã hồ sơ tài xế không hợp lệ.'),
 ];
 
 /**
@@ -13,24 +13,24 @@ const driverAssignmentValidator = [
  */
 const queryValidator = [
   query('page')
-    .optional()
+    .optional({ checkFalsy: true })
     .isInt({ min: 1 })
     .withMessage('Số trang phải là số nguyên dương.')
     .toInt(),
 
   query('limit')
-    .optional()
+    .optional({ checkFalsy: true })
     .isInt({ min: 1, max: 100 })
     .withMessage('Giới hạn phải từ 1–100.')
     .toInt(),
 
   query('status')
-    .optional()
+    .optional({ checkFalsy: true })
     .isIn(['active', 'inactive', 'all'])
     .withMessage('Status phải là: active, inactive hoặc all.'),
 
   query('role')
-    .optional(),
+    .optional({ checkFalsy: true }),
 ];
 
 /**
