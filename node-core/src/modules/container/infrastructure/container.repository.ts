@@ -22,14 +22,16 @@ const baseSelect = `
          c.container_type_id AS "containerTypeId",
          c.vessel_call_id AS "vesselCallId",
          c.container_no AS "containerNumber",
-         c.seal_no AS "sealNumber",
-         c.cargo_type AS "cargoType",
+         current_visit.seal_number AS "sealNumber",
+         current_visit.cargo_type AS "cargoType",
+         cargo.name_vi AS "cargoTypeName",
+         current_visit.required_power_kw AS "requiredPowerKw",
          c.status,
-         c.gross_weight_kg AS "grossWeightKg",
+         current_visit.gross_weight_kg AS "grossWeightKg",
          c.is_reefer AS "isReefer",
-         c.is_dangerous AS "isDangerous",
-         c.is_perishable AS "isPerishable",
-         c.is_oversized AS "isOversized",
+         (current_visit.cargo_type='dangerous') AS "isDangerous",
+         (current_visit.cargo_type='perishable') AS "isPerishable",
+         (current_visit.cargo_type='oversized') AS "isOversized",
          c.expected_gate_out_at AS "expectedGateOutAt",
          c.arrived_at AS "arrivedAt",
          c.left_at AS "leftAt",
@@ -54,6 +56,9 @@ const baseSelect = `
          (SELECT COUNT(*)::int FROM booking_containers bc WHERE bc.container_id = c.id) AS "bookingCount"
     FROM containers c
     JOIN container_types ct ON ct.id = c.container_type_id
+    LEFT JOIN LATERAL (SELECT cv.* FROM container_visits cv WHERE cv.container_id=c.id AND cv.visit_status IN ('active','completed')
+      ORDER BY (cv.visit_status='active') DESC,cv.completed_at DESC NULLS LAST,cv.started_at DESC LIMIT 1) current_visit ON true
+    LEFT JOIN container_cargo_types cargo ON cargo.code = current_visit.cargo_type
     LEFT JOIN carriers cr ON cr.id = c.carrier_id
     LEFT JOIN vessel_calls vc ON vc.id = c.vessel_call_id
     LEFT JOIN LATERAL (
@@ -89,6 +94,7 @@ const mapType = (row: Record<string, unknown>): ContainerTypeEntity => ({
 
 const mapListRow = (row: Record<string, unknown>): ContainerListItem => ({
   ...row,
+  requiredPowerKw: numberOrNull(row.requiredPowerKw),
   grossWeightKg: numberOrNull(row.grossWeightKg),
   latestGrossWeightKg: numberOrNull(row.latestGrossWeightKg),
   bookingCount: Number(row.bookingCount ?? 0),
@@ -160,8 +166,9 @@ export class ContainerRepository {
               SET visit_status = 'active', started_at = COALESCE(started_at, now()), updated_at = now()
             WHERE id = (
               SELECT id FROM container_visits
-               WHERE container_id = $1 AND visit_status IN ('planned', 'active')
-               ORDER BY created_at DESC LIMIT 1
+               WHERE container_id = $1 AND visit_status = 'planned'
+                 AND id IN (SELECT bc.container_visit_id FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id WHERE b.booking_type='dropoff' AND b.status IN ('approved','ready','checked_in'))
+               ORDER BY created_at ASC LIMIT 1
             )`,
           [input.containerId],
         );
@@ -172,8 +179,8 @@ export class ContainerRepository {
               SET visit_status = 'completed', completed_at = COALESCE(completed_at, now()), updated_at = now()
             WHERE id = (
               SELECT id FROM container_visits
-               WHERE container_id = $1 AND visit_status IN ('planned', 'active')
-               ORDER BY COALESCE(started_at, created_at) DESC LIMIT 1
+               WHERE container_id = $1 AND visit_status = 'active'
+               ORDER BY started_at ASC LIMIT 1
             )`,
           [input.containerId],
         );
@@ -229,7 +236,7 @@ export class ContainerRepository {
     if (filters.containerTypeId) addCondition('c.container_type_id = ?', filters.containerTypeId);
     if (filters.size) addCondition('ct.size = ?', filters.size);
     if (filters.category) addCondition('ct.category = ?', filters.category);
-    if (filters.cargoType) addCondition('c.cargo_type = ?', filters.cargoType);
+    if (filters.cargoType) addCondition("EXISTS(SELECT 1 FROM container_visits av WHERE av.container_id=c.id AND av.visit_status='active' AND av.cargo_type = ?)", filters.cargoType);
     if (filters.carrierId) addCondition('c.carrier_id = ?', filters.carrierId);
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';

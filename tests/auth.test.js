@@ -238,6 +238,17 @@ describe('GET /api/auth/me', () => {
   });
 });
 
+// ─── POST /api/auth/logout ───────────────────────────────────────────────────
+describe('POST /api/auth/logout', () => {
+  it('Đăng xuất thành công → 200 + message', async () => {
+    const res = await request(app).post('/api/auth/logout');
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toContain('Đăng xuất thành công');
+  });
+});
+
 // ─── GET /api/health ─────────────────────────────────────────────────────────
 describe('GET /api/health', () => {
   it('Health check → 200', async () => {
@@ -248,6 +259,7 @@ describe('GET /api/health', () => {
     expect(res.body).toHaveProperty('timestamp');
   });
 });
+
 
 // ─── 404 ─────────────────────────────────────────────────────────────────────
 describe('404 Not Found', () => {

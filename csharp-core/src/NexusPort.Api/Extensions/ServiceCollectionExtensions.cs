@@ -69,6 +69,7 @@ public static class ServiceCollectionExtensions
         dataSourceBuilder.MapEnum<NexusPort.Modules.Yard.Domain.Enums.AlertSeverity>("alert_severity", nullTranslator);
         dataSourceBuilder.MapEnum<NexusPort.Modules.Yard.Domain.Enums.ReeferAlertStatus>("reefer_alert_status", nullTranslator);
 
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Container.Domain.Enums.ContainerStorageStatus>("container_status");
         var dataSource = dataSourceBuilder.Build();
 
         services.AddDbContext<AppDbContext>(options =>

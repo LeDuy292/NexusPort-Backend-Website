@@ -78,7 +78,7 @@ async function createUser(req, res, next) {
   try {
     if (!checkValidation(req, res)) return;
 
-    const { username, email, password, role, fullName, isActive } = req.body;
+    const { username, email, password, role, fullName, isActive, carrierId, driverId } = req.body;
     const user = await usersService.createUser({
       username,
       email,
@@ -86,6 +86,7 @@ async function createUser(req, res, next) {
       role,
       fullName,
       isActive: isActive !== undefined ? isActive : true,
+      carrierId, driverId,
     });
 
     return res.status(201).json({
@@ -107,8 +108,8 @@ async function updateUser(req, res, next) {
     if (!checkValidation(req, res)) return;
 
     const { id } = req.params;
-    const { fullName, email, username } = req.body;
-    const user = await usersService.updateUser(id, { fullName, email, username });
+    const { fullName, email, username, carrierId, driverId } = req.body;
+    const user = await usersService.updateUser(id, { fullName, email, username, carrierId, driverId });
 
     return res.status(200).json({
       success: true,
@@ -129,8 +130,8 @@ async function assignRole(req, res, next) {
     if (!checkValidation(req, res)) return;
 
     const { id } = req.params;
-    const { role } = req.body;
-    const user = await usersService.assignRole(id, role);
+    const { role, carrierId, driverId } = req.body;
+    const user = await usersService.assignRole(id, role, { carrierId, driverId });
 
     return res.status(200).json({
       success: true,

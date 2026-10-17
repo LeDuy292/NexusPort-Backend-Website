@@ -70,6 +70,7 @@ public class BookingService : IBookingService
 
     public async Task<BookingDto> CreateAsync(CreateBookingDto dto, CancellationToken cancellationToken = default)
     {
+        dto.ContainerIds = dto.ContainerSelections.Select(x => x.ContainerId).ToList();
         // Execute Business Validation Rules (NXP-042)
         await _validationService.ValidateBookingAsync(dto, cancellationToken);
 
@@ -107,28 +108,39 @@ public class BookingService : IBookingService
             if (truck != null) entity.VehiclePlate = truck.PlateNumber;
         }
 
-        if (dto.ContainerIds != null)
+        if (dto.ContainerSelections.Count == 0 ||
+            dto.ContainerSelections.Select(x => x.ContainerId).Distinct().Count() != dto.ContainerSelections.Count)
+            throw new ValidationException("ContainerSelections", "Chọn container từ trang khai báo trước khi đặt lịch.");
+        await using var bookingTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        foreach (var selection in dto.ContainerSelections.OrderBy(x => x.ContainerId))
         {
-            foreach (var containerId in dto.ContainerIds)
+            if (dto.BookingType == BookingType.Pickup)
             {
-                entity.AddContainer(containerId);
-
-                // Cập nhật trạng thái container thành 'reserved' (Đã được giữ chỗ theo Booking)
-                try
-                {
-                    await _context.Database.ExecuteSqlInterpolatedAsync($"UPDATE containers SET status = 'reserved'::container_status, updated_at = NOW() WHERE id = {containerId};", cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Could not update container status to reserved for container {ContainerId}", containerId);
-                }
+                if (string.IsNullOrWhiteSpace(selection.YardCode) ||
+                    !System.Text.RegularExpressions.Regex.IsMatch(NormalizeYardCode(selection.YardCode), @"^TC-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$"))
+                    throw new ValidationException("YardCode", "Nhập mã lượt bãi nhận được từ booking Dropoff.");
+                var links = await _context.Database.SqlQueryRaw<PickupCodeLink>(
+                    "SELECT * FROM yard_prepare_pickup({0},{1},{2})", selection.ContainerId, NormalizeYardCode(selection.YardCode), dto.CarrierId)
+                    .ToListAsync(cancellationToken);
+                selection.DeclarationId = links.Single().DeclarationId;
+                selection.ContainerVisitId = links.Single().ContainerVisitId;
             }
+            else if (selection.DeclarationId == Guid.Empty || selection.ContainerVisitId.HasValue)
+                throw new ValidationException("ContainerSelections", "Chọn khai báo chưa đặt Dropoff từ trang khai báo container.");
+        }
+        foreach (var selection in dto.ContainerSelections.OrderBy(x => x.ContainerId))
+        {
+            entity.AddContainer(selection.ContainerId);
+            var link = entity.BookingContainers.Last();
+            link.DeclarationId = selection.DeclarationId;
+            link.ContainerVisitId = selection.ContainerVisitId;
         }
 
         // Theo yêu cầu: Luôn đặt trạng thái là Pending để chờ Dispatcher duyệt
         entity.Status = BookingStatus.Pending;
 
         await _repository.AddAsync(entity, cancellationToken);
+        await bookingTransaction.CommitAsync(cancellationToken);
 
         // Emit real business notification to Database (NXP-044)
         try
@@ -192,7 +204,7 @@ public class BookingService : IBookingService
         // Business Rule Check: Only Pending bookings can be updated by Transport Company
         if (entity.Status != BookingStatus.Pending)
         {
-            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be updated.");
+            throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể cập nhật.");
         }
 
         // Re-validate updated request values
@@ -205,7 +217,8 @@ public class BookingService : IBookingService
             TruckId = dto.TruckId ?? entity.TruckId,
             AppointmentStart = dto.AppointmentStart,
             AppointmentEnd = dto.AppointmentEnd,
-            ContainerIds = dto.ContainerIds
+            ContainerIds = entity.BookingContainers.Select(x => x.ContainerId).ToList(),
+            ExcludeBookingId = entity.Id
         };
 
         await _validationService.ValidateBookingAsync(validationDto, cancellationToken);
@@ -216,15 +229,8 @@ public class BookingService : IBookingService
         entity.AppointmentStart = dto.AppointmentStart;
         entity.AppointmentEnd = dto.AppointmentEnd;
 
-        // Update containers
-        entity.BookingContainers.Clear();
-        if (dto.ContainerIds != null)
-        {
-            foreach (var containerId in dto.ContainerIds)
-            {
-                entity.AddContainer(containerId);
-            }
-        }
+        if (dto.ContainerIds.Count > 0 && !dto.ContainerIds.OrderBy(x=>x).SequenceEqual(entity.BookingContainers.Select(x=>x.ContainerId).OrderBy(x=>x)))
+            throw new ValidationException("ContainerIds", "Không thay container/bản khai trên booking đã lưu; hãy hủy và tạo lịch mới.");
 
         await _repository.UpdateAsync(entity, cancellationToken);
 
@@ -255,42 +261,24 @@ public class BookingService : IBookingService
         // Tenant Isolation Check
         if (userCarrierId.HasValue && userCarrierId.Value != Guid.Empty && entity.CarrierId != userCarrierId.Value)
         {
-            // Tạm thời comment lại để Dev test dễ dàng
-            // throw new UnauthorizedException("Access denied. You can only cancel Bookings belonging to your company.");
+            throw new UnauthorizedException("Access denied. You can only cancel Bookings belonging to your company.");
         }
 
         // Business Rule Check: Cannot cancel if already checked-in or completed
         if (entity.Status == BookingStatus.CheckedIn || entity.Status == BookingStatus.Completed)
         {
-            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be canceled.");
+            throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể hủy.");
         }
 
         if (entity.Status == BookingStatus.Canceled)
         {
-            throw new ValidationException("Status", "Booking is already canceled.");
+            throw new ValidationException("Status", "Lịch hẹn đã bị hủy trước đó.");
         }
 
         entity.Cancel();
         if (!string.IsNullOrWhiteSpace(dto?.Reason))
         {
             entity.RejectedReason = dto.Reason;
-        }
-
-        // Hoàn trả trạng thái Container về 'in_yard' khi Booking bị hủy
-        foreach (var bc in entity.BookingContainers)
-        {
-            var cont = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
-                .FirstOrDefaultAsync(c => c.Id == bc.ContainerId, cancellationToken);
-            if (cont != null && cont.Status == "reserved")
-            {
-                cont.Status = "in_yard";
-            }
-
-            try
-            {
-                await _context.Database.ExecuteSqlInterpolatedAsync($"UPDATE containers SET status = 'in_yard' WHERE id = {bc.ContainerId} AND status = 'reserved';", cancellationToken);
-            }
-            catch { }
         }
 
         if (entity.DriverId.HasValue)
@@ -352,7 +340,7 @@ public class BookingService : IBookingService
                 await EnrichBookingDtosAsync(new List<BookingDto> { existingDto }, cancellationToken);
                 return existingDto;
             }
-            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be approved.");
+            throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể duyệt.");
         }
 
         entity.Approve(approvedBy);
@@ -391,27 +379,12 @@ public class BookingService : IBookingService
                 await EnrichBookingDtosAsync(new List<BookingDto> { existingDto }, cancellationToken);
                 return existingDto;
             }
-            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be rejected.");
+            throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể từ chối.");
         }
 
         entity.Reject(reason);
 
         // Hoàn trả trạng thái Container về 'in_yard' khi Booking bị từ chối
-        foreach (var bc in entity.BookingContainers)
-        {
-            var cont = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
-                .FirstOrDefaultAsync(c => c.Id == bc.ContainerId, cancellationToken);
-            if (cont != null && cont.Status == "reserved")
-            {
-                cont.Status = "in_yard";
-            }
-            try
-            {
-                await _context.Database.ExecuteSqlInterpolatedAsync($"UPDATE containers SET status = 'in_yard' WHERE id = {bc.ContainerId} AND status = 'reserved';", cancellationToken);
-            }
-            catch { }
-        }
-
         if (entity.DriverId.HasValue)
         {
             var drv = await _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
@@ -461,27 +434,25 @@ public class BookingService : IBookingService
         var bookings = await _context.Set<Domain.Entities.Booking>()
             .AsNoTracking()
             .Include(x => x.BookingContainers)
-            .Where(x => x.DriverId == driverId && x.Status != BookingStatus.Canceled && x.Status != BookingStatus.Completed)
+            .Where(x => x.DriverId == driverId && x.Status == BookingStatus.CheckedIn)
             .OrderBy(x => x.AppointmentStart)
             .ToListAsync(cancellationToken);
 
-        var completedOperationContainerIds = await _context.Set<NexusPort.Modules.Yard.Domain.Entities.YardOperationEvent>()
-            .AsNoTracking()
-            .Where(x => x.DriverId == driverId && x.OperationStatus == "Completed")
-            .Select(x => x.ContainerId)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-        var containerIds = bookings.SelectMany(x => x.BookingContainers.Select(bc => bc.ContainerId))
-            .Where(completedOperationContainerIds.Contains)
-            .Distinct()
-            .ToList();
+        if (bookings.Count == 0) return Array.Empty<DriverContainerOperationDto>();
+        var completedOperations = await _context.Set<NexusPort.Modules.Yard.Domain.Entities.YardOperationEvent>()
+            .AsNoTracking().Where(x => x.DriverId == driverId && x.OperationStatus == "Completed")
+            .Select(x => new { x.ContainerId, x.OccurredAt }).ToListAsync(cancellationToken);
+        var entryTimes = await _context.Database.SqlQueryRaw<BookingGateEntryTime>(
+            "SELECT booking_id AS \"BookingId\",max(checked_at) AS \"CheckedAt\" FROM gate_transactions WHERE booking_id=ANY({0}) AND gate_type='gate_in' AND status='completed' GROUP BY booking_id",
+            bookings.Select(x => x.Id).ToArray()).ToDictionaryAsync(x=>x.BookingId,x=>x.CheckedAt,cancellationToken);
+        var containerIds = bookings.SelectMany(x => x.BookingContainers.Select(bc => bc.ContainerId)).Distinct().ToList();
         var containers = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
             .AsNoTracking()
             .Where(x => containerIds.Contains(x.Id))
             .ToDictionaryAsync(x => x.Id, cancellationToken);
 
         return bookings.SelectMany(booking => booking.BookingContainers
-            .Where(link => containers.ContainsKey(link.ContainerId))
+            .Where(link => containers.ContainsKey(link.ContainerId) && entryTimes.TryGetValue(booking.Id,out var enteredAt) && completedOperations.Any(op=>op.ContainerId==link.ContainerId && op.OccurredAt>=enteredAt))
             .Select(link =>
             {
                 var container = containers[link.ContainerId];
@@ -505,13 +476,14 @@ public class BookingService : IBookingService
             throw new UnauthorizedException("A valid authenticated driver is required.");
 
         var driverExists = await _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
-            .AnyAsync(x => x.Id == driverId && x.Status == DriverStatus.active, cancellationToken);
+            .AnyAsync(x => x.Id == driverId && x.Status != DriverStatus.inactive && x.Status != DriverStatus.banned, cancellationToken);
         if (!driverExists)
             throw new UnauthorizedException("Only an active assigned driver can confirm a container.");
 
+        if (dto.BookingId == Guid.Empty) throw new ValidationException("BookingId", "Cần xác định đúng booking để xác nhận giao nhận.");
         var booking = await _context.Set<Domain.Entities.Booking>()
             .Include(x => x.BookingContainers)
-            .Where(x => x.DriverId == driverId)
+            .Where(x => x.Id == dto.BookingId && x.DriverId == driverId)
             .Where(x => x.BookingContainers.Any(link => link.ContainerId == dto.ContainerId))
             .Where(x => x.Status != BookingStatus.Canceled)
             .OrderByDescending(x => x.CreatedAt)
@@ -519,10 +491,13 @@ public class BookingService : IBookingService
         if (booking == null)
             throw new UnauthorizedException("The container is not assigned to the authenticated driver.");
 
+        var gateTimes = await _context.Database.SqlQueryRaw<DateTime>(
+            "SELECT checked_at AS \"Value\" FROM gate_transactions WHERE booking_id={0} AND gate_type='gate_in' AND status='completed' ORDER BY checked_at DESC LIMIT 1",booking.Id).ToListAsync(cancellationToken);
+        if (gateTimes.Count == 0) throw new ValidationException("Booking", "Booking chưa vào cổng.");
+        var enteredAt = gateTimes[0];
         var operationCompleted = await _context.Set<NexusPort.Modules.Yard.Domain.Entities.YardOperationEvent>()
-            .AnyAsync(x => x.DriverId == driverId && x.ContainerId == dto.ContainerId && x.OperationStatus == "Completed", cancellationToken);
-        if (!operationCompleted)
-            throw new ValidationException("Container", "The assigned yard operation has not been completed yet.");
+            .AnyAsync(x => x.DriverId == driverId && x.ContainerId == dto.ContainerId && x.OperationStatus == "Completed" && x.OccurredAt >= enteredAt, cancellationToken);
+        if (!operationCompleted) throw new ValidationException("Container", "Chưa hoàn tất thao tác bãi của booking này.");
 
         var container = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>().FirstOrDefaultAsync(x => x.Id == dto.ContainerId, cancellationToken);
         if (container == null)
@@ -547,6 +522,8 @@ public class BookingService : IBookingService
             };
         }
 
+        if (booking.Status != BookingStatus.CheckedIn) throw new ValidationException("Booking", "Booking cần đang thực hiện giao nhận.");
+
         var normalizedCondition = string.IsNullOrWhiteSpace(dto.Condition) ? "OK" : dto.Condition.Trim().ToUpperInvariant();
         if (normalizedCondition is not ("OK" or "DAMAGED" or "ISSUE"))
             throw new ValidationException("Condition", "Condition must be OK, DAMAGED, or ISSUE.");
@@ -554,7 +531,7 @@ public class BookingService : IBookingService
         await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            const string readyForGateOut = "ReadyForGateOut";
+            var readyForGateOut = booking.BookingType == BookingType.Dropoff ? "in_yard" : "moving";
             container.Status = readyForGateOut;
             booking.Complete();
 
@@ -624,7 +601,7 @@ public class BookingService : IBookingService
 
         if (entity.Status is not (BookingStatus.Pending or BookingStatus.Ready or BookingStatus.Approved))
         {
-            throw new ValidationException("Status", $"Booking in '{entity.Status}' status cannot be re-assigned.");
+            throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể điều phối lại phương tiện.");
         }
 
         // Validate Driver
@@ -633,11 +610,11 @@ public class BookingService : IBookingService
             .FirstOrDefaultAsync(d => d.Id == dto.DriverId, cancellationToken);
         if (driver == null)
         {
-            throw new ValidationException("DriverId", $"Driver with ID '{dto.DriverId}' does not exist.");
+            throw new ValidationException("DriverId", $"Không tìm thấy thông tin tài xế trong hệ thống.");
         }
         if (driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive || driver.Status == NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned)
         {
-            throw new ValidationException("DriverId", $"Driver '{driver.FullName}' is not active.");
+            throw new ValidationException("DriverId", $"Tài xế '{driver.FullName}' hiện không ở trạng thái sẵn sàng hoạt động.");
         }
 
         // Validate Vehicle / Truck
@@ -646,12 +623,15 @@ public class BookingService : IBookingService
             .FirstOrDefaultAsync(v => v.Id == dto.TruckId, cancellationToken);
         if (truck == null)
         {
-            throw new ValidationException("TruckId", $"Vehicle with ID '{dto.TruckId}' does not exist.");
+            throw new ValidationException("TruckId", $"Không tìm thấy thông tin xe đầu kéo trong hệ thống.");
         }
         if (truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.inactive || truck.Status == NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.maintenance)
         {
-            throw new ValidationException("TruckId", $"Vehicle '{truck.PlateNumber}' is not active.");
+            throw new ValidationException("TruckId", $"Xe đầu kéo '{truck.PlateNumber}' hiện không ở trạng thái sẵn sàng hoạt động.");
         }
+
+        if (driver.CarrierId != entity.CarrierId || truck.CarrierId != entity.CarrierId)
+            throw new ValidationException("Fleet", "Xe và tài xế phải thuộc công ty của booking.");
 
         // Validate Container
         var containerIds = dto.ContainerIds ?? new List<Guid>();
@@ -668,7 +648,7 @@ public class BookingService : IBookingService
 
         if (!containerIds.Any())
         {
-            throw new ValidationException("ContainerIds", "At least one valid container must be assigned.");
+            throw new ValidationException("ContainerIds", "Phải chỉ định ít nhất một container hợp lệ cho lịch hẹn.");
         }
 
         var existingContainers = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
@@ -677,7 +657,7 @@ public class BookingService : IBookingService
             .ToListAsync(cancellationToken);
         if (existingContainers.Count != containerIds.Count)
         {
-            throw new ValidationException("ContainerIds", "One or more assigned container IDs do not exist.");
+            throw new ValidationException("ContainerIds", "Một hoặc nhiều container được chỉ định không tồn tại trong hệ thống cảng.");
         }
 
         // Check overlapping bookings
@@ -693,7 +673,7 @@ public class BookingService : IBookingService
                            b.AppointmentEnd > entity.AppointmentStart, cancellationToken);
         if (overlapping)
         {
-            throw new ValidationException("Overlap", "Driver or Vehicle already has an active booking during this overlapping time slot.");
+            throw new ValidationException("Overlap", "Tài xế hoặc xe đầu kéo đã có một lịch hẹn đặt chỗ khác đang hoạt động trong khung giờ bị trùng lặp này.");
         }
 
         entity.DriverId = dto.DriverId;
@@ -702,16 +682,8 @@ public class BookingService : IBookingService
         entity.VehicleId = dto.TruckId;
         entity.VehiclePlate = !string.IsNullOrWhiteSpace(dto.VehiclePlate) ? dto.VehiclePlate : truck.PlateNumber;
 
-        entity.BookingContainers.Clear();
-        foreach (var cId in containerIds)
-        {
-            entity.AddContainer(cId);
-            try
-            {
-                await _context.Database.ExecuteSqlInterpolatedAsync($"UPDATE containers SET status = 'reserved' WHERE id = {cId};", cancellationToken);
-            }
-            catch { }
-        }
+        if (!containerIds.OrderBy(x=>x).SequenceEqual(entity.BookingContainers.Select(x=>x.ContainerId).OrderBy(x=>x)))
+            throw new ValidationException("ContainerIds", "Container phải khớp bản khai đã gắn với booking.");
 
         entity.MarkReady();
 
@@ -740,137 +712,11 @@ public class BookingService : IBookingService
         return assignDto;
     }
 
-    private static bool _dbInitialized = false;
-    private static readonly SemaphoreSlim _initLock = new(1, 1);
-
-    private async Task EnsureDatabaseDataAsync(CancellationToken cancellationToken)
-    {
-        if (_dbInitialized) return;
-        await _initLock.WaitAsync(cancellationToken);
-        try
-        {
-            if (_dbInitialized) return;
-
-            // 1. Ensure enum booking_status has 'ready'
-            try
-            {
-                await _context.Database.ExecuteSqlRawAsync("ALTER TYPE booking_status ADD VALUE IF NOT EXISTS 'ready';", cancellationToken);
-            }
-            catch { /* ignore if already exists or not supported */ }
-
-            // 2. Ensure Carrier exists
-            await _context.Database.ExecuteSqlRawAsync(@"
-                INSERT INTO carriers (id, company_name, tax_code, phone, email, contact_person, status)
-                VALUES ('c1010101-0000-0000-0000-000000000001', 'Bien Dong Logistics - Nexus Logistics', '0301992811', '0909123889', 'carrier01@nexusport.vn', 'Vo Hang Tau', 'active')
-                ON CONFLICT (id) DO NOTHING;
-            ", cancellationToken);
-
-            // 3. Ensure Container Types exist
-            await _context.Database.ExecuteSqlRawAsync(@"
-                INSERT INTO container_types (id, code, size, category, description, tare_weight_kg, max_gross_weight_kg)
-                VALUES 
-                    ('c0000001-0000-0000-0000-000000000001', '20GP', 'ft20', 'dry', '20ft General Purpose Dry Container', 2200, 30480),
-                    ('c0000001-0000-0000-0000-000000000002', '40GP', 'ft40', 'dry', '40ft General Purpose Dry Container', 3750, 32500),
-                    ('c0000001-0000-0000-0000-000000000003', '40HC', 'ft40', 'dry', '40ft High Cube Dry Container', 3900, 34000),
-                    ('c0000001-0000-0000-0000-000000000004', '45HC', 'ft45', 'dry', '45ft High Cube Dry Container', 4800, 35000),
-                    ('c0000001-0000-0000-0000-000000000005', '20RF', 'ft20', 'reefer', '20ft Refrigerated Container', 3050, 30480)
-                ON CONFLICT (code) DO NOTHING;
-            ", cancellationToken);
-
-            // 4. Ensure Ready Containers exist in database
-            await _context.Database.ExecuteSqlRawAsync(@"
-                INSERT INTO containers (id, carrier_id, container_type_id, container_no, seal_no, cargo_type, status, gross_weight_kg)
-                VALUES 
-                    ('c0000000-0000-0000-0000-000000000001', 'c1010101-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000001', 'MSKU8829104', 'SEAL-99120', 'general', 'in_yard', 18500.00),
-                    ('c0000000-0000-0000-0000-000000000002', 'c1010101-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000002', 'TEMU4451920', 'SEAL-44519', 'general', 'discharged', 28400.00),
-                    ('c0000000-0000-0000-0000-000000000003', 'c1010101-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000005', 'CMAU3381920', 'SEAL-33819', 'perishable', 'in_yard', 14200.00),
-                    ('c0000000-0000-0000-0000-000000000004', 'c1010101-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000002', 'ONEU8821903', 'SEAL-88219', 'general', 'expected', 24000.00),
-                    ('c0000000-0000-0000-0000-000000000005', 'c1010101-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000004', 'HLCU7719204', 'SEAL-77192', 'oversized', 'in_yard', 31000.00),
-                    ('c0000000-0000-0000-0000-000000000006', 'c1010101-0000-0000-0000-000000000001', 'c0000001-0000-0000-0000-000000000001', 'MAEU5519205', 'SEAL-55192', 'general', 'in_yard', 20500.00)
-                ON CONFLICT (container_no) DO NOTHING;
-            ", cancellationToken);
-
-            // 5. Ensure Trucks exist in database with max_payload
-            await _context.Database.ExecuteSqlRawAsync(@"
-                INSERT INTO trucks (id, carrier_id, plate_number, vehicle_type, status, rfid_tag)
-                VALUES 
-                    ('b1010101-0000-0000-0000-000000000001', 'c1010101-0000-0000-0000-000000000001', '51C-992.81', 'Dau keo Hyundai Xcient (Tai 25T)', 'active', 'RFID-TRK-99281'),
-                    ('b1010101-0000-0000-0000-000000000002', 'c1010101-0000-0000-0000-000000000001', '29H-771.02', 'Dau keo Daewoo Novus (Tai 16T)', 'active', 'RFID-TRK-77102'),
-                    ('b1010101-0000-0000-0000-000000000003', 'c1010101-0000-0000-0000-000000000001', '15C-662.19', 'Dau keo International (Tai 32T)', 'active', 'RFID-TRK-66219'),
-                    ('b1010101-0000-0000-0000-000000000004', 'c1010101-0000-0000-0000-000000000001', '51D-883.45', 'Dau keo Chenglong H7 (Tai 20T)', 'active', 'RFID-TRK-88345'),
-                    ('b1010101-0000-0000-0000-000000000001', 'c1010101-0000-0000-0000-000000000001', '43C-551.89', 'Dau keo Isuzu Giga (Tai 28T)', 'active', 'RFID-TRK-55189')
-                ON CONFLICT (plate_number) DO NOTHING;
-            ", cancellationToken);
-
-            // 6. Ensure Drivers exist in database
-            await _context.Database.ExecuteSqlRawAsync(@"
-                INSERT INTO drivers (id, carrier_id, full_name, phone, id_card_number, license_number, status)
-                VALUES 
-                    ('d1010101-0000-0000-0000-000000000001', 'c1010101-0000-0000-0000-000000000001', 'Nguyen Van Hung', '0912.883.991', '079090001234', 'FC-99201', 'active'),
-                    ('d1010101-0000-0000-0000-000000000002', 'c1010101-0000-0000-0000-000000000001', 'Tran Quoc Tuan', '0988.771.223', '079090005678', 'FC-88123', 'active'),
-                    ('d1010101-0000-0000-0000-000000000003', 'c1010101-0000-0000-0000-000000000001', 'Le Hoang Duc', '0903.441.552', '079090009988', 'FC-44512', 'active'),
-                    ('d1010101-0000-0000-0000-000000000004', 'c1010101-0000-0000-0000-000000000001', 'Pham Dinh Trong', '0934.112.334', '079090004455', 'FC-11233', 'active'),
-                    ('d1010101-0000-0000-0000-000000000005', 'c1010101-0000-0000-0000-000000000001', 'Vo Thanh Nam', '0976.223.445', '079090006677', 'FC-77890', 'active')
-                ON CONFLICT (id) DO NOTHING;
-            ", cancellationToken);
-
-            _dbInitialized = true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "EnsureDatabaseDataAsync encountered an issue, proceeding with graceful handling");
-        }
-        finally
-        {
-            _initLock.Release();
-        }
-    }
-
     public async Task<AvailableFleetResourcesDto> GetAvailableResourcesAsync(Guid? carrierId = null, CancellationToken cancellationToken = default)
     {
-        await EnsureDatabaseDataAsync(cancellationToken);
         var result = new AvailableFleetResourcesDto();
 
-        // 1. Containers trực tiếp từ DB (Chỉ lấy các container sẵn sàng trong bãi, loại trừ container đã được đặt trong Booking)
-        try
-        {
-            var bookedContainerIds = await _context.Database
-                .SqlQueryRaw<Guid>(@"
-                    SELECT DISTINCT bc.container_id AS ""Value""
-                    FROM booking_containers bc
-                    JOIN bookings b ON bc.booking_id = b.id
-                    WHERE b.status::text NOT IN ('canceled', 'rejected', 'expired')
-                ")
-                .ToListAsync(cancellationToken);
-
-            var rawContainers = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
-                .AsNoTracking()
-                .Where(c => c.Status != "canceled" && c.Status != "reserved" && c.Status != "loaded" && c.Status != "gate_out")
-                .Where(c => !bookedContainerIds.Contains(c.Id))
-                .OrderByDescending(c => c.CreatedAt)
-                .Take(25)
-                .ToListAsync(cancellationToken);
-
-            foreach (var c in rawContainers)
-            {
-                result.Containers.Add(new EligibleContainerDto
-                {
-                    Id = c.Id,
-                    ContainerNumber = c.ContainerNumber,
-                    SealNumber = string.IsNullOrWhiteSpace(c.SealNumber) ? "SEAL-LIVE" : c.SealNumber,
-                    CargoType = c.CargoType ?? "general",
-                    Status = c.Status ?? "in_yard",
-                    Size = c.ContainerNumber.StartsWith("T") || c.ContainerNumber.StartsWith("H") ? "ft40" : "ft20",
-                    Category = "dry",
-                    GrossWeightKg = c.ContainerNumber.StartsWith("T") ? 28400m : (c.ContainerNumber.StartsWith("H") ? 31000m : 18500m)
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not fetch containers directly from database");
-        }
-
+        // Private declarations are selected through Node; never enumerate shared cargo here.
         Guid? actualCarrierId = carrierId;
         if (carrierId.HasValue && carrierId.Value != Guid.Empty)
         {
@@ -912,12 +758,6 @@ public class BookingService : IBookingService
                 dbTrucks = await trucksQuery.Where(v => v.CarrierId == actualCarrierId.Value).ToListAsync(cancellationToken);
             }
 
-            // Fallback nếu carrier chưa có xe riêng: nạp toàn bộ xe đầu kéo đang hoạt động của hệ thống
-            if (!dbTrucks.Any())
-            {
-                dbTrucks = await trucksQuery.ToListAsync(cancellationToken);
-            }
-
             foreach (var t in dbTrucks)
             {
                 result.Trucks.Add(new AvailableTruckDto
@@ -949,12 +789,6 @@ public class BookingService : IBookingService
                 dbDrivers = await driversQuery.Where(d => d.CarrierId == actualCarrierId.Value).ToListAsync(cancellationToken);
             }
 
-            // Fallback nếu carrier chưa có tài xế riêng: nạp toàn bộ tài xế active của hệ thống
-            if (!dbDrivers.Any())
-            {
-                dbDrivers = await driversQuery.ToListAsync(cancellationToken);
-            }
-
             foreach (var d in dbDrivers)
             {
                 result.Drivers.Add(new AvailableDriverDto
@@ -962,7 +796,7 @@ public class BookingService : IBookingService
                     Id = d.Id,
                     FullName = d.FullName,
                     LicenseClass = d.LicenseNumber?.Contains("FC") == true ? "FC" : "FC",
-                    Phone = d.Phone ?? "0908123456",
+                    Phone = d.Phone ?? string.Empty,
                     Status = "active"
                 });
             }
@@ -975,32 +809,24 @@ public class BookingService : IBookingService
         return result;
     }
 
-    public async Task<FleetRecommendationDto> RecommendFleetAsync(Guid? containerId = null, string? bookingType = null, Guid? carrierId = null, CancellationToken cancellationToken = default)
+    public async Task<FleetRecommendationDto> RecommendFleetAsync(Guid? containerId = null, string? bookingType = null, Guid? carrierId = null, CancellationToken cancellationToken = default, Guid? declarationId = null, string? yardCode = null)
     {
         var resources = await GetAvailableResourcesAsync(carrierId, cancellationToken);
         
-        // 1. Resolve Container
-        EligibleContainerDto? container = null;
-        if (containerId.HasValue && containerId.Value != Guid.Empty)
-        {
-            container = resources.Containers.FirstOrDefault(c => c.Id == containerId.Value);
-        }
-        container ??= resources.Containers.FirstOrDefault();
-
-        if (container == null)
-        {
-            return new FleetRecommendationDto
-            {
-                RecommendedStartTime = "08:30",
-                RecommendedEndTime = "10:30",
-                RecommendedDate = DateTime.UtcNow.AddDays(1).ToString("yyyy-MM-dd"),
-                PayloadStatus = "Optimal",
-                PayloadSeverity = "optimal",
-                PayloadMessage = "Chưa có container trong bãi để phân tích."
-            };
-        }
-
-        var contWeight = container.GrossWeightTon > 0 ? container.GrossWeightTon : 20m;
+        // Resolve only the exact private declaration or a valid transferable code.
+        // The original truck/driver matching algorithm below stays intact.
+        var rows = await _context.Database.SqlQueryRaw<RecommendationCargo>(
+            "SELECT c.id AS \"Id\",c.container_no AS \"ContainerNumber\",ct.code AS \"Size\",cargo.name_vi AS \"CargoType\",d.gross_weight_kg AS \"GrossWeightKg\" FROM container_declarations d JOIN containers c ON c.id=d.container_id JOIN container_types ct ON ct.id=c.container_type_id LEFT JOIN container_cargo_types cargo ON cargo.code::text=d.cargo_type::text WHERE c.id={0} AND (({1}='Dropoff' AND d.id={2} AND d.carrier_id={3}) OR ({1}='Pickup' AND EXISTS(SELECT 1 FROM container_visits v WHERE v.declaration_id=d.id AND v.container_id=c.id AND v.pickup_code={4} AND v.visit_status IN ('planned','active') AND EXISTS(SELECT 1 FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id WHERE bc.container_visit_id=v.id AND b.booking_type::text='dropoff' AND b.status::text NOT IN ('canceled','rejected','expired')))))",
+            containerId ?? Guid.Empty, bookingType ?? "Dropoff", declarationId ?? Guid.Empty, carrierId ?? Guid.Empty, NormalizeYardCode(yardCode)).ToListAsync(cancellationToken);
+        var cargoInfo = rows.SingleOrDefault();
+        if (cargoInfo == null) throw new ValidationException("Container", "Chọn đúng khai báo hoặc cung cấp mã lượt bãi hợp lệ để phân tích.");
+        if (!cargoInfo.GrossWeightKg.HasValue || cargoInfo.GrossWeightKg <= 0)
+            throw new ValidationException("GrossWeightKg", "Chưa có khối lượng thực tế để phân tích tải trọng. Bạn vẫn có thể chọn xe và tài xế thủ công.");
+        var container = new EligibleContainerDto { Id=cargoInfo.Id, ContainerNumber=cargoInfo.ContainerNumber,
+            Size=cargoInfo.Size, CargoType=cargoInfo.CargoType ?? "Chưa xác định", GrossWeightKg=cargoInfo.GrossWeightKg.Value };
+        var contWeight = container.GrossWeightTon;
+        if (!resources.Trucks.Any() || !resources.Drivers.Any())
+            throw new ValidationException("Resources", "Công ty chưa có đủ xe và tài xế khả dụng để đề xuất tự động.");
 
         // 2. AI Match Truck: Optimal payload capacity without overload
         AvailableTruckDto? bestTruck = null;
@@ -1083,22 +909,10 @@ public class BookingService : IBookingService
 
     public async Task<PayloadEvaluationDto> EvaluatePayloadAsync(Guid? containerId = null, Guid? truckId = null, decimal? customGrossWeightTon = null, CancellationToken cancellationToken = default)
     {
-        await EnsureDatabaseDataAsync(cancellationToken);
 
-        decimal contWeight = customGrossWeightTon ?? 20m;
-        if (containerId.HasValue && containerId.Value != Guid.Empty)
-        {
-            var cont = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(c => c.Id == containerId.Value, cancellationToken);
-            if (cont != null)
-            {
-                if (cont.ContainerNumber.StartsWith("T")) contWeight = 28.4m;
-                else if (cont.ContainerNumber.StartsWith("H")) contWeight = 31.0m;
-                else if (cont.ContainerNumber.StartsWith("C")) contWeight = 14.2m;
-                else contWeight = 18.5m;
-            }
-        }
+        if (!customGrossWeightTon.HasValue || customGrossWeightTon <= 0)
+            throw new ValidationException("customGrossWeightTon", "Chọn bản khai có khối lượng thực tế; không suy đoán theo số container.");
+        decimal contWeight = customGrossWeightTon.Value;
 
         decimal truckPayload = 24m;
         if (truckId.HasValue && truckId.Value != Guid.Empty)
@@ -1154,6 +968,9 @@ public class BookingService : IBookingService
         };
     }
 
+    private static string NormalizeYardCode(string? code) =>
+        System.Text.RegularExpressions.Regex.Replace((code ?? "").Trim().ToUpperInvariant(), "^YARD-", "TC-");
+
     private static decimal ExtractPayloadTon(string? vehicleType)
     {
         if (string.IsNullOrWhiteSpace(vehicleType)) return 24m;
@@ -1199,6 +1016,22 @@ public class BookingService : IBookingService
                 .ToDictionaryAsync(c => c.Id, c => c.ContainerNumber, cancellationToken)
             : new Dictionary<Guid, string>();
 
+        var visitIds = dtos.SelectMany(d => d.ContainerSelections).Where(s => s.ContainerVisitId.HasValue)
+            .Select(s => s.ContainerVisitId!.Value).Distinct().ToArray();
+        var visitInfo = visitIds.Length == 0 ? new List<BookingVisitInfo>() : await _context.Database.SqlQueryRaw<BookingVisitInfo>(
+            "SELECT v.id AS \"Id\", v.pickup_code AS \"YardCode\", c.container_no AS \"ContainerNumber\",ct.code AS \"ContainerTypeCode\",cargo.name_vi AS \"CargoTypeName\" FROM container_visits v JOIN containers c ON c.id=v.container_id JOIN container_types ct ON ct.id=c.container_type_id LEFT JOIN container_cargo_types cargo ON cargo.code::text=v.cargo_type::text WHERE v.id=ANY({0})", visitIds)
+            .ToListAsync(cancellationToken);
+        foreach (var booking in dtos)
+            foreach (var selection in booking.ContainerSelections)
+            {
+                var info = visitInfo.FirstOrDefault(v => v.Id == selection.ContainerVisitId);
+                if (info == null) continue;
+                selection.YardCode = booking.BookingType == BookingType.Dropoff ? info.YardCode : null;
+                selection.ContainerNumber = info.ContainerNumber;
+                selection.ContainerTypeCode = info.ContainerTypeCode;
+                selection.CargoTypeName = info.CargoTypeName;
+            }
+
         foreach (var dto in dtos)
         {
             if (string.IsNullOrWhiteSpace(dto.DriverName) && dto.DriverId.HasValue && driversDict.TryGetValue(dto.DriverId.Value, out var driverName))
@@ -1217,7 +1050,211 @@ public class BookingService : IBookingService
                     .Select(cid => containersDict.TryGetValue(cid, out var cNum) ? cNum : cid.ToString())
                     .ToList();
             }
+
+            if (dto.Status == BookingStatus.Ready || dto.Status == BookingStatus.CheckedIn || dto.Status == BookingStatus.Completed)
+            {
+                dto.PaymentStatus = "Paid";
+            }
         }
+    }
+
+    public async Task<BookingPaymentInfoDto> GetPaymentInfoAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var booking = await _repository.GetByIdWithContainersAsync(id, cancellationToken);
+        if (booking == null)
+        {
+            throw new NotFoundException("Booking", id.ToString());
+        }
+
+        // Determine fee based on booking container size
+        bool is40Ft = false;
+        if (booking.BookingContainers.Any())
+        {
+            var cIds = booking.BookingContainers.Select(bc => bc.ContainerId).ToList();
+            var contNumbers = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+                .Where(c => cIds.Contains(c.Id))
+                .Select(c => c.ContainerNumber)
+                .ToListAsync(cancellationToken);
+            is40Ft = contNumbers.Any(n => n != null && (n.Contains("40") || n.Contains("45") || n.StartsWith("TEMU")));
+        }
+
+        decimal handlingFee = is40Ft ? 650000m : 450000m;
+        decimal weighingFee = 50000m;
+        decimal infrastructureFee = 40000m;
+        decimal subtotal = handlingFee + weighingFee + infrastructureFee;
+        decimal taxAmount = Math.Round(subtotal * 0.08m, 0);
+        decimal totalAmount = subtotal + taxAmount;
+
+        // Check if invoice or payment already exists in DB
+        string status = (booking.Status == BookingStatus.Completed || booking.Status == BookingStatus.CheckedIn) ? "Paid" : "Unpaid";
+        string? invoiceNo = null;
+        string? txnRef = null;
+        DateTime? paidAt = null;
+
+        try
+        {
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+            {
+                await conn.OpenAsync(cancellationToken);
+            }
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                SELECT i.invoice_no, p.transaction_ref, p.paid_at, p.status::text as payment_status
+                FROM invoices i
+                LEFT JOIN payments p ON p.invoice_id = i.id
+                WHERE i.invoice_no = @invNo OR i.invoice_no LIKE @invPattern
+                LIMIT 1";
+            
+            var p1 = cmd.CreateParameter();
+            p1.ParameterName = "@invNo";
+            p1.Value = $"INV-NP-{booking.BookingCode}";
+            cmd.Parameters.Add(p1);
+
+            var p2 = cmd.CreateParameter();
+            p2.ParameterName = "@invPattern";
+            p2.Value = $"%{booking.BookingCode}%";
+            cmd.Parameters.Add(p2);
+
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                invoiceNo = reader.IsDBNull(0) ? null : reader.GetString(0);
+                txnRef = reader.IsDBNull(1) ? null : reader.GetString(1);
+                paidAt = reader.IsDBNull(2) ? null : reader.GetDateTime(2);
+                var pStat = reader.IsDBNull(3) ? null : reader.GetString(3);
+                if (pStat == "success" || pStat == "paid")
+                {
+                    status = "Paid";
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not query invoices/payments table for booking {BookingCode}", booking.BookingCode);
+        }
+
+        string transferContent = $"NP {booking.BookingCode}";
+        string qrUrl = $"https://img.vietqr.io/image/MB-190388668899-compact2.png?amount={totalAmount:0}&addInfo={Uri.EscapeDataString(transferContent)}&accountName={Uri.EscapeDataString("CONG TY CP CANG QUOC TE NEXUSPORT")}";
+
+        return new BookingPaymentInfoDto
+        {
+            BookingId = booking.Id,
+            BookingCode = booking.BookingCode,
+            PaymentStatus = status,
+            HandlingFee = handlingFee,
+            WeighingFee = weighingFee,
+            InfrastructureFee = infrastructureFee,
+            Subtotal = subtotal,
+            TaxAmount = taxAmount,
+            TotalAmount = totalAmount,
+            InvoiceNo = invoiceNo ?? $"INV-NP-{booking.BookingCode}",
+            TransactionRef = txnRef ?? (status == "Paid" ? $"TXN-NP-{booking.BookingCode}" : null),
+            PaidAt = paidAt ?? (status == "Paid" ? booking.CreatedAt : null),
+            PaymentMethod = "VietQR",
+            BankName = "MB Bank (Ngân Hàng TMCP Quân Đội)",
+            AccountNo = "190388668899",
+            AccountName = "CÔNG TY CP CẢNG QUỐC TẾ NEXUSPORT",
+            TransferContent = transferContent,
+            QrUrl = qrUrl
+        };
+    }
+
+    public async Task<BookingPaymentInfoDto> ProcessPaymentAsync(Guid id, ProcessBookingPaymentDto dto, CancellationToken cancellationToken = default)
+    {
+        var booking = await _repository.GetByIdWithContainersAsync(id, cancellationToken);
+        if (booking == null)
+        {
+            throw new NotFoundException("Booking", id.ToString());
+        }
+
+        // Get payment calculation
+        var info = await GetPaymentInfoAsync(id, cancellationToken);
+        var txnRef = !string.IsNullOrWhiteSpace(dto.TransactionRef) 
+            ? dto.TransactionRef 
+            : $"TXN-NP-{DateTime.UtcNow:yyyyMMddHHmmss}-{Random.Shared.Next(1000, 9999)}";
+        var invoiceNo = $"INV-NP-{booking.BookingCode}";
+        var now = DateTime.UtcNow;
+
+        try
+        {
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+            {
+                await conn.OpenAsync(cancellationToken);
+            }
+
+            // 1. Create or get invoice
+            var invoiceId = Guid.NewGuid();
+            using (var cmdInv = conn.CreateCommand())
+            {
+                cmdInv.CommandText = @"
+                    INSERT INTO invoices (id, carrier_id, invoice_no, status, subtotal, tax_amount, total_amount, paid_amount, issued_by, issued_at, due_date, created_at)
+                    VALUES (@id, @carrierId, @invNo, 'paid'::invoice_status, @subtotal, @tax, @total, @paid, @issuedBy, @issuedAt, @dueDate, @createdAt)
+                    ON CONFLICT (id) DO NOTHING;";
+                
+                var pId = cmdInv.CreateParameter(); pId.ParameterName = "@id"; pId.Value = invoiceId; cmdInv.Parameters.Add(pId);
+                var pCarrier = cmdInv.CreateParameter(); pCarrier.ParameterName = "@carrierId"; pCarrier.Value = booking.CarrierId; cmdInv.Parameters.Add(pCarrier);
+                var pInvNo = cmdInv.CreateParameter(); pInvNo.ParameterName = "@invNo"; pInvNo.Value = invoiceNo; cmdInv.Parameters.Add(pInvNo);
+                var pSub = cmdInv.CreateParameter(); pSub.ParameterName = "@subtotal"; pSub.Value = info.Subtotal; cmdInv.Parameters.Add(pSub);
+                var pTax = cmdInv.CreateParameter(); pTax.ParameterName = "@tax"; pTax.Value = info.TaxAmount; cmdInv.Parameters.Add(pTax);
+                var pTot = cmdInv.CreateParameter(); pTot.ParameterName = "@total"; pTot.Value = info.TotalAmount; cmdInv.Parameters.Add(pTot);
+                var pPaid = cmdInv.CreateParameter(); pPaid.ParameterName = "@paid"; pPaid.Value = info.TotalAmount; cmdInv.Parameters.Add(pPaid);
+                var pBy = cmdInv.CreateParameter(); pBy.ParameterName = "@issuedBy"; pBy.Value = booking.CarrierId; cmdInv.Parameters.Add(pBy);
+                var pAt = cmdInv.CreateParameter(); pAt.ParameterName = "@issuedAt"; pAt.Value = now; cmdInv.Parameters.Add(pAt);
+                var pDue = cmdInv.CreateParameter(); pDue.ParameterName = "@dueDate"; pDue.Value = now.Date; cmdInv.Parameters.Add(pDue);
+                var pCr = cmdInv.CreateParameter(); pCr.ParameterName = "@createdAt"; pCr.Value = now; cmdInv.Parameters.Add(pCr);
+
+                await cmdInv.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            // 2. Insert payment record
+            using (var cmdPay = conn.CreateCommand())
+            {
+                cmdPay.CommandText = @"
+                    INSERT INTO payments (id, invoice_id, method, status, amount, transaction_ref, paid_at, created_at)
+                    VALUES (@id, @invoiceId, 'vietqr'::payment_method, 'success'::payment_status, @amount, @txnRef, @paidAt, @createdAt);";
+
+                var pId = cmdPay.CreateParameter(); pId.ParameterName = "@id"; pId.Value = Guid.NewGuid(); cmdPay.Parameters.Add(pId);
+                var pInvId = cmdPay.CreateParameter(); pInvId.ParameterName = "@invoiceId"; pInvId.Value = invoiceId; cmdPay.Parameters.Add(pInvId);
+                var pAmt = cmdPay.CreateParameter(); pAmt.ParameterName = "@amount"; pAmt.Value = info.TotalAmount; cmdPay.Parameters.Add(pAmt);
+                var pTxn = cmdPay.CreateParameter(); pTxn.ParameterName = "@txnRef"; pTxn.Value = txnRef; cmdPay.Parameters.Add(pTxn);
+                var pPaidAt = cmdPay.CreateParameter(); pPaidAt.ParameterName = "@paidAt"; pPaidAt.Value = now; cmdPay.Parameters.Add(pPaidAt);
+                var pCr = cmdPay.CreateParameter(); pCr.ParameterName = "@createdAt"; pCr.Value = now; cmdPay.Parameters.Add(pCr);
+
+                await cmdPay.ExecuteNonQueryAsync(cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not write to raw invoices/payments table: {Message}", ex.Message);
+        }
+
+        // 3. Update booking status: If Approved or Pending -> Ready (Ready for Gate-In)
+        if (booking.Status == BookingStatus.Approved || booking.Status == BookingStatus.Pending)
+        {
+            booking.MarkReady();
+            await _repository.UpdateAsync(booking, cancellationToken);
+        }
+
+        // 4. Send Notification to Carrier
+        await _notificationService.SendAsync(new SendNotificationDto
+        {
+            RecipientId = booking.CarrierId,
+            Title = $"Thanh toán thành công Booking {booking.BookingCode}",
+            Message = $"Đã quyết toán cước cảng {info.TotalAmount:N0} VNĐ cho Booking {booking.BookingCode} qua VietQR Napas 24/7. Vé điện tử e-Pass vào cổng đã sẵn sàng!",
+            Type = NotificationType.BookingApproved,
+            Severity = NotificationSeverity.Success,
+            ReferenceId = booking.BookingCode
+        }, cancellationToken);
+
+        info.PaymentStatus = "Paid";
+        info.TransactionRef = txnRef;
+        info.PaidAt = now;
+        info.InvoiceNo = invoiceNo;
+
+        return info;
     }
 
     private static BookingDto MapToDto(Domain.Entities.Booking entity)
@@ -1239,6 +1276,7 @@ public class BookingService : IBookingService
             CanceledAt = entity.CanceledAt,
             CreatedAt = entity.CreatedAt,
             ContainerIds = entity.BookingContainers?.Select(bc => bc.ContainerId).ToList() ?? new List<Guid>(),
+            ContainerSelections = (entity.BookingContainers ?? new List<BookingContainer>()).Select(x=>new BookingContainerSelectionDto { ContainerId=x.ContainerId, DeclarationId=x.DeclarationId??Guid.Empty, ContainerVisitId=x.ContainerVisitId }).ToList(),
 
             Description = entity.Description,
             VehiclePlate = entity.VehiclePlate,
@@ -1246,7 +1284,8 @@ public class BookingService : IBookingService
             DriverName = entity.DriverName,
             ValidFrom = entity.ValidFrom ?? entity.AppointmentStart,
             ValidTo = entity.ValidTo ?? entity.AppointmentEnd,
-            GateType = entity.GateType
+            PaymentStatus = (entity.Status == BookingStatus.Ready || entity.Status == BookingStatus.CheckedIn || entity.Status == BookingStatus.Completed) ? "Paid" : "Unpaid",
+            TotalAmount = 583200m
         };
     }
 }
@@ -1256,3 +1295,32 @@ public class BookingService : IBookingService
 
 
 
+
+public class BookingGateEntryTime
+{
+    public Guid BookingId { get; set; }
+    public DateTime CheckedAt { get; set; }
+}
+
+public sealed class PickupCodeLink
+{
+    public Guid DeclarationId { get; set; }
+    public Guid ContainerVisitId { get; set; }
+}
+public sealed class BookingVisitInfo
+{
+    public Guid Id { get; set; }
+    public string YardCode { get; set; } = string.Empty;
+    public string ContainerNumber { get; set; } = string.Empty;
+    public string ContainerTypeCode { get; set; } = string.Empty;
+    public string? CargoTypeName { get; set; }
+}
+
+public sealed class RecommendationCargo
+{
+    public Guid Id { get; set; }
+    public string ContainerNumber { get; set; } = string.Empty;
+    public string Size { get; set; } = string.Empty;
+    public string? CargoType { get; set; }
+    public decimal? GrossWeightKg { get; set; }
+}

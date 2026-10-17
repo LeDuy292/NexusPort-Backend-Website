@@ -25,7 +25,7 @@ public class ContainerMatchAndStatusRule : IGateRule
         // 1. Kiểm tra trạng thái Container trong hệ thống nếu có thông tin thực thể Container
         if (context.Container != null)
         {
-            var status = context.Container.Status;
+            var status = context.Container.Status.Replace("_", "");
 
             // Nghiệp vụ Gate-In: Container vào cảng
             if (string.Equals(context.GateType, "GateIn", StringComparison.OrdinalIgnoreCase))

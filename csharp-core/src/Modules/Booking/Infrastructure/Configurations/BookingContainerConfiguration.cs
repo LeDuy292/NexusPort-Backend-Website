@@ -20,6 +20,8 @@ public class BookingContainerConfiguration : IEntityTypeConfiguration<BookingCon
             .HasColumnName("container_id")
             .IsRequired();
 
+        builder.Property(x => x.DeclarationId).HasColumnName("declaration_id");
+        builder.Property(x => x.ContainerVisitId).HasColumnName("container_visit_id").ValueGeneratedOnAdd();
         builder.Ignore(x => x.Note);
 
         builder.HasOne(x => x.Booking)

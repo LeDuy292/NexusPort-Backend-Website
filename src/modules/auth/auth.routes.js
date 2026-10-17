@@ -1,7 +1,7 @@
 'use strict';
 
 const { Router } = require('express');
-const { loginController, getMeController, forgotPasswordController, resetPasswordController } = require('./auth.controller');
+const { loginController, logoutController, getMeController, forgotPasswordController, resetPasswordController } = require('./auth.controller');
 const { loginValidator, forgotPasswordValidator, resetPasswordValidator } = require('./auth.validator');
 const { authenticate } = require('../../middlewares/authenticate');
 
@@ -68,6 +68,7 @@ const router = Router();
  *         description: Dữ liệu đầu vào không hợp lệ
  */
 router.post('/login', loginValidator, loginController);
+router.post('/logout', logoutController);
 router.post('/forgot-password', forgotPasswordValidator, forgotPasswordController);
 router.post('/reset-password', resetPasswordValidator, resetPasswordController);
 

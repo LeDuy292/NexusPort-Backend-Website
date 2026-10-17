@@ -30,11 +30,32 @@ public class BookingDto
 
     public DateTime CreatedAt { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
+    public List<BookingContainerSelectionDto> ContainerSelections { get; set; } = new();
     public List<string> ContainerNumbers { get; set; } = new();
+
+    // Payment & TOS Tariff details
+    public string PaymentStatus { get; set; } = "Unpaid";
+    public decimal TotalAmount { get; set; } = 583200m;
+    public string? InvoiceNo { get; set; }
+    public string? TransactionRef { get; set; }
+    public DateTime? PaidAt { get; set; }
+}
+
+public class BookingContainerSelectionDto
+{
+    public Guid ContainerId { get; set; }
+    public Guid DeclarationId { get; set; }
+    public Guid? ContainerVisitId { get; set; }
+    public string? YardCode { get; set; }
+    public string? ContainerNumber { get; set; }
+    public string? ContainerTypeCode { get; set; }
+    public string? CargoTypeName { get; set; }
 }
 
 public class CreateBookingDto
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Guid? ExcludeBookingId { get; set; }
     public Guid CarrierId { get; set; }
     public Guid? DriverId { get; set; }
     public Guid? TruckId { get; set; }
@@ -44,6 +65,7 @@ public class CreateBookingDto
     public DateTime AppointmentStart { get; set; }
     public DateTime AppointmentEnd { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
+    public List<BookingContainerSelectionDto> ContainerSelections { get; set; } = new();
 
     public string? Status { get; set; } = "Active";
     public string? Description { get; set; }
@@ -62,6 +84,7 @@ public class UpdateBookingDto
     public DateTime AppointmentStart { get; set; }
     public DateTime AppointmentEnd { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
+    public List<BookingContainerSelectionDto> ContainerSelections { get; set; } = new();
 }
 
 public class CancelBookingDto
@@ -95,6 +118,7 @@ public class DriverContainerOperationDto
 
 public class ContainerConfirmationDto
 {
+    public Guid BookingId { get; set; }
     public Guid ContainerId { get; set; }
     public string Condition { get; set; } = "OK";
     public string? Notes { get; set; }
@@ -121,6 +145,7 @@ public class AssignBookingResourcesDto
     public Guid TruckId { get; set; }
     public string? VehiclePlate { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
+    public List<BookingContainerSelectionDto> ContainerSelections { get; set; } = new();
     public string? ContainerNo { get; set; }
 }
 
@@ -204,3 +229,43 @@ public class PayloadEvaluationDto
     public bool IsSafe { get; set; } = true;
 }
 
+public class BookingPaymentInfoDto
+{
+    public Guid BookingId { get; set; }
+    public string BookingCode { get; set; } = string.Empty;
+    public string PaymentStatus { get; set; } = "Unpaid";
+    public decimal HandlingFee { get; set; } = 450000m;
+    public decimal WeighingFee { get; set; } = 50000m;
+    public decimal InfrastructureFee { get; set; } = 40000m;
+    public decimal Subtotal { get; set; } = 540000m;
+    public decimal TaxAmount { get; set; } = 43200m;
+    public decimal TotalAmount { get; set; } = 583200m;
+    public string? InvoiceNo { get; set; }
+    public string? TransactionRef { get; set; }
+    public string? PaymentMethod { get; set; } = "VietQR";
+    public DateTime? PaidAt { get; set; }
+    public string BankName { get; set; } = "MB Bank (Ngân Hàng TMCP Quân Đội)";
+    public string AccountNo { get; set; } = "190388668899";
+    public string AccountName { get; set; } = "CONG TY CP CANG QUOC TE NEXUSPORT";
+    public string TransferContent { get; set; } = string.Empty;
+    public string QrUrl { get; set; } = string.Empty;
+}
+
+public class ProcessBookingPaymentDto
+{
+    public string? Method { get; set; } = "vietqr";
+    public string? TransactionRef { get; set; }
+    public decimal? Amount { get; set; }
+    public string? Note { get; set; }
+}
+
+
+
+public sealed class BookingSelectionRecommendationDto
+{
+    public Guid? BookingId { get; set; }
+    public Guid ContainerId { get; set; }
+    public Guid? DeclarationId { get; set; }
+    public string BookingType { get; set; } = "Dropoff";
+    public string? YardCode { get; set; }
+}
