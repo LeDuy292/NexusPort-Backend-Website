@@ -9,11 +9,19 @@ const loginValidator = [
   body('username')
     .trim()
     .notEmpty()
-    .withMessage('Tên đăng nhập hoặc email không được để trống.'),
+    .withMessage('Tên đăng nhập hoặc email không được để trống.')
+    .isLength({ min: 3 })
+    .withMessage('Tên đăng nhập hoặc email phải có ít nhất 3 ký tự.'),
 
   body('password')
     .notEmpty()
-    .withMessage('Mật khẩu không được để trống.'),
+    .withMessage('Mật khẩu không được để trống.')
+    .isLength({ min: 6 })
+    .withMessage('Mật khẩu phải có ít nhất 6 ký tự.'),
+
+  body('expectedRole')
+    .optional()
+    .trim(),
 ];
 
 const forgotPasswordValidator = [

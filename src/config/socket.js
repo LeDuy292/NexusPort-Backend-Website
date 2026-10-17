@@ -15,7 +15,7 @@ let io = null;
 function initSocket(server) {
   io = new Server(server, {
     cors: {
-      origin: process.env.CORS_ORIGIN || '*',
+      origin: process.env.CORS_ORIGIN || ((origin, callback) => callback(null, true)),
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
       credentials: true,
     },
@@ -37,6 +37,9 @@ function initSocket(server) {
       const decoded = verifyToken(token);
       const account = await User.findByPk(decoded.id);
       if (!account?.is_active || account.role !== decoded.role) return next(new Error('Tài khoản hoặc vai trò không còn hợp lệ.'));
+      if (decoded.sessionId && (!account.session_id || decoded.sessionId !== account.session_id)) {
+        return next(new Error('Phiên làm việc đã bị kết thúc do tài khoản đăng xuất hoặc đăng nhập ở nơi khác.'));
+      }
       socket.data.user = decoded;
       socket.data.driverId = decoded.id;
       socket.data.role = decoded.role;
@@ -288,6 +291,40 @@ function emitContainerReadyForGateOut(request) {
   }
 }
 
+/**
+ * Phát sự kiện kick session cũ khi tài khoản đăng nhập trên thiết bị / phiên khác.
+ * @param {string} userId
+ * @param {string} reason
+ * @param {string} message
+ */
+function kickUserSockets(userId, reason = 'CONCURRENT_LOGIN', message = 'Tài khoản của bạn vừa được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã bị đăng xuất.') {
+  if (!io || !userId) return;
+  const payload = {
+    userId,
+    reason,
+    message,
+    timestamp: new Date().toISOString(),
+  };
+
+  // Gửi sự kiện cho toàn bộ client socket thuộc user này (cả phòng cá nhân và phòng driver)
+  io.to(`user:${userId}`).emit('auth:session_kicked', payload);
+  io.to(`driver:${userId}`).emit('auth:session_kicked', payload);
+
+  // Cho phép packet 'auth:session_kicked' bay tới client trước khi ngắt kết nối
+  setTimeout(() => {
+    const userRoom = io.sockets?.adapter?.rooms?.get(`user:${userId}`);
+    if (userRoom) {
+      const socketIds = Array.from(userRoom);
+      for (const sid of socketIds) {
+        const s = io.sockets.sockets.get(sid);
+        if (s) {
+          s.disconnect(true);
+        }
+      }
+    }
+  }, 600);
+}
+
 module.exports = {
   initSocket,
   getIO,
@@ -298,4 +335,5 @@ module.exports = {
   emitYardOutboundRequested,
   emitCraneDispatched,
   emitContainerReadyForGateOut,
+  kickUserSockets,
 };

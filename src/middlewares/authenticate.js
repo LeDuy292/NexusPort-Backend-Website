@@ -43,6 +43,17 @@ async function authenticate(req, res, next) {
       });
     }
 
+    // Kiểm tra phiên hoạt động duy nhất (Single Active Session)
+    // Nếu token mang sessionId nhưng user không còn session_id trong DB (đã đăng xuất)
+    // hoặc session_id trong DB khác với token (đã bị kick bởi thiết bị khác):
+    if (decoded.sessionId && (!user.session_id || decoded.sessionId !== user.session_id)) {
+      return res.status(401).json({
+        success: false,
+        code: 'SESSION_KICKED',
+        message: 'Phiên làm việc đã kết thúc hoặc tài khoản vừa đăng nhập trên thiết bị khác. Vui lòng đăng nhập lại.',
+      });
+    }
+
     req.user = decoded;
     next();
   } catch (error) {
