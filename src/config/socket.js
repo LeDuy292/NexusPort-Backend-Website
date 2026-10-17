@@ -306,20 +306,23 @@ function kickUserSockets(userId, reason = 'CONCURRENT_LOGIN', message = 'Tài kh
     timestamp: new Date().toISOString(),
   };
 
-  // Gửi sự kiện cho toàn bộ client socket thuộc user này
+  // Gửi sự kiện cho toàn bộ client socket thuộc user này (cả phòng cá nhân và phòng driver)
   io.to(`user:${userId}`).emit('auth:session_kicked', payload);
+  io.to(`driver:${userId}`).emit('auth:session_kicked', payload);
 
-  // Ngắt kết nối socket của các phiên cũ
-  const userRoom = io.sockets?.adapter?.rooms?.get(`user:${userId}`);
-  if (userRoom) {
-    const socketIds = Array.from(userRoom);
-    for (const sid of socketIds) {
-      const s = io.sockets.sockets.get(sid);
-      if (s) {
-        s.disconnect(true);
+  // Cho phép packet 'auth:session_kicked' bay tới client trước khi ngắt kết nối
+  setTimeout(() => {
+    const userRoom = io.sockets?.adapter?.rooms?.get(`user:${userId}`);
+    if (userRoom) {
+      const socketIds = Array.from(userRoom);
+      for (const sid of socketIds) {
+        const s = io.sockets.sockets.get(sid);
+        if (s) {
+          s.disconnect(true);
+        }
       }
     }
-  }
+  }, 600);
 }
 
 module.exports = {

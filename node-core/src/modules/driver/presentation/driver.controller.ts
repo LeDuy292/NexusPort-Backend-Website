@@ -1,6 +1,7 @@
-﻿import { Request, Response } from 'express';
+import { Request, Response } from 'express';
 import { Router, NextFunction } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
+import { query } from '../../../infrastructure/database/db';
 import { DriverRepository } from '../infrastructure/driver.repository';
 import { DriverRouteService } from '../application/driver-route.service';
 import { DriverDestinationRepository } from '../infrastructure/driver-destination.repository';
@@ -20,6 +21,16 @@ const authenticateDriver = async (req: DriverRequest, _res: Response, next: Next
     if (role !== 'driver') return next(new ForbiddenError('Chỉ Driver được xem route của mình.'));
     const accountId = payload.sub ?? payload.id ?? payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'];
     if (typeof accountId !== 'string' || !uuidPattern.test(accountId)) return next(new UnauthorizedError('Token không chứa tài khoản hợp lệ.'));
+
+    // Kiểm tra tính hợp lệ của phiên đăng nhập duy nhất (Single Active Session)
+    if (payload.sessionId) {
+      const userRes = await query('SELECT session_id FROM users WHERE id = $1', [accountId]);
+      const currentSessionId = userRes.rows[0]?.session_id;
+      if (!currentSessionId || currentSessionId !== payload.sessionId) {
+        return next(new UnauthorizedError('Phiên làm việc đã bị kết thúc do tài khoản vừa đăng nhập ở nơi khác.'));
+      }
+    }
+
     const driverId = await new DriverRouteRepository().resolveDriverId(accountId);
     if (!driverId) return next(new ForbiddenError('Tài khoản chưa được liên kết với tài xế đang hoạt động.'));
     req.driverId = driverId;
