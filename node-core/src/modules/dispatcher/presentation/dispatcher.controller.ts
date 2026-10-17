@@ -6,6 +6,11 @@ import { ReadyBookingRepository } from '../infrastructure/ready-booking.reposito
 import { DestinationService } from '../application/destination.service';
 import { ForbiddenError, UnauthorizedError } from '../../../shared/errors/app-error';
 import { sendSuccess, sendCreated } from '../../../shared/utils/response';
+import { DriverRouteService } from '../../driver/application/driver-route.service';
+import { ConfiguredYardMapProvider } from '../../driver/infrastructure/yard-map.provider';
+import { query } from '../../../infrastructure/database/db';
+import { z } from 'zod';
+import { ValidationError, ConflictError } from '../../../shared/errors/app-error';
 
 interface DispatcherRequest extends Request {
   dispatcher?: { id: string | null; name: string };
@@ -37,6 +42,33 @@ const authenticateDispatcher = (req: DispatcherRequest, _res: Response, next: im
 };
 
 export class DispatcherController {
+  getSmartRoutes = async (_req: Request, res: Response, next: import('express').NextFunction): Promise<void> => {
+    try { res.setHeader('Cache-Control', 'no-store'); sendSuccess(res, await new DriverRouteService().monitor()); }
+    catch (error) { next(error); }
+  };
+
+  updateRouteCondition = async (req: DispatcherRequest, res: Response, next: import('express').NextFunction): Promise<void> => {
+    try {
+      const parsed = z.object({ targetType: z.enum(['node', 'edge']), targetId: z.string().trim().min(1).max(120),
+        restricted: z.boolean(), congestion: z.number().min(0).max(1).default(0),
+        validUntil: z.string().datetime().optional() }).strict().safeParse(req.body);
+      if (!parsed.success) throw new ValidationError('Điều kiện đường đi không hợp lệ.');
+      const { targetType, targetId, restricted, congestion, validUntil } = parsed.data;
+      if (validUntil && Date.parse(validUntil) <= Date.now()) throw new ValidationError('Thời hạn điều kiện phải ở tương lai.');
+      if (process.env.SMART_ROUTE_MAP_PATH) throw new ConflictError('Bản đồ đang được quản lý bởi nguồn ngoài. Cập nhật điều kiện tại nguồn Smart Yard.');
+      const snapshot = await new ConfiguredYardMapProvider().load(null);
+      const collection = targetType === 'node' ? snapshot.map?.nodes : snapshot.map?.edges;
+      if (!collection?.some(item => item.id === targetId)) throw new ValidationError('Đường/khu vực không có trong bản đồ hiện tại.');
+      const result = await query(`INSERT INTO smart_yard_conditions(map_id,target_type,target_id,restricted,congestion,source,valid_until,observed_at,updated_by)
+        SELECT id,$1,$2,$3,$4,'dispatcher',COALESCE($5::timestamptz,now()+interval '30 minutes'),now(),(SELECT id FROM users WHERE id=$6)
+        FROM smart_yard_maps WHERE is_active AND version=$7 ON CONFLICT(map_id,target_type,target_id) DO UPDATE
+        SET restricted=excluded.restricted,congestion=excluded.congestion,source=excluded.source,valid_until=excluded.valid_until,observed_at=now(),updated_by=excluded.updated_by
+        RETURNING target_type AS "targetType",target_id AS "targetId",restricted,congestion,valid_until AS "validUntil"`,
+        [targetType,targetId,restricted,congestion,validUntil ?? null,req.dispatcher?.id ?? null,snapshot.map?.version]);
+      if (!result.rows[0]) throw new ConflictError('Chưa có bản đồ bãi đang hoạt động.');
+      sendSuccess(res, result.rows[0]);
+    } catch (error) { next(error); }
+  };
   private repository = new DispatcherRepository();
   private readyBookingRepository = new ReadyBookingRepository();
   private destinationService = new DestinationService();
@@ -111,6 +143,8 @@ export const createDispatcherRouter = (): Router => {
   const controller = new DispatcherController();
 
   router.get('/bookings/ready', authenticateDispatcher, controller.getReadyBookings);
+  router.get('/smart-routes', authenticateDispatcher, controller.getSmartRoutes);
+  router.put('/smart-routes/conditions', authenticateDispatcher, controller.updateRouteCondition);
   router.get('/yard/destinations', authenticateDispatcher, controller.getYardDestinations);
   router.get('/operations/:operationId/destination', authenticateDispatcher, controller.getOperationDestination);
   router.put('/operations/:operationId/destination', authenticateDispatcher, controller.assignOperationDestination);

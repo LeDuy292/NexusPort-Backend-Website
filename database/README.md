@@ -65,6 +65,42 @@ Times use local UI time and UTC API values; booking creation remains Pending.
 
 ## Migration and deployment
 
+NXP-114 Smart Route uses additive migration
+`20261017_017_smart_yard_routes.sql`. The runner checks `nexusport_schema_versions`
+and applies all missing migrations through 017 in filename order:
+
+```powershell
+node --env-file=node-core/.env database/scripts/apply-smart-yard-routes.cjs
+node --env-file=node-core/.env database/scripts/apply-smart-yard-routes.cjs --apply
+```
+
+`smart_yard_maps` stores a single active directed road graph. The initial schematic
+uses the existing GATE-01/GATE-02 entrance lanes, GATE-03 exit, actual block/slot
+directory and A-S1/A-S2 handover stops. Graph endpoints stay beside the stacks;
+layout cells describe container positions rather than truck roads. The migration
+does not create containers, alter occupancy or guess historical operation links.
+New yard tasks can carry exact `booking_id` and `container_visit_id` links.
+The initial coordinates and road lengths are schematic values based on the
+provided yard drawing; replace them with surveyed Smart Yard geometry for
+operational distance and travel-time accuracy.
+
+`smart_yard_conditions` overlays dispatcher restrictions and congestion, with
+source, observation time and optional expiry for future Smart Yard/IoT adapters.
+`driver_route_progress` records arrival for an exact completed Gate In and its
+booking container. Gate passage, yard operation completion, driver confirmation
+and physical Gate Out remain separate records. The provider prefers
+`SMART_ROUTE_MAP_PATH`, then the active DB graph, then an instruction's legacy
+`smartYardMap` snapshot when no active DB graph exists. DB-backed layouts read
+current slot status and container positions on every refresh.
+
+After building Node Core, the guarded real HTTP integration test runs only on the
+isolated local database described below and removes its fixture records afterward:
+
+```powershell
+$env:DATABASE_URL='postgresql://postgres@127.0.0.1:55438/nxp038_test'
+node database/scripts/check-smart-route.cjs
+```
+
 Driver pre-gate coordination uses additive migration
 20261017_015_booking_dispatch_arrivals.sql and 016 for truck changes. Apply with
 node database/scripts/apply-booking-dispatch.cjs --apply after its prerequisites.

@@ -26,11 +26,12 @@ export class DestinationService {
     actor: { id: string | null; name: string },
   ): Promise<DestinationAssignment> {
     this.assertUuid(operationId, 'operationId');
-    const parsed = z.object({ slotId: uuidSchema }).strict().safeParse(body);
+    const parsed = z.object({ slotId: uuidSchema, bookingId: uuidSchema.optional() }).strict().safeParse(body);
     if (!parsed.success) throw new ValidationError('slotId phải là UUID hợp lệ.');
     return this.repository.assign({
       operationId,
       slotId: parsed.data.slotId,
+      ...(parsed.data.bookingId ? { bookingId: parsed.data.bookingId } : {}),
       dispatcherId: actor.id,
       dispatcherName: actor.name,
     });
