@@ -24,6 +24,8 @@ const baseSelect = `
          c.container_no AS "containerNumber",
          c.seal_no AS "sealNumber",
          c.cargo_type AS "cargoType",
+         cargo.name_vi AS "cargoTypeName",
+         c.required_power_kw AS "requiredPowerKw",
          c.status,
          c.gross_weight_kg AS "grossWeightKg",
          c.is_reefer AS "isReefer",
@@ -54,6 +56,7 @@ const baseSelect = `
          (SELECT COUNT(*)::int FROM booking_containers bc WHERE bc.container_id = c.id) AS "bookingCount"
     FROM containers c
     JOIN container_types ct ON ct.id = c.container_type_id
+    LEFT JOIN container_cargo_types cargo ON cargo.code = c.cargo_type
     LEFT JOIN carriers cr ON cr.id = c.carrier_id
     LEFT JOIN vessel_calls vc ON vc.id = c.vessel_call_id
     LEFT JOIN LATERAL (
@@ -89,6 +92,7 @@ const mapType = (row: Record<string, unknown>): ContainerTypeEntity => ({
 
 const mapListRow = (row: Record<string, unknown>): ContainerListItem => ({
   ...row,
+  requiredPowerKw: numberOrNull(row.requiredPowerKw),
   grossWeightKg: numberOrNull(row.grossWeightKg),
   latestGrossWeightKg: numberOrNull(row.latestGrossWeightKg),
   bookingCount: Number(row.bookingCount ?? 0),

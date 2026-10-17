@@ -30,6 +30,8 @@ export type EirActivity = 'in' | 'out';
 export type EirStatus = 'draft' | 'issued' | 'voided';
 
 export interface ContainerEntity {
+  requiredPowerKw: number | null;
+  cargoTypeName: string | null;
   id: string;
   carrierId: string | null;
   containerTypeId: string;
