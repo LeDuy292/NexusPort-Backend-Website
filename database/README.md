@@ -65,6 +65,13 @@ Times use local UI time and UTC API values; booking creation remains Pending.
 
 ## Migration and deployment
 
+Driver pre-gate coordination uses additive migration
+20261017_015_booking_dispatch_arrivals.sql and 016 for truck changes. Apply with
+node database/scripts/apply-booking-dispatch.cjs --apply after its prerequisites.
+It stores arrival/readiness and dispatcher calls separately from booking/gate
+status, with durable notifications and a transactional socket outbox.
+See docs/booking-dispatch.md for the flow and validation commands.
+
 Driver demo migration `20261017_014_driver_booking_feed.sql` adds an explicit optional `drivers.user_id` link (unique per login) and persisted driver booking notifications. Run `node database/scripts/apply-driver-booking-feed.cjs --apply` after all earlier migrations. Existing profiles/accounts are never matched by name automatically. Admin must select company and a driver profile in that company while creating/editing a Driver account or assigning the Driver role. Express reads booking cargo only from the exact linked declaration. The booking trigger records assignment, approval, cancellation/rejection and schedule changes for the linked driver, including changes made by the C# website.
 
 Read `AGENTS.md`. Never modify an applied migration; every correction is additive.
