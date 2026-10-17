@@ -111,31 +111,13 @@ public class BookingValidationService : IBookingValidationService
                 var missingIds = distinctContainerIds.Where(id => !foundIds.Contains(id));
                 AddError(nameof(dto.ContainerIds), $"Không tìm thấy các Container sau trong bãi cảng: {string.Join(", ", missingIds)}");
             }
-            else
-            {
-                foreach (var container in containers)
-                {
-                    if (dto.BookingType == BookingType.Dropoff && string.Equals(container.Status, "gate_in", StringComparison.OrdinalIgnoreCase))
-                    {
-                        AddError(nameof(dto.ContainerIds), $"Container '{container.ContainerNumber}' đã nằm trong bãi cảng (Trạng thái: {container.Status}). Không thể tạo lịch hạ container.");
-                    }
-                    else if (dto.BookingType == BookingType.Pickup && string.Equals(container.Status, "gate_out", StringComparison.OrdinalIgnoreCase))
-                    {
-                        AddError(nameof(dto.ContainerIds), $"Container '{container.ContainerNumber}' đã rời khỏi cảng (Trạng thái: {container.Status}). Không thể tạo lịch lấy container.");
-                    }
-                    else if (string.Equals(container.Status, "canceled", StringComparison.OrdinalIgnoreCase))
-                    {
-                        AddError(nameof(dto.ContainerIds), $"Container '{container.ContainerNumber}' đã bị hủy trên hệ thống và không thể đặt lịch.");
-                    }
-                }
-            }
         }
 
         // 6. Duplicate / Overlapping Booking Validation
         var overlappingBookings = await _context.Set<Domain.Entities.Booking>()
             .Include(b => b.BookingContainers)
             .AsNoTracking()
-            .Where(b => b.Status != BookingStatus.Canceled &&
+            .Where(b => b.Id != dto.ExcludeBookingId && b.Status != BookingStatus.Canceled &&
                         b.Status != BookingStatus.Completed &&
                         b.Status != BookingStatus.Expired &&
                         b.Status != BookingStatus.Rejected &&

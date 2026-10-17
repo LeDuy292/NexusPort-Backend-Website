@@ -140,4 +140,28 @@ async function getMeController(req, res, next) {
   }
 }
 
-module.exports = { loginController, getMeController, forgotPasswordController, resetPasswordController };
+/**
+ * POST /api/auth/logout
+ * Đăng xuất người dùng: xóa cookie (nếu có) và trả về thông báo thành công.
+ */
+function logoutController(req, res) {
+  try {
+    if (res.clearCookie) {
+      res.clearCookie('token');
+      res.clearCookie('refreshToken');
+    }
+  } catch (_) {}
+  return res.status(200).json({
+    success: true,
+    message: 'Đăng xuất thành công.',
+  });
+}
+
+module.exports = {
+  loginController,
+  logoutController,
+  getMeController,
+  forgotPasswordController,
+  resetPasswordController,
+};
+

@@ -1,3 +1,4 @@
+using Npgsql;
 using System.Net;
 using System.Text.Json;
 using NexusPort.Shared.Exceptions;
@@ -38,7 +39,14 @@ public class GlobalExceptionMiddleware
         object? errors = null;
 
 
-        if (exception is ValidationException valEx)
+        var databaseError = exception as PostgresException ?? exception.InnerException as PostgresException;
+        if (databaseError?.SqlState == "23514")
+        {
+            statusCode = 422;
+            errorCode = "JOURNEY_CONFLICT";
+            message = databaseError.MessageText;
+        }
+        else if (exception is ValidationException valEx)
         {
             statusCode = valEx.StatusCode;
             errorCode = valEx.ErrorCode;

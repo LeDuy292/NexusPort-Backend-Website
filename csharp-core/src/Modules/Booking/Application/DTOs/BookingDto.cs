@@ -30,6 +30,7 @@ public class BookingDto
 
     public DateTime CreatedAt { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
+    public List<BookingContainerSelectionDto> ContainerSelections { get; set; } = new();
     public List<string> ContainerNumbers { get; set; } = new();
 
     // Payment & TOS Tariff details
@@ -40,8 +41,21 @@ public class BookingDto
     public DateTime? PaidAt { get; set; }
 }
 
+public class BookingContainerSelectionDto
+{
+    public Guid ContainerId { get; set; }
+    public Guid DeclarationId { get; set; }
+    public Guid? ContainerVisitId { get; set; }
+    public string? YardCode { get; set; }
+    public string? ContainerNumber { get; set; }
+    public string? ContainerTypeCode { get; set; }
+    public string? CargoTypeName { get; set; }
+}
+
 public class CreateBookingDto
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Guid? ExcludeBookingId { get; set; }
     public Guid CarrierId { get; set; }
     public Guid? DriverId { get; set; }
     public Guid? TruckId { get; set; }
@@ -51,6 +65,7 @@ public class CreateBookingDto
     public DateTime AppointmentStart { get; set; }
     public DateTime AppointmentEnd { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
+    public List<BookingContainerSelectionDto> ContainerSelections { get; set; } = new();
 
     public string? Status { get; set; } = "Active";
     public string? Description { get; set; }
@@ -69,6 +84,7 @@ public class UpdateBookingDto
     public DateTime AppointmentStart { get; set; }
     public DateTime AppointmentEnd { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
+    public List<BookingContainerSelectionDto> ContainerSelections { get; set; } = new();
 }
 
 public class CancelBookingDto
@@ -102,6 +118,7 @@ public class DriverContainerOperationDto
 
 public class ContainerConfirmationDto
 {
+    public Guid BookingId { get; set; }
     public Guid ContainerId { get; set; }
     public string Condition { get; set; } = "OK";
     public string? Notes { get; set; }
@@ -128,6 +145,7 @@ public class AssignBookingResourcesDto
     public Guid TruckId { get; set; }
     public string? VehiclePlate { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
+    public List<BookingContainerSelectionDto> ContainerSelections { get; set; } = new();
     public string? ContainerNo { get; set; }
 }
 
@@ -242,3 +260,12 @@ public class ProcessBookingPaymentDto
 }
 
 
+
+public sealed class BookingSelectionRecommendationDto
+{
+    public Guid? BookingId { get; set; }
+    public Guid ContainerId { get; set; }
+    public Guid? DeclarationId { get; set; }
+    public string BookingType { get; set; } = "Dropoff";
+    public string? YardCode { get; set; }
+}

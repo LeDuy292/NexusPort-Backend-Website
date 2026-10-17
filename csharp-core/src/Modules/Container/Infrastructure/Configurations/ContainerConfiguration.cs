@@ -1,3 +1,4 @@
+using NexusPort.Modules.Container.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -7,13 +8,14 @@ public class ContainerConfiguration : IEntityTypeConfiguration<NexusPort.Modules
 {
     public void Configure(EntityTypeBuilder<NexusPort.Modules.Container.Domain.Entities.Container> builder)
     {
+        new ModelBuilder(builder.Metadata.Model).HasPostgresEnum<ContainerStorageStatus>("container_status");
         builder.ToTable("containers");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).HasColumnName("id");
         builder.Property(x => x.CarrierId).HasColumnName("carrier_id");
         builder.Property(x => x.ContainerNumber).HasColumnName("container_no").IsRequired().HasMaxLength(100);
         builder.Property(x => x.SealNumber).HasColumnName("seal_no").HasMaxLength(100);
-        builder.Property(x => x.Status).HasColumnName("status").HasConversion<string>().IsRequired().HasMaxLength(50);
+        builder.Property(x => x.Status).HasColumnName("status").HasConversion(v => ContainerStorageStatusCodec.Parse(v), v => v.ToString()).HasColumnType("container_status").IsRequired().HasMaxLength(50);
         builder.Property(x => x.CargoType).HasColumnName("cargo_type").HasConversion<string>();
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
         builder.Property(x => x.UpdatedAt).HasColumnName("updated_at");
