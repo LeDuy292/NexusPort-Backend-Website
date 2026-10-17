@@ -13,6 +13,7 @@ import { createDispatcherRouter } from '../../modules/dispatcher/presentation/di
 import { createVehicleRouter } from '../../modules/vehicle/presentation/vehicle.controller';
 import { createDriverRouter } from '../../modules/driver/presentation/driver.controller';
 import { createEquipmentRouter } from '../../modules/equipment/presentation/equipment.controller';
+import { createReeferRouter } from '../../modules/reefer/presentation/reefer.controller';
 
 const router = Router();
 const healthController = new HealthController();
@@ -38,12 +39,13 @@ export const nodeCoreRouteModules: NodeCoreRouteModule[] = [
   { prefix: '/vehicles', tag: 'Vehicles', secured: false, router: createVehicleRouter() },
   { prefix: '/drivers', tag: 'Drivers', secured: false, router: createDriverRouter() },
   { prefix: '/equipment', tag: 'Equipment', secured: false, router: createEquipmentRouter() },
+  { prefix: '/reefer', tag: 'Reefer', secured: false, router: createReeferRouter() },
 ];
 
 // Health Check
 router.get('/health', healthController.check);
 
-// 11 Domain Module Routes
+// 12 Domain Module Routes
 for (const module of nodeCoreRouteModules) router.use(module.prefix, module.router);
 
 export default router;
