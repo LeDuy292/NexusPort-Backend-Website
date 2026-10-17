@@ -7,9 +7,12 @@ const sequelize = new Sequelize(db.name, db.user, db.password, {
   host: db.host,
   port: db.port,
   dialect: 'postgres',
+  dialectOptions: db.sslMode === 'require'
+    ? { ssl: { require: true, rejectUnauthorized: false } }
+    : {},
   logging: nodeEnv === 'development' ? (msg) => console.log(`[DB] ${msg}`) : false,
   pool: {
-    max: 10,
+    max: db.poolMax,
     min: 0,
     acquire: 30000,
     idle: 10000,

@@ -8,11 +8,12 @@
 // Không override nếu biến đã được set (quan trọng cho test environment)
 require('dotenv').config({ override: false });
 
+const useAivenDatabase = process.env.DB_TARGET === 'aiven';
+
 const REQUIRED_VARS = [
-  'DB_HOST',
-  'DB_NAME',
-  'DB_USER',
-  'DB_PASSWORD',
+  ...(useAivenDatabase
+    ? ['AIVEN_DB_HOST', 'AIVEN_DB_PORT', 'AIVEN_DB_NAME', 'AIVEN_DB_USER', 'AIVEN_DB_PASSWORD']
+    : ['DB_HOST', 'DB_NAME', 'DB_USER', 'DB_PASSWORD']),
   'JWT_SECRET',
 ];
 
@@ -30,11 +31,13 @@ module.exports = {
   isTest: process.env.NODE_ENV === 'test',
 
   db: {
-    host: process.env.DB_HOST,
-    port: parseInt(process.env.DB_PORT, 10) || 5432,
-    name: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
+    host: useAivenDatabase ? process.env.AIVEN_DB_HOST : process.env.DB_HOST,
+    port: parseInt(useAivenDatabase ? process.env.AIVEN_DB_PORT : process.env.DB_PORT, 10) || 5432,
+    name: useAivenDatabase ? process.env.AIVEN_DB_NAME : process.env.DB_NAME,
+    user: useAivenDatabase ? process.env.AIVEN_DB_USER : process.env.DB_USER,
+    password: useAivenDatabase ? process.env.AIVEN_DB_PASSWORD : process.env.DB_PASSWORD,
+    sslMode: useAivenDatabase ? (process.env.AIVEN_DB_SSLMODE || 'require') : (process.env.DB_SSL_MODE || 'disable'),
+    poolMax: parseInt(process.env.DB_POOL_MAX, 10) || 5,
   },
 
   jwt: {
