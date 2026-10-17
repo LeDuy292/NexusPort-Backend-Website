@@ -49,8 +49,7 @@ public class BookingRepository : IBookingRepository
         if (filter.CarrierId.HasValue && filter.CarrierId.Value != Guid.Empty)
         {
             var targetCarrierId = filter.CarrierId.Value;
-            var defaultCarrierId = Guid.Parse("c1010101-0000-0000-0000-000000000001");
-            query = query.Where(b => b.CarrierId == targetCarrierId || b.CarrierId == defaultCarrierId);
+            query = query.Where(b => b.CarrierId == targetCarrierId);
         }
 
         if (filter.Status.HasValue)
@@ -101,7 +100,12 @@ public class BookingRepository : IBookingRepository
 
     public async Task UpdateAsync(Domain.Entities.Booking entity, CancellationToken cancellationToken = default)
     {
-        _dbSet.Update(entity);
+        // Repository reads track this entity. Marking the whole graph Modified
+        // rewrites unchanged appointment times (legacy Npgsql reads local time)
+        // and can shift the schedule when merely approving/canceling/assigning.
+        // Preserve EF's property-level change tracking for all normal updates.
+        if (_context.Entry(entity).State == EntityState.Detached)
+            throw new InvalidOperationException("Load the booking through this repository before updating it.");
         await _context.SaveChangesAsync(cancellationToken);
     }
 

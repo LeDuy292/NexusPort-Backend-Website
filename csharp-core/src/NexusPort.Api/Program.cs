@@ -1,3 +1,5 @@
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 using NexusPort.Api.Extensions;
 using NexusPort.Api.Middleware;
 using NexusPort.Modules.Carrier;
@@ -38,6 +40,13 @@ if (!Directory.Exists(webRoot)) {
     Directory.CreateDirectory(webRoot);
 }
 
+builder.Services.AddRateLimiter(options => {
+    options.RejectionStatusCode = 429;
+    options.AddPolicy("booking-create", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 15, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+});
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -60,6 +69,7 @@ app.UseStaticFiles();
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
 app.MapControllers();
 

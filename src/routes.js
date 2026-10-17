@@ -6,6 +6,7 @@ const protectedRoutes = require('./modules/protected/protected.routes');
 const usersRoutes = require('./modules/users/users.routes');
 const tripsRoutes = require('./modules/trips/trips.routes');
 const yardRoutes = require('./modules/yard/yard.routes');
+const driverBookingRoutes = require('./modules/driver-bookings/driver-bookings.routes');
 const { nodeEnv } = require('./config/env');
 
 const systemRoutes = Router();
@@ -22,6 +23,7 @@ systemRoutes.get('/api/health', (_req, res) => {
 const mountedRouters = [
   { prefix: '/', tag: 'System', secured: false, router: systemRoutes },
   { prefix: '/api/auth', tag: 'Auth', secured: false, router: authRoutes },
+  { prefix: '/api/driver-bookings', tag: 'Driver Bookings', secured: true, router: driverBookingRoutes },
   { prefix: '/api/users', tag: 'Users', secured: true, router: usersRoutes },
   { prefix: '/api/yard', tag: 'Yard Operations', secured: true, router: yardRoutes },
   { prefix: '/api', tag: 'Transport Trips', secured: true, router: tripsRoutes },

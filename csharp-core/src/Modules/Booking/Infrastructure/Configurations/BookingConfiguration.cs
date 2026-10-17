@@ -73,13 +73,13 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
 
         // Ignore unmapped helper properties for DB-first schema compatibility
         builder.Ignore(x => x.BookingNumber);
-        builder.Ignore(x => x.VehiclePlate);
-        builder.Ignore(x => x.VehicleId);
-        builder.Ignore(x => x.DriverName);
-        builder.Ignore(x => x.ValidFrom);
-        builder.Ignore(x => x.ValidTo);
-        builder.Ignore(x => x.GateType);
-        builder.Ignore(x => x.Description);
+        builder.Property(x => x.VehiclePlate).HasColumnName("vehicle_plate");
+        builder.Property(x => x.VehicleId).HasColumnName("vehicle_id");
+        builder.Property(x => x.DriverName).HasColumnName("driver_name");
+        builder.Property(x => x.ValidFrom).HasColumnName("valid_from");
+        builder.Property(x => x.ValidTo).HasColumnName("valid_to");
+        builder.Property(x => x.GateType).HasColumnName("gate_type");
+        builder.Property(x => x.Description).HasColumnName("description");
 
         builder.HasMany(x => x.BookingContainers)
             .WithOne(x => x.Booking)

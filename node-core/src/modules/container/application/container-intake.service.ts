@@ -1,170 +1,104 @@
 import * as XLSX from 'xlsx';
-import { AppError, ValidationError } from '../../../shared/errors/app-error';
+import { AppError, ForbiddenError, ValidationError } from '../../../shared/errors/app-error';
 import { ContainerIntakeRepository } from '../infrastructure/container-intake.repository';
-import {
-  ContainerIntakeResult, ContainerIntakeRow, ContainerIntakeSource,
-} from './container-intake.dto';
+import { ContainerIntakeResult, ContainerIntakeRow, ContainerIntakeSource } from './container-intake.dto';
 import { containerIntakeSchema } from './container-intake.validator';
-
+const normalize = (v: string) => v.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]/g, '');
 const HEADERS: Record<string, keyof ContainerIntakeRow> = {
-  containerid: 'containerNumber', container_no: 'containerNumber', socontainer: 'containerNumber',
-  container_number: 'containerNumber', containernumber: 'containerNumber',
-  container_type: 'containerTypeCode', containertype: 'containerTypeCode', loaicontainer: 'containerTypeCode', isocode: 'containerTypeCode',
-  movement_type: 'movementType', movementtype: 'movementType', nhucau: 'movementType',
-  source_reference: 'sourceReference', sourcereference: 'sourceReference', mathamchieu: 'sourceReference',
-  seal_number: 'sealNumber', sealnumber: 'sealNumber', soseal: 'sealNumber',
-  load_status: 'loadStatus', loadstatus: 'loadStatus', tinhtranghang: 'loadStatus',
-  cargo_type: 'cargoType', cargotype: 'cargoType', loaihang: 'cargoType',
-  gross_weight_kg: 'grossWeightKg', grossweightkg: 'grossWeightKg', trongluongkg: 'grossWeightKg',
-  vessel_call_code: 'vesselCallCode', vesselcallcode: 'vesselCallCode', machuyentau: 'vesselCallCode',
-  expected_arrival_at: 'expectedArrivalAt', expectedarrivalat: 'expectedArrivalAt', thoigiandenkien: 'expectedArrivalAt',
-  expected_available_at: 'expectedAvailableAt', expectedavailableat: 'expectedAvailableAt', thoigiansansangdukien: 'expectedAvailableAt',
-  requested_service_date: 'requestedServiceDate', requestedservicedate: 'requestedServiceDate', ngaymongmuonthuchien: 'requestedServiceDate',
-  requested_pickup_date: 'requestedServiceDate', requestedpickupdate: 'requestedServiceDate', ngaymongmuonnhan: 'requestedServiceDate',
-  bl_booking_number: 'blBookingNumber', blbookingnumber: 'blBookingNumber', soblbooking: 'blBookingNumber',
-  customer_name: 'customerName', customername: 'customerName', tenkhachhang: 'customerName',
-  transport_company_name: 'transportCompanyName', transportcompanyname: 'transportCompanyName', tencongtyvanchuyen: 'transportCompanyName',
+    containernumber: 'containerNumber', containerno: 'containerNumber', socontainer: 'containerNumber',
+    containertype: 'containerTypeCode', containertypecode: 'containerTypeCode', loaicontainer: 'containerTypeCode',
+    seal: 'sealNumber', sealnumber: 'sealNumber', soseal: 'sealNumber', sosealneuco: 'sealNumber',
+    loadstatus: 'loadStatus', tinhtranghang: 'loadStatus', cargotype: 'cargoType', loaihang: 'cargoType',
+    grossweightkg: 'grossWeightKg', khoiluongkg: 'grossWeightKg', trongluongkg: 'grossWeightKg',
+    requiredpowerkw: 'requiredPowerKw', congsuatdienkw: 'requiredPowerKw', congsuatdienyeucaukw: 'requiredPowerKw',
+    customername: 'customerName', tenkhachhang: 'customerName', tenkhachhangchuhang: 'customerName',
 };
-
-const normalizeHeader = (value: string): string => value.trim().toLowerCase()
-  .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd')
-  .replace(/[^a-z0-9_]+/g, '');
-
-const dateValue = (value: unknown, dateOnly = false): unknown => {
-  if (typeof value === 'number') {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    if (!parsed) return value;
-    if (dateOnly) return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
-    const date = new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d, parsed.H - 7, parsed.M, Math.floor(parsed.S)));
-    return date.toISOString();
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    if (dateOnly && /^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
-    if (!dateOnly && /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(trimmed)) {
-      return new Date(`${trimmed.replace(' ', 'T')}${trimmed.length === 16 ? ':00' : ''}+07:00`).toISOString();
-    }
-  }
-  return value;
-};
-
-const normalizeEnum = (key: keyof ContainerIntakeRow, value: unknown): unknown => {
-  if (typeof value !== 'string') return value;
-  const normalized = value.trim().toLowerCase();
-  if (key === 'loadStatus') return ({ day: 'full', full: 'full', rong: 'empty', empty: 'empty', unknown: 'unknown' } as Record<string, string>)[normalized] ?? normalized;
-  if (key === 'cargoType' || key === 'movementType') return normalized.replace(/[ -]+/g, '_');
-  return value.trim();
-};
-
-const applyIntakeDefaults = (row: ContainerIntakeRow): ContainerIntakeRow => {
-  if (row.sourceType !== 'port_vessel') return row;
-  const expectedAvailableAt = row.expectedArrivalAt
-    ? new Date(new Date(row.expectedArrivalAt).getTime() + 12 * 60 * 60 * 1000).toISOString()
-    : null;
-  return {
-    ...row,
-    vesselCallCode: null,
-    transportCompanyName: null,
-    expectedAvailableAt,
-  };
-};
-
-const normalizeLegacyFields = (raw: unknown): Record<string, unknown> => {
-  const row = { ...((raw ?? {}) as Record<string, unknown>) };
-  row.requestedServiceDate = row.requestedServiceDate || row.requestedPickupDate || null;
-  return row;
-};
-
+// Old templates must fail visibly; silently discarding booking data is misleading.
+const REMOVED = new Set(['transportcompanyname', 'tencongtyvanchuyen', 'tencongtyvantai', 'movementtype', 'nhucau', 'sourcereference', 'mathamchieu', 'blbookingnumber', 'soblbooking', 'requestedservicedate', 'requestedpickupdate', 'ngaymongmuonnhan', 'ngaymongmuonthuchien', 'expectedarrivalat', 'expectedavailableat', 'vesselcallcode']);
 export class ContainerIntakeService {
-  constructor(private readonly repository = new ContainerIntakeRepository()) {}
-
-  async createManual(raw: unknown, sourceType: ContainerIntakeSource, userId: string) {
-    const parsed = containerIntakeSchema.safeParse({ ...normalizeLegacyFields(raw), sourceType });
-    if (!parsed.success) {
-      const details = parsed.error.issues.reduce<Record<string, string[]>>((result, issue) => {
-        const field = issue.path.join('.') || 'request';
-        result[field] = [...(result[field] ?? []), issue.message];
-        return result;
-      }, {});
-      throw new ValidationError('Thông tin tiếp nhận Container không hợp lệ.', details);
+    constructor(private readonly repository = new ContainerIntakeRepository()) { }
+    private checkSource(source: ContainerIntakeSource) {
+        if (source !== 'transport_company')
+            throw new ForbiddenError('Chỉ công ty vận tải được khai báo Container cho kho bãi.');
     }
-    return this.repository.processRow(applyIntakeDefaults(parsed.data), userId);
-  }
-
-  async importExcel(file: Express.Multer.File | undefined, sourceType: ContainerIntakeSource, userId: string) {
-    if (!file) throw new ValidationError('Vui lòng chọn file Excel cần import.');
-    if (!/\.(xlsx|xls)$/i.test(file.originalname)) throw new ValidationError('Chỉ chấp nhận file Excel .xlsx hoặc .xls.');
-    const batchId = await this.repository.createBatch(sourceType, file.originalname, file.size, userId);
-
-    let workbook: XLSX.WorkBook;
-    try { workbook = XLSX.read(file.buffer, { type: 'buffer', cellDates: false }); }
-    catch {
-      await this.repository.failBatch(batchId);
-      throw new ValidationError('Không thể đọc file Excel. Vui lòng dùng đúng file mẫu.');
+    getCargoTypes() { return this.repository.listCargoTypes(); }
+    async buildTemplate() {
+        const workbook = XLSX.utils.book_new();
+        const sheet = XLSX.utils.aoa_to_sheet([[
+            'Số Container', 'Loại Container', 'Tên khách hàng/chủ hàng',
+            'Tình trạng hàng', 'Loại hàng', 'Khối lượng (kg)', 'Công suất điện yêu cầu (kW)',
+            'Số seal (nếu có)',
+        ]]);
+        sheet['!cols'] = [22, 20, 30, 22, 24, 20, 34, 24].map(wch => ({ wch }));
+        sheet['!rows'] = [{ hpt: 26 }];
+        sheet['!autofilter'] = { ref: 'A1:H1' };
+        XLSX.utils.book_append_sheet(workbook, sheet, 'Container');
+        return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
     }
-    const preferredName = sourceType === 'port_vessel' ? 'Cang_Tau' : 'CongTyVanChuyen';
-    const sheet = workbook.Sheets[preferredName] ?? workbook.Sheets[workbook.SheetNames[0]];
-    if (!sheet) {
-      await this.repository.failBatch(batchId);
-      throw new ValidationError('File Excel không có sheet dữ liệu.');
-    }
-    const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '', raw: true });
-    if (!rawRows.length) {
-      await this.repository.failBatch(batchId);
-      throw new ValidationError('File Excel không có dòng dữ liệu nào.');
-    }
-    if (rawRows.length > 1000) {
-      await this.repository.failBatch(batchId);
-      throw new ValidationError('Mỗi lần chỉ được import tối đa 1.000 dòng.');
-    }
-    const results: ContainerIntakeResult[] = [];
-    for (let index = 0; index < rawRows.length; index += 1) {
-      const raw = rawRows[index];
-      const mapped: Record<string, unknown> = {};
-      for (const [header, value] of Object.entries(raw)) {
-        const key = HEADERS[normalizeHeader(header)];
-        if (key) {
-          const normalizedValue = ['expectedArrivalAt', 'expectedAvailableAt', 'requestedServiceDate', 'requestedPickupDate'].includes(key)
-            ? dateValue(value, ['requestedServiceDate', 'requestedPickupDate'].includes(key)) : value;
-          mapped[key] = normalizeEnum(key, normalizedValue);
+    async createManual(raw: unknown, source: ContainerIntakeSource, userId: string) {
+        this.checkSource(source);
+        const parsed = containerIntakeSchema.safeParse({ ...((raw ?? {}) as object), sourceType: source });
+        if (!parsed.success) {
+            const details = parsed.error.issues.reduce<Record<string, string[]>>((r, i) => { const key = i.path.join('.') || 'request'; r[key] = [...(r[key] ?? []), i.message]; return r; }, {});
+            throw new ValidationError('Thông tin khai báo Container không hợp lệ.', details);
         }
-      }
-      mapped.sourceType = sourceType;
-      mapped.movementType = sourceType === 'port_vessel' ? 'vessel_discharge' : (mapped.movementType || 'pickup_request');
-      const rowNumber = index + 2;
-      const parsed = containerIntakeSchema.safeParse(normalizeLegacyFields(mapped));
-      let result: ContainerIntakeResult;
-      if (!parsed.success) {
-        result = {
-          rowNumber,
-          containerNumber: typeof mapped.containerNumber === 'string' ? mapped.containerNumber : null,
-          status: 'rejected',
-          errors: parsed.error.issues.map((issue) => `${issue.path.join('.') || 'dòng'}: ${issue.message}`),
-        };
-      } else {
-        try { result = await this.repository.processRow(applyIntakeDefaults(parsed.data), userId, batchId, rowNumber); }
-        catch (error) {
-          result = {
-            rowNumber, containerNumber: parsed.data.containerNumber, status: 'rejected',
-            errors: [error instanceof AppError ? error.message : 'Không thể lưu dòng dữ liệu.'],
-          };
-        }
-      }
-      results.push(result);
-      await this.repository.saveRowResult(batchId, result, raw);
+        return this.repository.processRow(parsed.data, userId);
     }
-    await this.repository.completeBatch(batchId, results);
-    return {
-      batchId,
-      totalRows: results.length,
-      successRows: results.filter((row) => ['created_master', 'created_visit', 'updated_visit'].includes(row.status)).length,
-      duplicateRows: results.filter((row) => row.status === 'duplicate').length,
-      failedRows: results.filter((row) => row.status === 'rejected').length,
-      rows: results,
-    };
-  }
-
-  listImports() { return this.repository.listBatches(); }
-
-  listTransportDeclarations(userId: string) { return this.repository.listTransportDeclarations(userId); }
+    async importExcel(file: Express.Multer.File | undefined, source: ContainerIntakeSource, userId: string) {
+        this.checkSource(source);
+        if (!file || !/\.(xlsx|xls)$/i.test(file.originalname))
+            throw new ValidationError('Vui lòng chọn file Excel .xlsx hoặc .xls.');
+        let workbook: XLSX.WorkBook;
+        try {
+            workbook = XLSX.read(file.buffer, { type: 'buffer' });
+        }
+        catch {
+            throw new ValidationError('Không thể đọc file Excel.');
+        }
+        const sheet = workbook.Sheets.Container ?? workbook.Sheets.CongTyVanChuyen ?? workbook.Sheets[workbook.SheetNames[0]];
+        if (!sheet)
+            throw new ValidationError('File Excel không có sheet dữ liệu.');
+        const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: '', raw: true });
+        if (!rawRows.length || rawRows.length > 1000)
+            throw new ValidationError('File phải có từ 1 đến 1.000 dòng.');
+        const removed = Object.keys(rawRows[0]).filter(h => REMOVED.has(normalize(h)));
+        if (removed.length)
+            throw new ValidationError('File mẫu cũ chứa trường đã bỏ. Vui lòng tải mẫu khai báo mới.');
+        const cargoTypes = await this.repository.listCargoTypes();
+        const batchId = await this.repository.createBatch(source, file.originalname, file.size, userId);
+        const results: ContainerIntakeResult[] = [];
+        for (let index = 0; index < rawRows.length; index++) {
+            const raw = rawRows[index];
+            const mapped: Record<string, unknown> = { sourceType: source };
+            for (const [header, value] of Object.entries(raw)) {
+                const key = HEADERS[normalize(header)];
+                if (!key)
+                    continue;
+                mapped[key] = typeof value === 'string' ? value.trim() : value;
+                if (key === 'cargoType' && typeof value === 'string')
+                    mapped[key] = cargoTypes.find(t => normalize(t.code) === normalize(value) || normalize(t.name) === normalize(value))?.code ?? value;
+                if (key === 'loadStatus' && typeof value === 'string')
+                    mapped[key] = ({ dayhang: 'full', day: 'full', rong: 'empty', chuaxacdinh: 'unknown' } as Record<string, string>)[normalize(value)] ?? value;
+            }
+            const parsed = containerIntakeSchema.safeParse(mapped);
+            const rowNumber = index + 2;
+            let result: ContainerIntakeResult;
+            if (!parsed.success)
+                result = { rowNumber, containerNumber: String(mapped.containerNumber || ''), status: 'rejected', errors: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`) };
+            else {
+                try {
+                    result = await this.repository.processRow(parsed.data, userId, batchId, rowNumber);
+                }
+                catch (error) {
+                    result = { rowNumber, containerNumber: parsed.data.containerNumber, status: 'rejected', errors: [error instanceof AppError ? error.message : 'Không thể lưu dòng dữ liệu.'] };
+                }
+            }
+            results.push(result);
+            await this.repository.saveRowResult(batchId, result, raw);
+        }
+        await this.repository.completeBatch(batchId, results);
+        return { batchId, totalRows: results.length, successRows: results.filter(r => ['created_master', 'created_visit', 'updated_visit'].includes(r.status)).length, duplicateRows: results.filter(r => r.status === 'duplicate').length, failedRows: results.filter(r => r.status === 'rejected').length, rows: results };
+    }
+    listImports() { return this.repository.listBatches(); }
+    listTransportDeclarations(userId: string, containerNumber = '') { return this.repository.listTransportDeclarations(userId, containerNumber); }
 }

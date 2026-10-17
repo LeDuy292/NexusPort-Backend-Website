@@ -4,6 +4,8 @@ const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
 const { User, VALID_ROLES } = require('../../models/User');
 const { bcrypt: bcryptConfig } = require('../../config/env');
+const { sequelize } = require('../../config/database');
+const { assignDriverProfile, getUserDriverAssignments, removeDriverAssignment } = require('./driver-assignment.service');
 
 /**
  * Lấy danh sách người dùng với tìm kiếm, lọc và phân trang.
@@ -52,8 +54,9 @@ async function getUsers({ search, role, status, page = 1, limit = 20 } = {}) {
     attributes: { exclude: ['password', 'reset_token', 'reset_token_exp'] },
   });
 
+  const assignments = await getUserDriverAssignments(rows.filter(user => user.role === 'Driver').map(user => user.id));
   return {
-    users:      rows.map((u) => u.toSafeObject()),
+    users:      rows.map((u) => ({ ...u.toSafeObject(), ...assignments.find(item => item.userId === u.id) })),
     total:      count,
     page:       pageNum,
     limit:      limitNum,
@@ -79,7 +82,8 @@ async function getUserById(id) {
     throw err;
   }
 
-  return user.toSafeObject();
+  const assignments = user.role === 'Driver' ? await getUserDriverAssignments([user.id]) : [];
+  return { ...user.toSafeObject(), ...assignments[0] };
 }
 
 /**
@@ -95,7 +99,7 @@ async function getUserById(id) {
  * @returns {Promise<Object>}
  * @throws {{ statusCode: 409 }} Trùng email/username
  */
-async function createUser({ username, email, password, role, fullName, isActive = true }) {
+async function createUser({ username, email, password, role, fullName, isActive = true, carrierId, driverId }) {
   // Kiểm tra username trùng
   const existingUsername = await User.findOne({
     where: { username: { [Op.iLike]: username } },
@@ -119,16 +123,20 @@ async function createUser({ username, email, password, role, fullName, isActive 
   // Hash mật khẩu
   const hashedPassword = await bcrypt.hash(password, bcryptConfig.saltRounds);
 
-  const user = await User.create({
+  const user = await sequelize.transaction(async transaction => {
+  const created = await User.create({
     username,
     email:     email.toLowerCase(),
     password:  hashedPassword,
     role,
     full_name: fullName || null,
     is_active: isActive,
+  }, { transaction });
+  if (role === 'Driver') await assignDriverProfile(created.id, { carrierId, driverId }, transaction);
+  return created;
   });
 
-  return user.toSafeObject();
+  return getUserById(user.id);
 }
 
 /**
@@ -143,7 +151,7 @@ async function createUser({ username, email, password, role, fullName, isActive 
  * @returns {Promise<Object>}
  * @throws {{ statusCode: 404 | 409 }}
  */
-async function updateUser(id, { fullName, email, username }) {
+async function updateUser(id, { fullName, email, username, carrierId, driverId }) {
   const user = await User.findByPk(id);
   if (!user) {
     const err = new Error('Không tìm thấy người dùng.');
@@ -187,8 +195,13 @@ async function updateUser(id, { fullName, email, username }) {
     user.full_name = fullName || null;
   }
 
-  await user.save();
-  return user.toSafeObject();
+  await sequelize.transaction(async transaction => {
+    await user.save({ transaction });
+    if (user.role === 'Driver' && (carrierId !== undefined || driverId !== undefined)) {
+      await assignDriverProfile(user.id, { carrierId, driverId }, transaction);
+    }
+  });
+  return getUserById(user.id);
 }
 
 /**
@@ -199,7 +212,7 @@ async function updateUser(id, { fullName, email, username }) {
  * @returns {Promise<Object>}
  * @throws {{ statusCode: 400 | 404 }}
  */
-async function assignRole(id, role) {
+async function assignRole(id, role, { carrierId, driverId } = {}) {
   if (!VALID_ROLES.includes(role)) {
     const err = new Error(`Role không hợp lệ. Phải là một trong: ${VALID_ROLES.join(', ')}`);
     err.statusCode = 400;
@@ -214,8 +227,12 @@ async function assignRole(id, role) {
   }
 
   user.role = role;
-  await user.save();
-  return user.toSafeObject();
+  await sequelize.transaction(async transaction => {
+    await user.save({ transaction });
+    if (role === 'Driver') await assignDriverProfile(user.id, { carrierId, driverId }, transaction);
+    else await removeDriverAssignment(user.id, transaction);
+  });
+  return getUserById(user.id);
 }
 
 /**
