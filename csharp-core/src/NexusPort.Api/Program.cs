@@ -26,6 +26,9 @@ builder.Services.AddControllers()
     .AddApplicationPart(typeof(NexusPort.Modules.Driver.Presentation.Controllers.DriverController).Assembly)
     .AddApplicationPart(typeof(NexusPort.Modules.Equipment.Presentation.Controllers.EquipmentController).Assembly);
 
+// Add SignalR
+builder.Services.AddSignalR();
+
 // Add Infrastructure & Domain Modules
 builder.Services.AddNexusPortInfrastructure(builder.Configuration);
 builder.Services.AddNexusPortModules();
@@ -62,5 +65,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<NexusPort.Modules.Yard.Infrastructure.Hubs.ReeferMonitoringHub>("/hubs/reefer-monitoring");
 
 app.Run();

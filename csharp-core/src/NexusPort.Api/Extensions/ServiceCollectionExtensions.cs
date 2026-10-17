@@ -59,6 +59,15 @@ public static class ServiceCollectionExtensions
         dataSourceBuilder.MapEnum<NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus>("truck_status");
         dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingType>("booking_type");
         dataSourceBuilder.MapEnum<NexusPort.Modules.Booking.Domain.Enums.BookingStatus>("booking_status");
+        var nullTranslator = new Npgsql.NameTranslation.NpgsqlNullNameTranslator();
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Yard.Domain.Enums.ReeferRequestStatus>("reefer_request_status", nullTranslator);
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Yard.Domain.Enums.SocketUsageStatus>("socket_usage_status", nullTranslator);
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Yard.Domain.Enums.SocketTechnicalStatus>("socket_technical_status", nullTranslator);
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Yard.Domain.Enums.PowerSessionStatus>("power_session_status", nullTranslator);
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Yard.Domain.Enums.ActualPowerStatus>("actual_power_status", nullTranslator);
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Yard.Domain.Enums.TempDataSource>("temp_data_source", nullTranslator);
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Yard.Domain.Enums.AlertSeverity>("alert_severity", nullTranslator);
+        dataSourceBuilder.MapEnum<NexusPort.Modules.Yard.Domain.Enums.ReeferAlertStatus>("reefer_alert_status", nullTranslator);
 
         var dataSource = dataSourceBuilder.Build();
 
@@ -91,15 +100,29 @@ public static class ServiceCollectionExtensions
                 ValidateAudience = false,
                 ClockSkew = TimeSpan.Zero
             };
+            options.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
+                {
+                    var accessToken = context.Request.Query["access_token"];
+                    var path = context.HttpContext.Request.Path;
+                    if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                    {
+                        context.Token = accessToken;
+                    }
+                    return Task.CompletedTask;
+                }
+            };
         });
 
         services.AddCors(options =>
         {
             options.AddPolicy("NexusPortCorsPolicy", policy =>
             {
-                policy.AllowAnyOrigin()
+                policy.SetIsOriginAllowed(_ => true)
                       .AllowAnyMethod()
-                      .AllowAnyHeader();
+                      .AllowAnyHeader()
+                      .AllowCredentials();
             });
         });
 
@@ -149,6 +172,8 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IYardReceivingService, YardReceivingService>();
         services.AddScoped<IYardTaskService, YardTaskService>();
         services.AddScoped<IYardRestackService, YardRestackService>();
+        services.AddScoped<NexusPort.Modules.Yard.Application.Interfaces.IReeferMonitoringService, NexusPort.Modules.Yard.Application.Services.ReeferMonitoringService>();
+        services.AddHostedService<NexusPort.Modules.Yard.Infrastructure.BackgroundServices.ReeferMonitoringSimulatorWorker>();
 
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();
