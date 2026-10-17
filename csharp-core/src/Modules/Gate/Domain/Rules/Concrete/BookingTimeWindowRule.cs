@@ -17,9 +17,9 @@ public class BookingTimeWindowRule : IGateRule
         }
 
         var booking = context.Booking;
-        var checkTime = context.VerificationTime;
+        var checkTime = context.VerificationTime.ToUniversalTime();
 
-        if (booking.ValidTo.HasValue && checkTime > booking.ValidTo.Value)
+        if (booking.ValidTo.HasValue && checkTime > booking.ValidTo.Value.ToUniversalTime())
         {
             return Task.FromResult(GateRuleResult.Fail(
                 RuleName, 
@@ -27,7 +27,7 @@ public class BookingTimeWindowRule : IGateRule
                 $"Booking '{booking.BookingNumber}' đã hết hạn hiệu lực lúc {booking.ValidTo.Value:yyyy-MM-dd HH:mm:ss}."));
         }
 
-        if (booking.ValidFrom.HasValue && checkTime < booking.ValidFrom.Value)
+        if (booking.ValidFrom.HasValue && checkTime < booking.ValidFrom.Value.ToUniversalTime())
         {
             return Task.FromResult(GateRuleResult.Fail(
                 RuleName, 

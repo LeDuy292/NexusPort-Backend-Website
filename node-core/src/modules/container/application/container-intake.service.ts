@@ -100,5 +100,5 @@ export class ContainerIntakeService {
         return { batchId, totalRows: results.length, successRows: results.filter(r => ['created_master', 'created_visit', 'updated_visit'].includes(r.status)).length, duplicateRows: results.filter(r => r.status === 'duplicate').length, failedRows: results.filter(r => r.status === 'rejected').length, rows: results };
     }
     listImports() { return this.repository.listBatches(); }
-    listTransportDeclarations(userId: string) { return this.repository.listTransportDeclarations(userId); }
+    listTransportDeclarations(userId: string, containerNumber = '') { return this.repository.listTransportDeclarations(userId, containerNumber); }
 }

@@ -5,8 +5,15 @@ const path = require('path');
 const { createHash } = require('crypto');
 const { Client } = require('../../node-core/node_modules/pg');
 const files = [
+  '20261009_005_transport_trips.sql',
+  '20261012_006_transport_trip_yard_navigation.sql',
   '20261017_007_yard_carrier_declarations.sql',
   '20261017_008_optional_declaration_seal.sql',
+  '20261017_009_shared_container_journeys.sql',
+  '20261017_010_journey_lifecycle_guards.sql',
+  '20261017_011_preserve_legacy_journeys.sql',
+  '20261017_012_pickup_yard_codes.sql',
+  '20261017_013_tc_pickup_code_prefix.sql',
 ];
 async function main() {
   if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL must be explicitly provided.');

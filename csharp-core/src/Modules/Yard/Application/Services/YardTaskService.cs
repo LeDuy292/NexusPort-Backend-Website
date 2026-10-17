@@ -393,8 +393,10 @@ public class YardTaskService : IYardTaskService
         var container = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
             .FirstOrDefaultAsync(c => c.ContainerNumber.ToUpper() == cleanContainerNo, cancellationToken);
 
-        string expectedSeal = dto.ExpectedSealNo ?? container?.SealNumber ?? "SEAL-889922";
-        bool isSealIntact = dto.IsSealIntact && string.Equals(cleanActualSeal, expectedSeal, StringComparison.OrdinalIgnoreCase);
+        var snapshot = await YardContainerSnapshot.ReadAsync(_context,cleanContainerNo,cancellationToken);
+        if (snapshot?.VisitId == null) throw new ValidationException("Container", "Container chưa có lượt đang lưu bãi để tiếp nhận.");
+        string expectedSeal = snapshot.SealNumber ?? string.Empty;
+        bool isSealIntact = dto.IsSealIntact && (string.IsNullOrEmpty(expectedSeal) || string.Equals(cleanActualSeal, expectedSeal, StringComparison.OrdinalIgnoreCase));
 
         // 3. Nếu chưa có Task, tạo Task mới ở trạng thái Assigned
         if (task == null)
@@ -408,7 +410,7 @@ public class YardTaskService : IYardTaskService
                 dto.LocationCoordinate ?? "A01-05-02-3",
                 "High",
                 "Assigned",
-                container?.CargoType ?? "40FT HC",
+                snapshot.TypeCode,
                 "Hàng Tiếp Nhận",
                 null,
                 null,
@@ -455,7 +457,7 @@ public class YardTaskService : IYardTaskService
         // 5. Cập nhật trạng thái Container -> In_Yard
         if (container != null)
         {
-            container.Status = "In_Yard";
+            container.Status = "in_yard";
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -586,12 +588,14 @@ public class YardTaskService : IYardTaskService
             sourceBlock = "A01";
         }
 
+        var physicalSnapshot = await YardContainerSnapshot.ReadAsync(_context,cleanContainerNo,cancellationToken);
+
         // 3. Validate Target Slot
         var validationResult = await ValidateTargetSlotAsync(new ValidateSlotRequestDto
         {
             TargetLocation = dto.ToLocation,
             ContainerNo = cleanContainerNo,
-            ContainerType = dto.ContainerType ?? container?.CargoType ?? "40FT HC"
+            ContainerType = physicalSnapshot?.TypeCode ?? string.Empty
         }, cancellationToken);
 
         if (!validationResult.IsValid)
@@ -606,7 +610,7 @@ public class YardTaskService : IYardTaskService
             var feeCalc = await CalculateShiftingFeeAsync(new CalculateShiftingFeeRequestDto
             {
                 ContainerNo = cleanContainerNo,
-                ContainerType = dto.ContainerType ?? container?.CargoType ?? "40FT HC",
+                ContainerType = physicalSnapshot?.TypeCode ?? string.Empty,
                 ShiftingReason = dto.ShiftingReason,
                 IsBillable = dto.IsBillable
             }, cancellationToken);
@@ -983,27 +987,7 @@ ALTER TABLE ""Equipments"" ADD COLUMN IF NOT EXISTS ""IsDeleted"" boolean NOT NU
 CREATE INDEX IF NOT EXISTS ix_equipments_code ON ""Equipments"" (""EquipmentCode"");
 CREATE INDEX IF NOT EXISTS ix_equipments_status ON ""Equipments"" (""Status"");
 
-CREATE TABLE IF NOT EXISTS ""Containers"" (
-    ""Id"" uuid PRIMARY KEY,
-    ""CarrierId"" uuid,
-    ""ContainerNumber"" varchar(100) NOT NULL,
-    ""SealNumber"" varchar(100),
-    ""Status"" varchar(50) NOT NULL DEFAULT 'in_yard',
-    ""CargoType"" varchar(100),
-    ""Description"" varchar(500),
-    ""CreatedAt"" timestamptz NOT NULL DEFAULT now(),
-    ""CreatedBy"" varchar(150),
-    ""UpdatedAt"" timestamptz,
-    ""UpdatedBy"" varchar(150),
-    ""IsDeleted"" boolean NOT NULL DEFAULT false
-);
-ALTER TABLE ""Containers"" ADD COLUMN IF NOT EXISTS ""CreatedBy"" varchar(150);
-ALTER TABLE ""Containers"" ADD COLUMN IF NOT EXISTS ""UpdatedBy"" varchar(150);
-ALTER TABLE ""Containers"" ADD COLUMN IF NOT EXISTS ""IsDeleted"" boolean NOT NULL DEFAULT false;
-ALTER TABLE ""Containers"" ADD COLUMN IF NOT EXISTS ""SealNumber"" varchar(100);
-ALTER TABLE ""Containers"" ADD COLUMN IF NOT EXISTS ""CargoType"" varchar(100);
-CREATE INDEX IF NOT EXISTS ix_containers_number ON ""Containers"" (""ContainerNumber"");
-CREATE INDEX IF NOT EXISTS ix_containers_status ON ""Containers"" (""Status"");
+
 
 CREATE TABLE IF NOT EXISTS yard_receipts (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1148,354 +1132,7 @@ CREATE INDEX IF NOT EXISTS ix_yard_tasks_status ON yard_tasks (""Status"");
 ";
             await _context.Database.ExecuteSqlRawAsync(createTableSql, cancellationToken);
 
-            // 1. Seed Equipments nếu chưa có
-            var eqCount = await _context.Set<NexusPort.Modules.Equipment.Domain.Entities.Equipment>().CountAsync(cancellationToken);
-            if (eqCount == 0)
-            {
-                var equipments = new List<NexusPort.Modules.Equipment.Domain.Entities.Equipment>
-                {
-                    new("RTG-01", "Cẩu Bánh Lốp RTG 01", "RTG", "A01", "available", "Cẩu RTG Mitsui 40 tấn - Trạng thái sẵn sàng tác nghiệp"),
-                    new("RTG-02", "Cẩu Bánh Lốp RTG 02", "RTG", "A01", "working", "Đang thực hiện nâng hạ container TSK-0804") { OperatorName = "Phạm Văn Cần" },
-                    new("RTG-03", "Cẩu Bánh Lốp RTG 03", "RTG", "B02", "maintenance", "Đang bảo dưỡng định kỳ hệ thống thủy lực"),
-                    new("QC-01", "Cẩu Bờ Panamax QC 01", "QC", "A01", "available", "Cẩu bờ chuyên dỡ container từ tàu"),
-                    new("RS-01", "Xe Nâng Chụp Reach Stacker 01", "ReachStacker", "C01", "available", "Xe nâng chụp Kalmar 45 tấn")
-                };
-                await _context.Set<NexusPort.Modules.Equipment.Domain.Entities.Equipment>().AddRangeAsync(equipments, cancellationToken);
-                await _context.SaveChangesAsync(cancellationToken);
-            }
-
-            // 2. Seed Containers nếu chưa có
-            var contCount = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>().CountAsync(cancellationToken);
-            if (contCount == 0)
-            {
-                var containers = new List<NexusPort.Modules.Container.Domain.Entities.Container>
-                {
-                    new("TEMU4451920", "in_transit") { Description = "Hàng Linh Kiện Điện Tử - 40HC", SealNumber = "SEAL-VN-889922", CargoType = "dry" },
-                    new("CMAU3381920", "in_transit") { Description = "Hàng May Mặc Xuất Khẩu - 20GP", SealNumber = "SEAL-VN-998811", CargoType = "dry" },
-                    new("ONEU8821903", "in_transit") { Description = "Trái Cây Nhập Khẩu - 40RF", SealNumber = "SEAL-TH-445566", CargoType = "reefer" },
-                    new("HLCU7719204", "in_transit") { Description = "Hóa Chất Công Nghiệp - 20TK", SealNumber = "SEAL-DE-112288", CargoType = "tank" },
-                    new("MAEU5519205", "in_transit") { Description = "Thiết Bị Điện Tử Viễn Thông - 40HC", SealNumber = "SEAL-DK-990033", CargoType = "dry" },
-                    new("MSCU9901123", "In_Yard") { Description = "Thủy Hải Sản Đông Lạnh (-20°C) - 40RF", SealNumber = "SEAL-RF-554411", CargoType = "reefer" },
-                    new("COSU8819201", "In_Yard") { Description = "Hàng Công Nghiệp Tiêu Dùng - 40HC", SealNumber = "SEAL-COS-11223", CargoType = "dry" },
-                    new("EVER1129983", "In_Yard") { Description = "Hóa Chất Đóng Can (Class 3) - 20GP", SealNumber = "SEAL-EV-778899", CargoType = "dry" }
-                };
-                await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>().AddRangeAsync(containers, cancellationToken);
-                await _context.SaveChangesAsync(cancellationToken);
-            }
-
-            // 3. Seed YardTasks nếu chưa có hoặc số lượng ít hơn 6
-            var count = await _context.Set<YardTask>().CountAsync(cancellationToken);
-            if (count < 6)
-            {
-                var existingCodes = await _context.Set<YardTask>()
-                    .Select(t => t.TaskCode)
-                    .ToListAsync(cancellationToken);
-
-                var sampleTasks = new List<YardTask>
-                {
-                    // [HÀNG CHỜ TIẾP NHẬN 1]: Test [3] Đối soát Seal & Tiếp Nhận Bãi (NXP-055)
-                    new(
-                        "TSK-0801",
-                        "TEMU4451920",
-                        "A01",
-                        "Hạ Bãi Nhập",
-                        "Cầu Tàu B-02",
-                        "A01-04-02-1",
-                        "High",
-                        "Assigned",
-                        "40FT HC",
-                        "Hàng Linh Kiện Điện Tử",
-                        "51C-889.12",
-                        "Nguyễn Văn Bình",
-                        DateTime.UtcNow.AddMinutes(30),
-                        "Xe cont đang di chuyển từ cầu tàu về bãi A01"
-                    )
-                    {
-                        ExpectedSealNo = "SEAL-VN-889922",
-                        AssignedBy = "dispatcher01"
-                    },
-
-                    // [HÀNG CHỜ TIẾP NHẬN 2]: Test [3] Đối soát Seal & Tiếp Nhận Bãi (NXP-055)
-                    new(
-                        "TSK-0802",
-                        "CMAU3381920",
-                        "B02",
-                        "Hạ Bãi Nhập",
-                        "Cổng In-Gate 02",
-                        "B02-02-05-2",
-                        "Normal",
-                        "Assigned",
-                        "20FT ST",
-                        "Hàng May Mặc Xuất Khẩu",
-                        "50H-912.44",
-                        "Trần Hoàng Nam",
-                        DateTime.UtcNow.AddMinutes(45),
-                        "Xe qua trạm cân Gate, đang xếp hàng chờ nhận tại bãi B02"
-                    )
-                    {
-                        ExpectedSealNo = "SEAL-VN-998811",
-                        AssignedBy = "dispatcher01"
-                    },
-
-                    // [HÀNG CHỜ TIẾP NHẬN 3]: Test [3] Đối soát cont lạnh Reefer
-                    new(
-                        "TSK-0806",
-                        "ONEU8821903",
-                        "C01",
-                        "Hạ Bãi Nhập",
-                        "Cầu Tàu B-01",
-                        "C01-02-04-2",
-                        "Critical",
-                        "Assigned",
-                        "40FT RF",
-                        "Trái Cây Nhập Khẩu Thái Lan (-18°C)",
-                        "51D-992.12",
-                        "Lê Văn Cường",
-                        DateTime.UtcNow.AddMinutes(20),
-                        "Xe cont lạnh dỡ từ tàu ONE APUS, cần cắm điện bãi C01 khẩn"
-                    )
-                    {
-                        ExpectedSealNo = "SEAL-TH-445566",
-                        AssignedBy = "dispatcher01"
-                    },
-
-                    // [HÀNG CHỜ TIẾP NHẬN 4]: Test [3] Đối soát xe từ Cổng In-Gate
-                    new(
-                        "TSK-0807",
-                        "HLCU7719204",
-                        "B02",
-                        "Hạ Bãi Nhập",
-                        "Cổng In-Gate 01",
-                        "B02-04-01-1",
-                        "High",
-                        "Assigned",
-                        "20FT TANK",
-                        "Hóa Chất Công Nghiệp Lỏng",
-                        "60C-334.88",
-                        "Vũ Văn Tuấn",
-                        DateTime.UtcNow.AddMinutes(35),
-                        "Xe bồn hóa chất chuyên dụng đã hoàn tất thủ tục hải quan tại cổng"
-                    )
-                    {
-                        ExpectedSealNo = "SEAL-DE-112288",
-                        AssignedBy = "dispatcher01"
-                    },
-
-                    // [HÀNG CHỜ TIẾP NHẬN 5]: Test [3] Đối soát cont máy móc
-                    new(
-                        "TSK-0808",
-                        "MAEU5519205",
-                        "A01",
-                        "Hạ Bãi Nhập",
-                        "Cầu Tàu B-03",
-                        "A01-05-02-3",
-                        "Normal",
-                        "Assigned",
-                        "40FT HC",
-                        "Thiết Bị Điện Tử Viễn Thông",
-                        "29H-772.19",
-                        "Ngô Thanh Tùng",
-                        DateTime.UtcNow.AddMinutes(50),
-                        "Xe cont đang trên đường từ bến 03 về bãi A01"
-                    )
-                    {
-                        ExpectedSealNo = "SEAL-DK-990033",
-                        AssignedBy = "dispatcher01"
-                    },
-
-                    // GIAI ĐOẠN 2 & 4 (Bước 1): ĐÃ GÁN CẨU (Ready) -> Test [4] Bắt Đầu Cẩu (NXP-060 Bước 1)
-                    new(
-                        "TSK-0803",
-                        "MSCU9901123",
-                        "A01",
-                        "Đảo Chuyển Bãi",
-                        "A01-01-02-3",
-                        "A01-05-01-1",
-                        "Critical",
-                        "Ready",
-                        "40FT RF",
-                        "Thủy Hải Sản Đông Lạnh (-20°C)",
-                        "51D-771.88",
-                        "Lê Quốc Bảo",
-                        DateTime.UtcNow.AddMinutes(15),
-                        "Đã kiểm tra chốt chì, cần thủ RTG-01 đã vào cabin sẵn sàng cẩu"
-                    )
-                    {
-                        EquipmentCode = "RTG-01",
-                        EquipmentType = "RTG",
-                        OperatorName = "Trần Văn Hùng",
-                        ExpectedSealNo = "SEAL-RF-554411",
-                        ActualSealNo = "SEAL-RF-554411",
-                        Condition = "Good",
-                        ReceivedAt = DateTime.UtcNow.AddMinutes(-15),
-                        ReceivedBy = "yard01"
-                    },
-
-                    // GIAI ĐOẠN 4 (Bước 2): ĐANG CẨU (In_Progress) -> Test [4] Hoàn Tất Tác Nghiệp Bãi (NXP-060 Bước 3)
-                    new(
-                        "TSK-0804",
-                        "COSU8819201",
-                        "A01",
-                        "Xuất Bãi Giao Xe",
-                        "A01-03-04-2",
-                        "GATE-OUT-01",
-                        "High",
-                        "In_Progress",
-                        "40FT HC",
-                        "Hàng Công Nghiệp Tiêu Dùng",
-                        "59C-334.90",
-                        "Vũ Đức Thịnh",
-                        DateTime.UtcNow.AddMinutes(20),
-                        "Cần thủ RTG-02 đang hạ cont lên rơ-moóc xe 59C-334.90"
-                    )
-                    {
-                        EquipmentCode = "RTG-02",
-                        EquipmentType = "RTG",
-                        OperatorName = "Phạm Văn Cần",
-                        ExpectedSealNo = "SEAL-COS-11223",
-                        ActualSealNo = "SEAL-COS-11223",
-                        Condition = "Good",
-                        ReceivedAt = DateTime.UtcNow.AddMinutes(-30),
-                        ReceivedBy = "yard01",
-                        StartTime = DateTime.UtcNow.AddMinutes(-7)
-                    },
-
-                    // ĐÃ HOÀN THÀNH (Completed)
-                    new(
-                        "TSK-0805",
-                        "EVER1129983",
-                        "B02",
-                        "Hạ Bãi Nhập",
-                        "Cầu Tàu B-01",
-                        "B02-DG-01-1",
-                        "Normal",
-                        "Completed",
-                        "20FT ST",
-                        "Hóa Chất Đóng Can (Class 3)",
-                        "60C-123.45",
-                        "Đặng Văn Lâm",
-                        DateTime.UtcNow.AddHours(-2),
-                        "Đã hạ cont an toàn vào khu vực bãi cách ly hóa chất nguy hiểm"
-                    )
-                    {
-                        EquipmentCode = "RTG-03",
-                        EquipmentType = "RTG",
-                        OperatorName = "Trần Văn Hùng",
-                        ExpectedSealNo = "SEAL-EV-778899",
-                        ActualSealNo = "SEAL-EV-778899",
-                        Condition = "Good",
-                        ReceivedAt = DateTime.UtcNow.AddHours(-2),
-                        ReceivedBy = "yard01",
-                        StartTime = DateTime.UtcNow.AddMinutes(-110),
-                        EndTime = DateTime.UtcNow.AddMinutes(-100),
-                        CompletedLocation = "B02-DG-01-1"
-                    },
-
-                    // [NXP-119]: Lệnh chuyển container giữa các Block
-                    new(
-                        "MOV-1024",
-                        "MSCU1234567",
-                        "B02",
-                        "Relocate",
-                        "A01-03-12-2",
-                        "B02-02-08-3",
-                        "High",
-                        "Assigned",
-                        "40FT HC",
-                        "Hàng May Mặc Tái Cơ Cấu",
-                        null,
-                        null,
-                        DateTime.UtcNow.AddHours(2),
-                        "Chuyển bãi tái cơ cấu xếp tầng",
-                        350000,
-                        "Tái cơ cấu xếp bãi"
-                    )
-                    {
-                        AssignedBy = "Operator - Nguyễn Văn Q"
-                    },
-                    new(
-                        "MOV-1025",
-                        "TEMU8822190",
-                        "B02",
-                        "Relocate",
-                        "B02-01-02-1",
-                        "A01-05-02-1",
-                        "Critical",
-                        "Assigned",
-                        "40FT HC",
-                        "Hàng Xuất Khẩu Khẩn",
-                        null,
-                        null,
-                        DateTime.UtcNow.AddMinutes(45),
-                        "Chuẩn bị xuất cổng khẩn theo booking",
-                        550000,
-                        "Chuẩn bị xuất cổng khẩn"
-                    )
-                    {
-                        AssignedBy = "Operator - Nguyễn Văn Q"
-                    },
-                    new(
-                        "MOV-1022",
-                        "CMAU9918234",
-                        "A01",
-                        "Relocate",
-                        "A01-01-05-3",
-                        "A01-01-01-1",
-                        "Medium",
-                        "In_Progress",
-                        "20FT ST",
-                        "Hàng Bách Hóa",
-                        null,
-                        null,
-                        DateTime.UtcNow.AddHours(1),
-                        "Đảo tầng cẩu bãi giải phóng cont bên dưới",
-                        0,
-                        "Đảo tầng cẩu bãi"
-                    )
-                    {
-                        AssignedBy = "Điều phối viên",
-                        EquipmentCode = "RTG-01",
-                        EquipmentType = "RTG",
-                        OperatorName = "Trần Văn Hùng",
-                        StartTime = DateTime.UtcNow.AddMinutes(-15)
-                    },
-                    new(
-                        "MOV-1020",
-                        "COSU8819201",
-                        "B02",
-                        "Relocate",
-                        "A01-02-04-2",
-                        "B02-03-01-1",
-                        "Normal",
-                        "Completed",
-                        "40FT HC",
-                        "Hàng Công Nghiệp Tiêu Dùng",
-                        null,
-                        null,
-                        DateTime.UtcNow.AddHours(-1),
-                        "Chuyển kho bãi lưu trữ dài hạn",
-                        0,
-                        "Tái cơ cấu xếp bãi"
-                    )
-                    {
-                        AssignedBy = "Operator - Lê Văn Hoàng",
-                        EquipmentCode = "RTG-02",
-                        EquipmentType = "RTG",
-                        OperatorName = "Phạm Văn Cần",
-                        StartTime = DateTime.UtcNow.AddMinutes(-50),
-                        EndTime = DateTime.UtcNow.AddMinutes(-32),
-                        CompletedLocation = "B02-03-01-1"
-                    }
-                };
-
-                var tasksToAdd = sampleTasks.Where(s => !existingCodes.Contains(s.TaskCode)).ToList();
-                if (tasksToAdd.Count > 0)
-                {
-                    await _context.Set<YardTask>().AddRangeAsync(tasksToAdd, cancellationToken);
-                    await _context.SaveChangesAsync(cancellationToken);
-                }
-            }
-
+            // Production data is entered through real workflows; never seed on reads.
             _tableEnsured = true;
         }
         catch (Exception ex)

@@ -53,44 +53,25 @@ export class ContainerIntakeRepository {
                 throw new AppError('Hàng đông lạnh phải dùng Container lạnh.', 422, 'REEFER_TYPE_REQUIRED');
             if (type.max_gross_weight_kg != null && row.grossWeightKg != null && row.grossWeightKg > Number(type.max_gross_weight_kg))
                 throw new AppError('Khối lượng vượt giới hạn của loại Container.', 422, 'CONTAINER_WEIGHT_EXCEEDED');
-            const inserted = await client.query(`INSERT INTO containers(container_type_id,container_no,cargo_type,status,gross_weight_kg,required_power_kw,is_reefer,is_dangerous,is_perishable,is_oversized)
-         VALUES($1,$2,$3,'expected',$4,$5,$6,$7,$8,$9) ON CONFLICT(container_no) DO NOTHING RETURNING id`, [type.id, row.containerNumber, row.cargoType, row.grossWeightKg ?? null, row.requiredPowerKw ?? null, type.category === 'reefer', row.cargoType === 'dangerous', row.cargoType === 'perishable', row.cargoType === 'oversized']);
+            const inserted = await client.query(`INSERT INTO containers(container_type_id,container_no,status,is_reefer)
+              VALUES($1,$2,'expected',$3) ON CONFLICT(container_no) DO NOTHING RETURNING id`, [type.id,row.containerNumber,type.category==='reefer']);
             const createdMaster = Boolean(inserted.rows[0]);
-            const locked = await client.query('SELECT id,container_type_id,status FROM containers WHERE container_no=$1 FOR UPDATE', [row.containerNumber]);
-            const container = locked.rows[0];
-            if (String(container.container_type_id) !== String(type.id))
-                throw new AppError('Container đã tồn tại với loại khác.', 409, 'CONTAINER_TYPE_MISMATCH');
-            const existing = await client.query(`SELECT id, declared_by, visit_status, booking_id FROM container_visits WHERE container_id=$1
-         AND visit_status IN ('planned','active') ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, [container.id]);
-            const visit = existing.rows[0];
-            if (!visit && ['gate_in', 'in_yard', 'reserved', 'moving', 'discharged', 'damaged'].includes(container.status)) {
-                throw new AppError('Container đang được vận hành trong kho bãi. Không thể tạo khai báo mới.', 409, 'DECLARATION_IN_USE');
-            }
-            if (visit && String(visit.declared_by) !== userId)
-                throw new AppError('Container đang có lượt khai báo của tài khoản khác.', 409, 'CONTAINER_DECLARATION_CONFLICT');
-            const booked = await client.query(`SELECT 1 FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id WHERE bc.container_id=$1 AND lower(b.status::text) NOT IN ('completed','canceled','cancelled','rejected','expired') LIMIT 1`, [container.id]);
-            if (booked.rowCount || (visit && (visit.visit_status !== 'planned' || visit.booking_id)))
-                throw new AppError('Container đã có Booking hoặc đang trong bãi. Không thể sửa khai báo.', 409, 'DECLARATION_IN_USE');
-            let visitId: string;
-            let status: ContainerIntakeResult['status'];
-            const values = [row.loadStatus, row.cargoType, row.grossWeightKg ?? null, row.requiredPowerKw ?? null, row.customerName ?? null, row.sealNumber ?? null];
-            if (visit) {
-                visitId = String(visit.id);
-                const updated = await client.query(`UPDATE container_visits SET load_status=$2,cargo_type=$3,gross_weight_kg=$4,required_power_kw=$5,customer_name=$6,seal_number=$7,updated_at=now()
-           WHERE id=$1 AND (load_status,cargo_type,gross_weight_kg,required_power_kw,customer_name,seal_number)
-            IS DISTINCT FROM ($2::varchar,$3::cargo_type,$4::numeric,$5::numeric,$6::varchar,$7::varchar) RETURNING id`, [visitId, ...values]);
-                status = updated.rowCount ? 'updated_visit' : 'duplicate';
-            }
-            else {
-                visitId = randomUUID();
-                await client.query(`INSERT INTO container_visits(id,visit_reference,container_id,load_status,cargo_type,gross_weight_kg,required_power_kw,customer_name,seal_number,source_type,declared_by,import_batch_id,source_row_number,data_status)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'transport_company',$10,$11,$12,NULL)`, [visitId, 'YARD-' + visitId, container.id, ...values, userId, batchId ?? null, rowNumber ?? null]);
-                status = createdMaster ? 'created_master' : 'created_visit';
-            }
-            // Booking and inventory read the physical master; persist the same cargo/power there.
-            await client.query(`UPDATE containers SET cargo_type=$2,gross_weight_kg=$3,required_power_kw=$4,is_reefer=$5,is_dangerous=$6,is_perishable=$7,is_oversized=$8,seal_no=$10,status=CASE WHEN $9::boolean THEN 'expected'::container_status ELSE status END,arrived_at=CASE WHEN $9::boolean THEN NULL ELSE arrived_at END,left_at=CASE WHEN $9::boolean THEN NULL ELSE left_at END,updated_at=now() WHERE id=$1`, [container.id, row.cargoType, row.grossWeightKg ?? null, row.requiredPowerKw ?? null, type.category === 'reefer', row.cargoType === 'dangerous', row.cargoType === 'perishable', row.cargoType === 'oversized', !visit, row.sealNumber ?? null]);
+            const container = (await client.query('SELECT id,container_type_id FROM containers WHERE container_no=$1 FOR UPDATE',[row.containerNumber])).rows[0];
+            if (String(container.container_type_id)!==String(type.id))
+              throw new AppError('Container đã tồn tại với loại khác. Hãy dùng loại đã đăng ký.',409,'CONTAINER_TYPE_MISMATCH');
+            const memberships = await client.query('SELECT carrier_id FROM carrier_users WHERE user_id=$1',[userId]);
+            if(memberships.rows.length!==1) throw new AppError('Tài khoản cần thuộc đúng một công ty vận tải để khai báo.',403,'CARRIER_MEMBERSHIP_REQUIRED');
+            const values=[container.id,userId,memberships.rows[0].carrier_id,row.loadStatus,row.cargoType,row.grossWeightKg??null,row.requiredPowerKw??null,row.customerName??null,row.sealNumber??null];
+            const duplicate=await client.query(`SELECT d.id FROM container_declarations d WHERE
+              (container_id,declared_by,carrier_id,load_status,cargo_type,gross_weight_kg,required_power_kw,customer_name,seal_number)
+              IS NOT DISTINCT FROM ($1::uuid,$2::uuid,$3::uuid,$4::varchar,$5::cargo_type,$6::numeric,$7::numeric,$8::varchar,$9::varchar)
+              AND NOT EXISTS(SELECT 1 FROM booking_containers bc WHERE bc.declaration_id=d.id) LIMIT 1`,values);
+            const declarationId=duplicate.rows[0]?.id??randomUUID();
+            if(!duplicate.rows[0]) await client.query(`INSERT INTO container_declarations(id,container_id,declared_by,carrier_id,load_status,cargo_type,gross_weight_kg,required_power_kw,customer_name,seal_number,import_batch_id,source_row_number)
+              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,[declarationId,...values,batchId??null,rowNumber??null]);
+            const status: ContainerIntakeResult['status']=duplicate.rows[0]?'duplicate':createdMaster?'created_master':'created_visit';
             await client.query('COMMIT');
-            return { rowNumber: rowNumber ?? 1, containerNumber: row.containerNumber, status, containerId: String(container.id), visitId, errors: [] };
+            return { rowNumber: rowNumber ?? 1, containerNumber: row.containerNumber, status, containerId: String(container.id), declarationId: String(declarationId), errors: [] };
         }
         catch (error) {
             await client.query('ROLLBACK');
@@ -108,17 +89,27 @@ export class ContainerIntakeRepository {
          FROM container_import_batches ORDER BY created_at DESC LIMIT $1`, [limit]);
         return result.rows as ContainerImportBatchSummary[];
     }
-    async listTransportDeclarations(userId: string): Promise<TransportContainerDeclaration[]> {
-        const result = await query(`SELECT cv.id, c.id AS "containerId", c.container_no AS "containerNumber",
+    async listTransportDeclarations(userId: string, containerNumber = ''): Promise<TransportContainerDeclaration[]> {
+        const result = await query(`SELECT cv.id, EXISTS(SELECT 1 FROM booking_containers bc WHERE bc.declaration_id=cv.id) AS "isBooked", c.id AS "containerId", c.container_no AS "containerNumber",
               ct.code AS "containerTypeCode", ct.description AS "containerTypeDescription",
               cv.seal_number AS "sealNumber", cv.load_status AS "loadStatus", cv.cargo_type AS "cargoType", cargo.name_vi AS "cargoTypeName",
               cv.gross_weight_kg::float8 AS "grossWeightKg", cv.required_power_kw::float8 AS "requiredPowerKw",
               cv.customer_name AS "customerName",
-              cv.created_at AS "createdAt", cv.updated_at AS "updatedAt"
-         FROM container_visits cv JOIN containers c ON c.id=cv.container_id
+              cv.created_at AS "createdAt", cv.updated_at AS "updatedAt",
+              COALESCE((SELECT json_agg(json_build_object('id',b.id,'bookingCode',b.booking_code,
+                'bookingType',b.booking_type,'status',b.status,
+                'isDeclarationBooking',bc.declaration_id=cv.id) ORDER BY b.appointment_start,b.id)
+                FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id
+                WHERE bc.container_id=cv.container_id
+                  AND (bc.declaration_id=cv.id OR bc.container_visit_id IN (
+                    SELECT original.container_visit_id FROM booking_containers original
+                    WHERE original.declaration_id=cv.id AND original.container_visit_id IS NOT NULL))
+                  AND EXISTS(SELECT 1 FROM carrier_users member
+                    WHERE member.user_id=$1 AND member.carrier_id=b.carrier_id)), '[]'::json) AS bookings
+         FROM container_declarations cv JOIN containers c ON c.id=cv.container_id
          JOIN container_types ct ON ct.id=c.container_type_id
          LEFT JOIN container_cargo_types cargo ON cargo.code=cv.cargo_type
-        WHERE cv.source_type='transport_company' AND cv.declared_by=$1 ORDER BY cv.created_at DESC`, [userId]);
+        WHERE (cv.declared_by=$1 OR EXISTS(SELECT 1 FROM carrier_users cu WHERE cu.user_id=$1 AND cu.carrier_id=cv.carrier_id)) AND c.container_no LIKE $2 ORDER BY cv.created_at DESC LIMIT 50`, [userId,containerNumber.toUpperCase()+'%']);
         return result.rows as TransportContainerDeclaration[];
     }
 }

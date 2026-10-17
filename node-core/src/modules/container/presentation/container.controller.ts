@@ -1,3 +1,4 @@
+import { ContainerJourneyRepository } from '../infrastructure/container-journey.repository';
 import { NextFunction, Request, Response, Router } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import multer from 'multer';
@@ -104,7 +105,8 @@ export class ContainerController {
     };
     listTransportDeclarations = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
         try {
-            sendSuccess(res, await this.intakeService.listTransportDeclarations(req.containerUser!.id));
+            if (!/^[A-Z0-9]{4,11}$/.test(String(req.query.containerNumber??'').trim().toUpperCase())) throw new ValidationError('Nhập số Container để tìm bản khai.');
+            sendSuccess(res, await this.intakeService.listTransportDeclarations(req.containerUser!.id, String(req.query.containerNumber ?? '')));
         }
         catch (error) {
             next(error);
@@ -112,6 +114,7 @@ export class ContainerController {
     };
     getAll = async (req: Request, res: Response, next: NextFunction) => {
         try {
+            if (String(req.query.search??'').trim().length<4) throw new ValidationError('Nhập điều kiện trước khi tìm kiếm Container.');
             sendSuccess(res, await this.service.getAll(parse(containerSearchSchema, req.query) as ContainerSearchDto));
         }
         catch (error) {
@@ -171,6 +174,7 @@ export class ContainerController {
         try {
             const id = parse(idSchema, req.params.id);
             const dto = parse(transitionContainerStatusSchema, req.body);
+            if (['gate_in','gate_out'].includes(dto.status)) throw new ValidationError('Ghi nhận vào/ra qua nghiệp vụ cổng gắn với đúng booking và lượt bãi.');
             sendSuccess(res, await this.statusService.transition(id, dto.status, req.containerUser!.id, req.ip));
         }
         catch (error) {
@@ -195,10 +199,38 @@ export const createContainerRouter = (): Router => {
     router.get('/intake/transport/template', allowRoles('Carrier'), controller.downloadTemplate);
     router.post('/intake/transport/manual', allowRoles('Carrier'), controller.createTransportIntake);
     router.post('/intake/transport/import', allowRoles('Carrier'), upload.single('file'), controller.importTransportExcel);
-    router.get('/', allowRoles(...readers), controller.getAll);
-    router.get('/:id/status/history', allowRoles(...readers), controller.getStatusHistory);
-    router.get('/:id/status', allowRoles(...readers), controller.getCurrentStatus);
+    const journeys = new ContainerJourneyRepository();
+    router.get('/lookup', allowRoles(...readers), async (req,res,next) => {
+      try { sendSuccess(res,await journeys.lookup(String(req.query.containerNumber??'').trim().toUpperCase())); } catch(e){next(e);}
+    });
+    router.get('/journeys', allowRoles(...readers), async (req: AuthorizedRequest,res,next) => {
+      try { sendSuccess(res,await journeys.search(req.query,req.containerUser!.role==='Carrier'?req.containerUser!.id:undefined)); } catch(e){next(e);}
+    });
+    router.get('/own-visits/:id', allowRoles('Carrier'), async (req: AuthorizedRequest,res,next) => {
+      try { sendSuccess(res,await journeys.ownVisits(parse(idSchema,req.params.id),req.containerUser!.id)); } catch(e){next(e);}
+    });
+    router.get('/legacy-bookings',allowRoles('Administrator','Dispatcher'),async(req,res,next)=>{
+      try{sendSuccess(res,await journeys.legacyBookings(String(req.query.containerNumber??'').trim().toUpperCase()));}catch(e){next(e);}
+    });
+    router.get('/legacy-bookings/:id/options',allowRoles('Administrator','Dispatcher'),async(req,res,next)=>{
+      try{sendSuccess(res,await journeys.legacyOptions(parse(idSchema,req.params.id),parse(idSchema,req.query.containerId)));}catch(e){next(e);}
+    });
+    router.post('/legacy-bookings/:id/link',allowRoles('Administrator','Dispatcher'),async(req:AuthorizedRequest,res,next)=>{
+      try{sendSuccess(res,await journeys.reconcile(parse(idSchema,req.params.id),parse(idSchema,req.body.containerId),parse(idSchema,req.body.declarationId),req.body.visitId?parse(idSchema,req.body.visitId):null,req.containerUser!.id));}catch(e){next(e);}
+    });
+    router.get('/gates',allowRoles('Administrator','Dispatcher','Gate Officer'),async(_req,res,next)=>{
+      try{const {query}=await import('../../../infrastructure/database/db');sendSuccess(res,(await query('SELECT id,code,name FROM gates WHERE is_active ORDER BY code')).rows);}catch(e){next(e);}
+    });
+    router.get('/access-carriers',allowRoles('Administrator','Dispatcher'),async(req,res,next)=>{
+      try{sendSuccess(res,await journeys.carriers(String(req.query.search??'')));}catch(e){next(e);}
+    });
+    router.post('/visits/:id/access',allowRoles('Administrator','Dispatcher'),async(req:AuthorizedRequest,res,next)=>{
+      try{sendSuccess(res,await journeys.grantVisit(parse(idSchema,req.params.id),parse(idSchema,req.body.carrierId),req.containerUser!.id));}catch(e){next(e);}
+    });
+    router.get('/', allowRoles('Administrator','Dispatcher','Yard Staff','Gate Officer'), controller.getAll);
+    router.get('/:id/status/history', allowRoles('Administrator','Dispatcher','Yard Staff','Gate Officer'), controller.getStatusHistory);
+    router.get('/:id/status', allowRoles('Administrator','Dispatcher','Yard Staff','Gate Officer'), controller.getCurrentStatus);
     router.post('/:id/status/transition', allowRoles(...writers), controller.transitionStatus);
-    router.get('/:id', allowRoles(...readers), controller.getById);
+    router.get('/:id', allowRoles('Administrator','Dispatcher','Yard Staff','Gate Officer'), controller.getById);
     return router;
 };

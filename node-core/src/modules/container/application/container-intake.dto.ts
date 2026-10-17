@@ -16,6 +16,7 @@ export interface ContainerIntakeResult {
     status: 'created_master' | 'created_visit' | 'updated_visit' | 'duplicate' | 'rejected';
     containerId?: string;
     visitId?: string;
+    declarationId?: string;
     errors: string[];
 }
 export interface ContainerImportBatchSummary {
@@ -32,6 +33,13 @@ export interface ContainerImportBatchSummary {
 }
 export interface TransportContainerDeclaration {
     id: string;
+    bookings: {
+        id: string;
+        bookingCode: string;
+        bookingType: 'dropoff' | 'pickup';
+        status: string;
+        isDeclarationBooking: boolean;
+    }[];
     containerId: string;
     containerNumber: string;
     containerTypeCode: string;

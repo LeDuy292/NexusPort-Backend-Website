@@ -6,6 +6,8 @@ public class BookingContainer
     public Booking? Booking { get; set; }
 
     public Guid ContainerId { get; set; }
+    public Guid? DeclarationId { get; set; }
+    public Guid? ContainerVisitId { get; set; }
     public string? Note { get; set; }
 
     public BookingContainer() { }
