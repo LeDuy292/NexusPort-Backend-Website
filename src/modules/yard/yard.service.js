@@ -1,6 +1,7 @@
 'use strict';
 
 const { Op } = require('sequelize');
+const { validate: isUuid } = require('uuid');
 const { YardGateOutRequest } = require('../../models/YardGateOutRequest');
 const { TransportTrip } = require('../../models/TransportTrip');
 const {
@@ -169,10 +170,42 @@ async function getGateOutRequests({ status, search, urgency, page = 1, limit = 2
 }
 
 /**
+ * Tìm bản ghi yêu cầu xuất cont an toàn, hỗ trợ cả UUID và mã định danh container / GOR legacy.
+ */
+async function findGateOutRequest(id) {
+  if (!id) return null;
+
+  // 1. Nếu là UUID hợp lệ -> tìm theo Primary Key
+  if (isUuid(String(id))) {
+    const byPk = await YardGateOutRequest.findByPk(id);
+    if (byPk) return byPk;
+  }
+
+  // 2. Tra cứu seed mapping nếu id dạng GOR-001, GOR-002, GOR-003
+  const seedMap = {
+    'GOR-001': 'CAIU1234567',
+    'GOR-002': 'HLBU7781920',
+    'GOR-003': 'ONEY3399102',
+    'GOR-004': 'MSCU9901123',
+  };
+  const targetContId = seedMap[id] || id;
+
+  // 3. Tìm theo container_id hoặc booking_code
+  return YardGateOutRequest.findOne({
+    where: {
+      [Op.or]: [
+        { container_id: targetContId },
+        { booking_code: targetContId },
+      ],
+    },
+  });
+}
+
+/**
  * Lấy chi tiết 1 yêu cầu xuất container theo ID.
  */
 async function getGateOutRequestById(id) {
-  const request = await YardGateOutRequest.findByPk(id);
+  const request = await findGateOutRequest(id);
   if (!request) {
     const err = new Error('Không tìm thấy yêu cầu xuất container bãi.');
     err.statusCode = 404;
@@ -185,7 +218,7 @@ async function getGateOutRequestById(id) {
  * Tạo / gán lệnh cẩu RTG cho yêu cầu xuất bãi (Bắt đầu pickup container).
  */
 async function createLiftOrder(id, { rtgCrane, rtgOperator }, userId) {
-  const request = await YardGateOutRequest.findByPk(id);
+  const request = await findGateOutRequest(id);
   if (!request) {
     const err = new Error('Không tìm thấy yêu cầu xuất container.');
     err.statusCode = 404;
@@ -208,7 +241,7 @@ async function createLiftOrder(id, { rtgCrane, rtgOperator }, userId) {
  * Cập nhật bước tiến trình cẩu container (vd: Đến vị trí, Bắt đầu đối soát).
  */
 async function updateFlowStep(id, { step, note }, userId) {
-  const request = await YardGateOutRequest.findByPk(id);
+  const request = await findGateOutRequest(id);
   if (!request) {
     const err = new Error('Không tìm thấy yêu cầu xuất container.');
     err.statusCode = 404;
@@ -242,7 +275,7 @@ async function updateFlowStep(id, { step, note }, userId) {
  * - Gửi thông báo cho Gate Staff và Driver
  */
 async function confirmLoadedOnTruck(id, verifyData = {}, userId) {
-  const request = await YardGateOutRequest.findByPk(id);
+  const request = await findGateOutRequest(id);
   if (!request) {
     const err = new Error('Không tìm thấy yêu cầu xuất container.');
     err.statusCode = 404;
