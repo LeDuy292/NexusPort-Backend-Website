@@ -39,18 +39,33 @@ public class DriverController : ControllerBase
         if (Guid.TryParse(userIdStr, out var userId))
         {
             var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-            using var cmd = db.Database.GetDbConnection().CreateCommand();
-            if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
-                db.Database.GetDbConnection().Open();
-            cmd.CommandText = "SELECT carrier_id FROM carrier_users WHERE user_id = @userId LIMIT 1";
-            var param = cmd.CreateParameter();
-            param.ParameterName = "@userId";
-            param.Value = userId;
-            cmd.Parameters.Add(param);
-            var result = cmd.ExecuteScalar();
-            if (result != null && Guid.TryParse(result.ToString(), out var dbCarrierId))
+            var conn = db.Database.GetDbConnection();
+            bool opened = false;
+            if (conn.State != System.Data.ConnectionState.Open)
             {
-                return dbCarrierId;
+                db.Database.OpenConnection();
+                opened = true;
+            }
+            try
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = "SELECT carrier_id FROM carrier_users WHERE user_id = @userId LIMIT 1";
+                var param = cmd.CreateParameter();
+                param.ParameterName = "@userId";
+                param.Value = userId;
+                cmd.Parameters.Add(param);
+                var result = cmd.ExecuteScalar();
+                if (result != null && Guid.TryParse(result.ToString(), out var dbCarrierId))
+                {
+                    return dbCarrierId;
+                }
+            }
+            finally
+            {
+                if (opened)
+                {
+                    db.Database.CloseConnection();
+                }
             }
         }
         return null;
@@ -273,24 +288,37 @@ public class DriverController : ControllerBase
 
         // Map Carrier Name
         var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-        using var command = db.Database.GetDbConnection().CreateCommand();
-        if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+        var conn = db.Database.GetDbConnection();
+        bool openedByUs = false;
+        if (conn.State != System.Data.ConnectionState.Open)
         {
             await db.Database.OpenConnectionAsync(cancellationToken);
+            openedByUs = true;
         }
-        command.CommandText = "SELECT id, company_name FROM carriers";
-        using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        var carrierMap = new Dictionary<Guid, string>();
-        while (await reader.ReadAsync(cancellationToken))
+        try
         {
-            carrierMap[reader.GetGuid(0)] = reader.GetString(1);
-        }
-
-        foreach(var item in items)
-        {
-            if (carrierMap.TryGetValue(item.CarrierId, out var cName))
+            using var command = conn.CreateCommand();
+            command.CommandText = "SELECT id, company_name FROM carriers";
+            using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var carrierMap = new Dictionary<Guid, string>();
+            while (await reader.ReadAsync(cancellationToken))
             {
-                item.CarrierName = cName;
+                carrierMap[reader.GetGuid(0)] = reader.GetString(1);
+            }
+
+            foreach(var item in items)
+            {
+                if (carrierMap.TryGetValue(item.CarrierId, out var cName))
+                {
+                    item.CarrierName = cName;
+                }
+            }
+        }
+        finally
+        {
+            if (openedByUs)
+            {
+                await db.Database.CloseConnectionAsync();
             }
         }
 
@@ -325,15 +353,28 @@ public class DriverController : ControllerBase
             else
             {
                 var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-                if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                var conn = db.Database.GetDbConnection();
+                bool openedByUs = false;
+                if (conn.State != System.Data.ConnectionState.Open)
                 {
                     await db.Database.OpenConnectionAsync(cancellationToken);
+                    openedByUs = true;
                 }
                 object result;
-                using (var command = db.Database.GetDbConnection().CreateCommand())
+                try
                 {
-                    command.CommandText = "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1";
-                    result = await command.ExecuteScalarAsync(cancellationToken);
+                    using (var command = conn.CreateCommand())
+                    {
+                        command.CommandText = "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1";
+                        result = await command.ExecuteScalarAsync(cancellationToken);
+                    }
+                }
+                finally
+                {
+                    if (openedByUs)
+                    {
+                        await db.Database.CloseConnectionAsync();
+                    }
                 }
                 if (result == null) 
                 {
@@ -402,18 +443,31 @@ public class DriverController : ControllerBase
             if (status.Equals("inactive", StringComparison.OrdinalIgnoreCase) || status.Equals("banned", StringComparison.OrdinalIgnoreCase))
             {
                 var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-                if (db.Database.GetDbConnection().State != System.Data.ConnectionState.Open)
+                var conn = db.Database.GetDbConnection();
+                bool openedByUs = false;
+                if (conn.State != System.Data.ConnectionState.Open)
                 {
                     await db.Database.OpenConnectionAsync(cancellationToken);
+                    openedByUs = true;
                 }
-                using (var command = db.Database.GetDbConnection().CreateCommand())
+                try
                 {
-                    command.CommandText = "UPDATE trucks SET driver_id = NULL WHERE driver_id = @id";
-                    var param = command.CreateParameter();
-                    param.ParameterName = "@id";
-                    param.Value = id;
-                    command.Parameters.Add(param);
-                    await command.ExecuteNonQueryAsync(cancellationToken);
+                    using (var command = conn.CreateCommand())
+                    {
+                        command.CommandText = "UPDATE trucks SET driver_id = NULL WHERE driver_id = @id";
+                        var param = command.CreateParameter();
+                        param.ParameterName = "@id";
+                        param.Value = id;
+                        command.Parameters.Add(param);
+                        await command.ExecuteNonQueryAsync(cancellationToken);
+                    }
+                }
+                finally
+                {
+                    if (openedByUs)
+                    {
+                        await db.Database.CloseConnectionAsync();
+                    }
                 }
             }
 

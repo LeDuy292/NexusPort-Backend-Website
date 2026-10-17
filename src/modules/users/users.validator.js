@@ -9,8 +9,8 @@ const { VALID_ROLES } = require('../../models/User');
 const databaseGuid = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
 const driverAssignmentValidator = [
-  body('carrierId').optional().trim().matches(databaseGuid).withMessage('Mã công ty vận tải không hợp lệ.').toLowerCase(),
-  body('driverId').optional().trim().matches(databaseGuid).withMessage('Mã hồ sơ tài xế không hợp lệ.').toLowerCase(),
+  body('carrierId').optional({ checkFalsy: true }).trim().matches(databaseGuid).withMessage('Mã công ty vận tải không hợp lệ.').toLowerCase(),
+  body('driverId').optional({ checkFalsy: true }).trim().matches(databaseGuid).withMessage('Mã hồ sơ tài xế không hợp lệ.').toLowerCase(),
 ];
 
 /**
@@ -18,24 +18,24 @@ const driverAssignmentValidator = [
  */
 const queryValidator = [
   query('page')
-    .optional()
+    .optional({ checkFalsy: true })
     .isInt({ min: 1 })
     .withMessage('Số trang phải là số nguyên dương.')
     .toInt(),
 
   query('limit')
-    .optional()
+    .optional({ checkFalsy: true })
     .isInt({ min: 1, max: 100 })
     .withMessage('Giới hạn phải từ 1–100.')
     .toInt(),
 
   query('status')
-    .optional()
+    .optional({ checkFalsy: true })
     .isIn(['active', 'inactive', 'all'])
     .withMessage('Status phải là: active, inactive hoặc all.'),
 
   query('role')
-    .optional(),
+    .optional({ checkFalsy: true }),
 ];
 
 /**
