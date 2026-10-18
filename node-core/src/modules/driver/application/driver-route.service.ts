@@ -4,6 +4,16 @@ import { ValidationError, ConflictError } from '../../../shared/errors/app-error
 import { z } from 'zod';
 import { RouteTarget, SmartRoute } from '../domain/smart-route';
 import { SmartRouteService } from './smart-route.service';
+import { RabbitMQClient } from '../../../infrastructure/clients/rabbitmq';
+import { logger } from '../../../shared/utils/logger';
+import { randomUUID } from 'crypto';
+
+const publishProgress = (driverId: string, bookingId: string, containerId: string, status: string) => {
+  void RabbitMQClient.getInstance().publish('dispatcher.status.updated', {
+    eventId: randomUUID(), domain: 'driver', entityId: containerId, status,
+    occurredAt: new Date().toISOString(), bookingId, driverId,
+  }).catch(error => logger.warn('[Driver journey] Progress committed; realtime update unavailable.', error));
+};
 
 export interface DriverRoute {
   driverId?: string; driverName?: string; truckPlate?: string; bookingCode?: string; bookingType?: string;
@@ -88,9 +98,9 @@ export class DriverRouteService {
     result.target = slot ? {
       type: 'slot', location: row.targetLocation || `${slot.block}-${slot.bay}-${slot.row}-${slot.tier}`,
       ...slot, source: row.destinationSource ?? 'reservation',
-    } : row.targetLocation?.trim() && row.operationId ? {
+    } : row.targetLocation?.trim() && (row.operationId || row.destinationSource === 'demo_admission') ? {
       type: 'area', location: row.targetLocation.trim(), slotId: null,
-      block: null, zone: null, bay: null, row: null, tier: null, source: 'operation',
+      block: null, zone: null, bay: null, row: null, tier: null, source: row.operationId ? 'operation' : 'demo_admission',
     } : null;
     const arrived = row.destinationKey === routeDestinationKey(row) ? row.arrivedAt ?? null : null;
     const readyForExit = !!row.containerConfirmedAt && row.bookingStatus === 'completed';
@@ -147,6 +157,7 @@ export class DriverRouteService {
     if (!route.journey?.canArrive || !route.navigation?.destinationNode) throw new ConflictError('Chưa có tuyến khả dụng để xác nhận đến điểm giao nhận.');
     if (currentNodeId && currentNodeId !== route.navigation.destinationNode.id) throw new ValidationError('Chỉ xác nhận tại điểm giao nhận được phân công.');
     await this.repository.arrive(driverId, containerId, bookingId, route.navigation.destinationNode.id, routeDestinationKey(row));
+    publishProgress(driverId, bookingId, containerId, 'arrived');
     return this.get(driverId, containerId, undefined, bookingId);
   }
 
@@ -154,6 +165,7 @@ export class DriverRouteService {
     const parsed = z.object({ bookingId: z.string().uuid(), condition: z.enum(['OK', 'DAMAGED', 'ISSUE']).default('OK'), notes: z.string().trim().max(1000).optional() }).strict().safeParse(input);
     if (!parsed.success) throw new ValidationError('Thông tin xác nhận container không hợp lệ.');
     await this.repository.confirm(driverId, containerId, parsed.data.bookingId, parsed.data.condition, parsed.data.notes);
+    publishProgress(driverId, parsed.data.bookingId, containerId, 'container-confirmed');
     return this.get(driverId, containerId, undefined, parsed.data.bookingId);
   }
 }

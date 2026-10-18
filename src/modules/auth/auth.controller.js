@@ -121,7 +121,7 @@ async function resetPasswordController(req, res, next) {
 async function getMeController(req, res, next) {
   try {
     // req.user được gắn bởi authenticate middleware
-    const user = await User.findByPk(req.user.id);
+    const user = req.authenticatedAccount || await User.findByPk(req.user.id);
     if (!user) {
       return res.status(404).json({
         success: false,

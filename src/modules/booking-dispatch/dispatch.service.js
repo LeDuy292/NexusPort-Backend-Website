@@ -3,6 +3,7 @@ const { QueryTypes } = require('sequelize');
 const { sequelize } = require('../../config/database');
 const { BOOKING_FIELDS } = require('../driver-bookings/driver-bookings.service');
 const { POLICY, fail, activeBooking, decorate, checkArrival, checkCall, expectedVersion } = require('./dispatch.policy');
+const admission = require('./yard-admission');
 const query = (sql, replacements = {}, transaction) => sequelize.query(sql, { replacements, transaction, type: QueryTypes.SELECT });
 
 async function getBoard(date) {
@@ -22,12 +23,13 @@ async function getBoard(date) {
     || Number(a.coordination.isLate || a.dispatch?.action==='call_expired') - Number(b.coordination.isLate || b.dispatch?.action==='call_expired')
     || Date.parse(a.appointmentStart) - Date.parse(b.appointmentStart)
     || Date.parse(a.createdAt) - Date.parse(b.createdAt));
-  return { bookings: items, serverTime: now.toISOString(), policy: POLICY };
+  return { bookings: items, serverTime: now.toISOString(), policy: POLICY, yard: await admission.snapshot() };
 }
 
 async function act(userId, role, bookingId, action, input = {}) {
   const version = expectedVersion(input.expectedVersion);
   return sequelize.transaction(async transaction => {
+    if (action === 'call') await admission.lock(transaction);
     // Serialize by booking and fleet driver, including concurrent dispatchers.
     const rows = await query(`SELECT b.id,d.user_id AS "userId" FROM bookings b
       JOIN drivers d ON d.id=b.driver_id WHERE b.id=:bookingId `
@@ -63,14 +65,21 @@ async function act(userId, role, bookingId, action, input = {}) {
       if (note.length > 500) throw fail('Hướng dẫn tối đa 500 ký tự.', 422);
       if (action === 'call') {
         checkCall(raw, now);
+        await admission.requireSpace(transaction);
         // Truck lock prevents two different drivers being called with the same truck.
         await query('SELECT id FROM trucks WHERE id=(SELECT truck_id FROM bookings WHERE id=:bookingId) FOR UPDATE', {bookingId}, transaction);
         const others = await query(`SELECT s.booking_id FROM booking_dispatch_state s JOIN bookings b ON b.id=s.booking_id
           WHERE s.booking_id<>:bookingId AND s.status IN ('called','acknowledged')
           AND b.status::text IN ('approved','ready') AND (s.driver_id=:driverId OR
             (b.truck_id IS NOT NULL AND b.truck_id=(SELECT truck_id FROM bookings WHERE id=:bookingId)))
+          UNION ALL SELECT b.id FROM bookings b WHERE b.id<>:bookingId
+          AND (b.driver_id=:driverId OR (b.truck_id IS NOT NULL AND b.truck_id=(SELECT truck_id FROM bookings WHERE id=:bookingId)))
+          AND EXISTS(SELECT 1 FROM gate_transactions g WHERE g.booking_id=b.id AND g.gate_type='gate_in' AND g.status='completed'
+            AND NOT EXISTS(SELECT 1 FROM gate_transactions x WHERE x.booking_id=b.id AND x.gate_type='gate_out'
+              AND x.status='completed' AND x.checked_at>=g.checked_at))
           LIMIT 1`, { bookingId, driverId: raw.driverId }, transaction);
         if (others.length) throw fail('Tài xế hoặc xe đang có một lệnh gọi khác chưa kết thúc.');
+        if (!await admission.assignDestination(bookingId, transaction)) throw fail('Chưa có điểm giao nhận trên bản đồ bãi. Vui lòng kiểm tra cấu hình trước khi gọi xe.');
         status = 'called'; calledAt = now; acknowledgedAt = null; holdUntil = null;
         callExpiresAt = new Date(now.getTime() + POLICY.callResponseMinutes * 60000);
         message = note || 'Điều độ đã gọi bạn. Xác nhận nhận lệnh trong 10 phút và làm theo hướng dẫn của nhân viên cổng.';

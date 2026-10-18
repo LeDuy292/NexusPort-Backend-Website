@@ -1,6 +1,9 @@
 import { getClient } from '../../../infrastructure/database/db';
 import { ConflictError, NotFoundError, ValidationError } from '../../../shared/errors/app-error';
 import { z } from 'zod';
+import { RabbitMQClient } from '../../../infrastructure/clients/rabbitmq';
+import { logger } from '../../../shared/utils/logger';
+import { randomUUID } from 'crypto';
 
 export class GateMovementService {
   async completeOut(actorId: string, input: unknown): Promise<{id: string}> {
@@ -10,7 +13,7 @@ export class GateMovementService {
     const client=await getClient();
     try {
       await client.query('BEGIN');
-      const booking=(await client.query(`SELECT id,status::text,booking_type::text FROM bookings WHERE id=$1 FOR UPDATE`,[bookingId])).rows[0];
+      const booking=(await client.query(`SELECT id,status::text,booking_type::text,driver_id FROM bookings WHERE id=$1 FOR UPDATE`,[bookingId])).rows[0];
       if(!booking) throw new NotFoundError('Booking',bookingId);
       const previous=(await client.query(`SELECT id FROM gate_transactions WHERE booking_id=$1 AND gate_type='gate_out' AND status='completed' LIMIT 1`,[bookingId])).rows[0];
       if(previous){await client.query('COMMIT');return previous;}
@@ -40,6 +43,10 @@ export class GateMovementService {
           AND NOT EXISTS(SELECT 1 FROM yard_slot_reservations r WHERE r.slot_id=ys.id AND r.reserved_to IS NULL)`,[slotIds]);
       }
       await client.query('COMMIT');
+      void RabbitMQClient.getInstance().publish('dispatcher.status.updated', {
+          eventId: randomUUID(), domain: 'gate-out', entityId: record.id, status: 'completed',
+          occurredAt: new Date().toISOString(), bookingId, driverId: booking.driver_id,
+      }).catch(error => logger.warn('[Gate Out] Passage committed; realtime update unavailable.', error));
       return record;
     } catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
   }

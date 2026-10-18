@@ -1,10 +1,13 @@
 import { z } from 'zod';
 
 const identifier = z.string().trim().min(1).max(120);
+// PostgreSQL jsonb_build_object(now()) emits an ISO timestamp with an offset,
+// while external snapshots often use Z. Accept both and expose one UTC form.
+const mapTimestamp = z.string().datetime({ offset: true }).transform(value => new Date(value).toISOString());
 export const yardMapSchema = z.object({
   version: identifier,
-  updatedAt: z.string().datetime().optional(),
-  validUntil: z.string().datetime().optional(),
+  updatedAt: mapTimestamp.optional(),
+  validUntil: mapTimestamp.optional(),
   nodes: z.array(z.object({
     id: identifier,
     label: z.string().trim().min(1).max(200),
@@ -64,7 +67,7 @@ export interface RouteTarget {
   bay: number | null;
   row: number | null;
   tier: number | null;
-  source: 'operation' | 'reservation' | 'container_position' | 'gate';
+  source: 'operation' | 'reservation' | 'container_position' | 'gate' | 'demo_admission';
 }
 
 export interface SmartRoute {

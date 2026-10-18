@@ -185,6 +185,7 @@ public static class ServiceCollectionExtensions
         // Gate Rule Engine & Rules (Extensible Pipeline)
         services.AddScoped<IGateRuleEngine, GateRuleEngine>();
         services.AddScoped<IGateRule, BookingExistenceAndStatusRule>();
+        services.AddScoped<IGateRule, GateEntryOrderRule>();
         services.AddScoped<IGateRule, BookingTimeWindowRule>();
         services.AddScoped<IGateRule, VehicleMatchAndStatusRule>();
         services.AddScoped<IGateRule, DriverMatchAndStatusRule>();

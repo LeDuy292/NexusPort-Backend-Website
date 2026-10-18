@@ -31,6 +31,7 @@ module.exports = {
   isTest: process.env.NODE_ENV === 'test',
 
   db: {
+    logSql: process.env.DB_LOG_SQL === 'true',
     host: useAivenDatabase ? process.env.AIVEN_DB_HOST : process.env.DB_HOST,
     port: parseInt(useAivenDatabase ? process.env.AIVEN_DB_PORT : process.env.DB_PORT, 10) || 5432,
     name: useAivenDatabase ? process.env.AIVEN_DB_NAME : process.env.DB_NAME,

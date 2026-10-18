@@ -21,6 +21,18 @@ describe('Smart Yard map provider', () => {
     expect((await provider().load({ smartYardMap: { version: 'broken' } })).errorCode).toBe('YARD_MAP_INVALID');
     expect((await provider().load({ smartYardMap: { ...map, validUntil: '2020-01-01T00:00:00Z' } })).errorCode).toBe('YARD_MAP_EXPIRED');
   });
+  it('reads PostgreSQL JSON offset timestamps and normalizes them to UTC', async () => {
+    const snapshot = await provider().load({ smartYardMap: {
+      ...map, updatedAt: '2026-10-18T09:15:30.123456+07:00', validUntil: '2099-01-01T00:00:00+00:00',
+    } });
+    expect(snapshot.map?.updatedAt).toBe('2026-10-18T02:15:30.123Z');
+    expect(snapshot.map?.validUntil).toBe('2099-01-01T00:00:00.000Z');
+    expect(snapshot.errorCode).toBeUndefined();
+  });
+  it('still rejects expired offset timestamps and malformed calendar dates', async () => {
+    expect((await provider().load({ smartYardMap: { ...map, validUntil: '2020-01-01T07:00:00+07:00' } })).errorCode).toBe('YARD_MAP_EXPIRED');
+    expect((await provider().load({ smartYardMap: { ...map, updatedAt: '2026-19-99T00:00:00+00:00' } })).errorCode).toBe('YARD_MAP_INVALID');
+  });
   it('fails closed when the configured live source cannot be read', async () => {
     process.env.SMART_ROUTE_MAP_PATH = 'missing-smart-yard-map.json';
     expect((await provider().load({ smartYardMap: map })).errorCode).toBe('YARD_MAP_INVALID');

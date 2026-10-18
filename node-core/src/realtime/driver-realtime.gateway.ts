@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import { z } from 'zod';
 import { RabbitMQClient } from '../infrastructure/clients/rabbitmq';
 import { logger } from '../shared/utils/logger';
+import { DriverRouteRepository } from '../modules/driver/infrastructure/driver-route.repository';
 
 const queueName = 'yard.operation.completed';
 const dispatcherQueueName = 'dispatcher.status.updated';
@@ -41,7 +42,7 @@ export class DriverRealtimeGateway {
     this.io = new Server(server, {
       cors: { origin: process.env.CORS_ORIGIN?.split(',') || true, methods: ['GET', 'POST'] },
     });
-    this.io.use((socket, next) => {
+    this.io.use(async (socket, next) => {
       const token = socket.handshake.auth?.token;
       if (!token || typeof token !== 'string') return next(new Error('Authentication required.'));
       try {
@@ -51,7 +52,10 @@ export class DriverRealtimeGateway {
         const normalizedRole = typeof role === 'string' ? role.toLowerCase() : '';
         if (!['driver', 'dispatcher', 'administrator'].includes(normalizedRole)) return next(new Error('Only driver or dispatcher sessions may use this realtime channel.'));
         if (typeof driverId !== 'string') return next(new Error('A driver identity is required.'));
-        socket.data.driverId = driverId;
+        // JWT subject is a user account, while business events carry drivers.id.
+        const domainDriverId = normalizedRole === 'driver' ? await new DriverRouteRepository().resolveDriverId(driverId) : driverId;
+        if (!domainDriverId) return next(new Error('An active linked driver profile is required.'));
+        socket.data.driverId = domainDriverId;
         socket.data.role = normalizedRole;
         next();
       } catch {
@@ -110,6 +114,10 @@ export class DriverRealtimeGateway {
 
   private emitToDispatcher(event: DispatcherStatusUpdatedEvent): void {
     this.io.to('dispatcher:all').emit(dispatcherQueueName, event);
+    if (event.driverId) this.io.to(`driver:${event.driverId}`).emit('driver.journey.updated', {
+      eventId: event.eventId, bookingId: event.bookingId, containerId: event.containerId,
+      domain: event.domain, occurredAt: event.occurredAt,
+    });
     logger.info(`[Realtime] Emitted ${dispatcherQueueName} ${event.domain}:${event.entityId} to dispatcher dashboard.`);
   }
 }

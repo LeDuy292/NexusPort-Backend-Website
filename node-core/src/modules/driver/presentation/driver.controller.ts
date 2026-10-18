@@ -6,6 +6,7 @@ import { DriverRepository } from '../infrastructure/driver.repository';
 import { DriverRouteService } from '../application/driver-route.service';
 import { DriverDestinationRepository } from '../infrastructure/driver-destination.repository';
 import { DriverRouteRepository } from '../infrastructure/driver-route.repository';
+import { ConfiguredYardMapProvider } from '../infrastructure/yard-map.provider';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '../../../shared/errors/app-error';
 import { sendSuccess, sendCreated } from '../../../shared/utils/response';
 
@@ -43,6 +44,14 @@ const authenticateDriver = async (req: DriverRequest, _res: Response, next: Next
 };
 
 export class DriverController {
+  getYardMap = async (_req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      // Read the approved layout before Gate In; this grants no entry permission
+      // and does not expose another driver's booking or assigned destination.
+      sendSuccess(res, await new ConfiguredYardMapProvider().load(null));
+    } catch (error) { next(error); }
+  };
   private repository = new DriverRepository();
   private routeService = new DriverRouteService();
   private destinationRepository = new DriverDestinationRepository();
@@ -117,6 +126,7 @@ export const createDriverRouter = (): Router => {
   const router = Router();
   const controller = new DriverController();
 
+  router.get('/me/yard-map', authenticateDriver, controller.getYardMap);
   router.get('/me/routes', authenticateDriver, controller.getMyRoutes);
   router.get('/me/routes/:containerId', authenticateDriver, controller.getMyContainerRoute);
   router.post('/me/routes/:containerId/progress', authenticateDriver, controller.arrive);

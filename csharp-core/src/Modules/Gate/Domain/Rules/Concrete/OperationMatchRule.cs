@@ -20,10 +20,12 @@ public class OperationMatchRule : IGateRule
         var operation = context.OperationType ?? booking.GateType ?? "GateIn";
 
         // Kiểm tra chiều cổng GateIn / GateOut
-        if (!string.IsNullOrWhiteSpace(booking.GateType))
+        // One booking covers one visit in both directions. Only an explicit
+        // operation from this scan may constrain its direction.
+        if (!string.IsNullOrWhiteSpace(context.OperationType))
         {
             if (string.Equals(gateType, "GateIn", StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(booking.GateType, "GateOut", StringComparison.OrdinalIgnoreCase))
+                string.Equals(context.OperationType, "GateOut", StringComparison.OrdinalIgnoreCase))
             {
                 return Task.FromResult(GateRuleResult.Fail(
                     RuleName,
@@ -32,7 +34,7 @@ public class OperationMatchRule : IGateRule
             }
 
             if (string.Equals(gateType, "GateOut", StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(booking.GateType, "GateIn", StringComparison.OrdinalIgnoreCase))
+                string.Equals(context.OperationType, "GateIn", StringComparison.OrdinalIgnoreCase))
             {
                 return Task.FromResult(GateRuleResult.Fail(
                     RuleName,

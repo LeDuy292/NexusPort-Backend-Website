@@ -26,6 +26,9 @@ const BOOKING_FIELDS = `SELECT b.id, b.booking_code AS "bookingCode", b.booking_
   b.appointment_start AS "appointmentStart", b.appointment_end AS "appointmentEnd",
   b.approved_at AS "approvedAt", b.rejected_reason AS "rejectedReason", b.description,
   b.created_at AS "createdAt", b.gate_type AS "gateType",
+  (SELECT jsonb_build_object('id',e.id,'status',CASE WHEN e.status IN ('pending_ack','active') AND e.valid_until<=now() THEN 'expired' ELSE e.status END,
+    'validFrom',e.valid_from,'validUntil',e.valid_until,'vehiclePlate',e.vehicle_plate)
+    FROM gate_entry_orders e WHERE e.booking_id=b.id ORDER BY e.issued_at DESC,e.dispatch_version DESC LIMIT 1) AS "gateEntryOrder",
   CASE WHEN ds.booking_id IS NULL THEN NULL ELSE jsonb_build_object(
     'status',ds.status,'action',ds.action,'arrivedAt',ds.arrived_at,'readyAt',ds.ready_at,
     'calledAt',ds.called_at,'callExpiresAt',ds.call_expires_at,'acknowledgedAt',ds.acknowledged_at,

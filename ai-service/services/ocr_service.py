@@ -5,13 +5,13 @@ import numpy as np
 import requests as http_requests
 from typing import Dict, Any, List, Optional, Tuple
 
-try:
-    from dotenv import load_dotenv
-    env_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
-    if os.path.exists(env_path):
-        load_dotenv(env_path)
-except ImportError:
-    pass
+from dotenv import load_dotenv
+
+# Explicit process settings > AI-local settings > shared backend settings.
+# Never depend on the terminal's current directory or copy credentials into code.
+service_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(service_dir, ".env"), override=False)
+load_dotenv(os.path.join(os.path.dirname(service_dir), ".env"), override=False)
 
 # Azure AI Vision credentials từ .env
 AZURE_ENDPOINT = os.getenv("AZURE_VISION_ENDPOINT", "").strip().rstrip("/")

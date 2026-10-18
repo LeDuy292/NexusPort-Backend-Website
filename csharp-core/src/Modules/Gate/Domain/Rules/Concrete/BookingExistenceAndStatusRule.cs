@@ -23,7 +23,7 @@ public class BookingExistenceAndStatusRule : IGateRule
 
         var status = context.Booking.Status;
         if (status == BookingStatus.Canceled ||
-            status == BookingStatus.Completed ||
+            (status == BookingStatus.Completed && !string.Equals(context.GateType,"GateOut",StringComparison.OrdinalIgnoreCase)) ||
             status == BookingStatus.Expired ||
             status == BookingStatus.Rejected)
         {
