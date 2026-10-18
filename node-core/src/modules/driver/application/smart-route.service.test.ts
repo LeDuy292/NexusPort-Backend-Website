@@ -3,6 +3,8 @@ import { shortestRoute, YardMap, yardMapSchema, RouteTarget } from '../domain/sm
 import { DriverRouteRow } from '../infrastructure/driver-route.repository';
 import { DriverRouteService } from './driver-route.service';
 import { DriverRouteRepository } from '../infrastructure/driver-route.repository';
+import { RabbitMQClient } from '../../../infrastructure/clients/rabbitmq';
+import { dispatcherStatusUpdatedSchema } from '../../../realtime/driver-realtime.gateway';
 
 const mapInput = {
   version: 'test-1',
@@ -128,6 +130,37 @@ describe('NXP-114 Smart Route', () => {
     const service = new SmartRouteService({ load: async () => ({ map: null, errorCode: 'YARD_MAP_NOT_CONFIGURED' }) });
     expect((await service.create(row, target)).reasonCode).toBe('YARD_MAP_NOT_CONFIGURED');
     expect((await service.create(row, null)).status).toBe('pending_destination');
+  });
+
+  it('shows the approved yard map and gate marker while a destination is pending', async () => {
+    const result = await serviceFor().create(row, null);
+    expect(result).toMatchObject({ status: 'pending_destination', reasonCode: 'YARD_LOCATION_NOT_ASSIGNED', origin: { id: 'gate' } });
+    expect(result.map?.nodes.length).toBe(mapInput.nodes.length);
+    expect(result.waypoints).toEqual([]);
+  });
+
+  it('uses an explicit demo reception assignment without fabricating cargo completion', async () => {
+    const assigned = { ...row, slotId: null, operationId: null, targetLocation: 'INSPECTION', destinationSource: 'demo_admission' as const };
+    const repository = { findForDriverAndContainer: jest.fn().mockResolvedValue(assigned) } as unknown as DriverRouteRepository;
+    const route = await new DriverRouteService(repository, serviceFor()).get('driver-id', row.containerId);
+    expect(route.target).toMatchObject({ type: 'area', location: 'INSPECTION', source: 'demo_admission' });
+    expect(route.navigation?.status).toBe('available');
+    expect(route.journey).toMatchObject({ phase: 'to_yard', canArrive: true, canConfirmContainer: false });
+    expect(route.destination).toBeNull();
+  });
+
+  it('publishes driver arrival using the event contract accepted by the mobile realtime gateway', async () => {
+    const publish = jest.fn().mockResolvedValue(undefined);
+    const broker = jest.spyOn(RabbitMQClient, 'getInstance').mockReturnValue({ publish } as unknown as RabbitMQClient);
+    try {
+      const repository = { findForDriverAndContainer: jest.fn().mockResolvedValue(row), arrive: jest.fn() } as unknown as DriverRouteRepository;
+      await new DriverRouteService(repository, serviceFor()).arrive(row.containerId, row.containerId, { bookingId: row.bookingId, action: 'arrive' });
+      expect(repository.arrive).toHaveBeenCalled();
+      const [topic, event] = publish.mock.calls[0];
+      expect(topic).toBe('dispatcher.status.updated');
+      expect(dispatcherStatusUpdatedSchema.safeParse(event).success).toBe(true);
+      expect(event).toMatchObject({ domain: 'driver', driverId: row.containerId, bookingId: row.bookingId, status: 'arrived' });
+    } finally { broker.mockRestore(); }
   });
 
   it('preserves legacy route fields and returns the updated Operation destination each time', async () => {

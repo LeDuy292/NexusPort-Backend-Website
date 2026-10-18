@@ -10,7 +10,7 @@ Operational booking is not duplicated. Express dispatch commands persist
    assigned truck/driver and normalized plate. Booking appointment is not reused
    as the short entry deadline. Gate staff see the queue, including pending calls.
 4. Successful verification → barrier command API; simulation response only.
-5. Actual passage → passage API, consumes the permission and writes canonical
+5. Passage event → passage API, consumes the permission and writes canonical
    `gate_transactions` and booking `checked_in` atomically. Smart Route then sees
    Gate In. Retries reuse the existing gate transaction.
 6. No acknowledgment, expired entry permission, withdrawal, delay or changed
@@ -80,10 +80,42 @@ of opening must remain separate from a vehicle passage event.
 - `POST /Gate/passage-in` (legacy alias `/Gate/approve-in`):
   `verificationRecordId`, `bookingNumber`, `vehiclePlate`, `gateCode`, optional
   `containerNumber`, and `passageConfirmed:true`. Requires an accepted simulated
-  or acknowledged open command for that verification/permission. Staff confirm
-  passage in the current simulator; a future authorized crossing sensor can use
-  this API. Merely scanning, recognizing or opening does not create Gate In.
-- Gate Out continues through Node `/gate/complete-out` after actual passage.
+  or acknowledged open command for that verification/permission. The temporary
+  frontend simulator supplies the passage event after the open interval below;
+  a future authorized crossing sensor can use this API. Merely scanning,
+  recognizing or opening does not create Gate In.
+- Gate Out continues through Node `/gate/complete-out` after the passage event.
+
+## Temporary timed passage simulator (NXP-114)
+
+Gate Control runs the existing server verification and barrier-open checks. Only
+an accepted `simulated` open command starts a countdown. The default interval is
+10 seconds; frontend `VITE_GATE_OPEN_SECONDS` accepts whole seconds from 3 to 120
+(invalid or missing values use 10). Change the environment value and restart Vite
+or rebuild the frontend to change the interval.
+
+When the countdown expires, Gate Control automatically calls C#
+`POST /api/v1/Gate/passage-in` with the verified evidence and
+`passageConfirmed:true`, or Node `POST /api/v1/gate/complete-out` with the booking
+and exit gate IDs. Existing server business rules and transaction idempotency
+remain in force. Successful Gate In makes Smart Route available; Gate Out
+advances the journey to exited. Driver views observe these through their existing
+refresh/realtime mechanisms. The simulator then issues an automatic close
+command, including when recording passage fails.
+
+The UI shows the countdown and simulation status and no longer requires a staff
+passage-confirmation click. While a cycle is pending, another scan, gate/direction
+change or manual barrier command cannot interrupt it. API failure stays visible;
+retry reuses the same evidence and close request ID and skips passage if it has
+already succeeded.
+
+The timer runs in the browser, continues during navigation within the app, and
+stores the pending cycle (without images) in account-scoped session storage.
+Reloading and reopening Gate Control in the same tab resumes its original
+deadline. Closing the tab/browser stops this temporary simulator; it is not a
+server worker or a measurement of actual vehicle movement. For IoT, replace the
+timed passage adapter with the sensor event and keep barrier acknowledgment
+separate from passage.
 
 Manual fallback covers failed recognition/weather by entering the plate and
 reason and running the same server checks. It does not bypass an expired or

@@ -6,6 +6,7 @@ import { AppError } from '../../../shared/errors/app-error';
 import { createServer, get as httpGet, IncomingHttpHeaders } from 'http';
 import { AddressInfo } from 'net';
 import { DriverRouteRepository } from '../infrastructure/driver-route.repository';
+import { ConfiguredYardMapProvider } from '../infrastructure/yard-map.provider';
 
 const driverId = '55555555-5555-4555-8555-555555555555';
 const containerId = '11111111-1111-4111-8111-111111111111';
@@ -37,6 +38,19 @@ describe('Driver Smart Route API authentication and input', () => {
     expect((await get('/drivers/me/routes')).status).toBe(401);
     expect((await get('/drivers/me/routes', 'bad-token')).status).toBe(401);
     expect((await get('/drivers/me/routes', token('Dispatcher'))).status).toBe(403);
+  });
+
+  it('protects the pre-entry map with linked Driver authentication and disables caching', async () => {
+    const load = jest.spyOn(ConfiguredYardMapProvider.prototype, 'load').mockResolvedValue({
+      map: { version: 'approved-1', nodes: [{ id: 'gate', label: 'Gate', x: 0, y: 0, restricted: false }], edges: [] },
+    });
+    expect((await get('/drivers/me/yard-map')).status).toBe(401);
+    expect((await get('/drivers/me/yard-map', token('Dispatcher'))).status).toBe(403);
+    expect(load).not.toHaveBeenCalled();
+    const response = await get('/drivers/me/yard-map', token());
+    expect(response.status).toBe(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(load).toHaveBeenCalledWith(null);
   });
 
   it('validates container ID and rejects structured current position query parameters', async () => {

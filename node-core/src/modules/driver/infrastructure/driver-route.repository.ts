@@ -10,7 +10,7 @@ export interface DriverRouteRow {
   instructionId: string | null; fromGate: string | null; routeDetail: string | null; mapData: unknown | null;
   operationId?: string | null; taskCode?: string | null; operationType?: string | null;
   operationStatus?: string | null; targetLocation?: string | null;
-  destinationSource?: 'operation' | 'reservation' | 'container_position'; slotStatus?: string | null;
+  destinationSource?: 'operation' | 'reservation' | 'container_position' | 'demo_admission'; slotStatus?: string | null;
   driverId?: string; driverName?: string; truckPlate?: string; bookingCode?: string; bookingType?: string; bookingStatus?: string;
   gateInAt?: string; gateOutAt?: string | null; containerConfirmedAt?: string | null;
   arrivedAt?: string | null; currentNodeId?: string | null; destinationKey?: string | null;
@@ -28,8 +28,10 @@ export const driverRouteQuery = `
  gt.driver_id AS "driverId",d.full_name AS "driverName",COALESCE(t.plate_number,b.vehicle_plate) AS "truckPlate",
  dest.slot_id AS "slotId",dest.zone,dest.block_code AS "blockCode",dest.bay,dest.row_no AS row,dest.tier,dest.slot_status AS "slotStatus",
  op."Id" AS "operationId",op."TaskCode" AS "taskCode",op."OperationType" AS "operationType",op."Status" AS "operationStatus",
- COALESCE(NULLIF(btrim(op."ToLocation"),''),CASE WHEN dest.slot_id IS NOT NULL THEN concat(dest.block_code,'-',dest.bay,'-',dest.row_no,'-',dest.tier) END) AS "targetLocation",
- CASE WHEN op."Id" IS NOT NULL THEN 'operation' WHEN dest.reserved THEN 'reservation' ELSE 'container_position' END AS "destinationSource",
+ COALESCE(NULLIF(btrim(op."ToLocation"),''),CASE WHEN dest.slot_id IS NOT NULL THEN concat(dest.block_code,'-',dest.bay,'-',dest.row_no,'-',dest.tier) END,
+   CASE WHEN op."Id" IS NULL AND ri.map_data->>'source'='demo_admission' THEN ri.map_data->>'handoverLocation' END) AS "targetLocation",
+ CASE WHEN op."Id" IS NOT NULL THEN 'operation' WHEN dest.reserved THEN 'reservation'
+   WHEN dest.slot_id IS NOT NULL THEN 'container_position' WHEN ri.map_data->>'source'='demo_admission' THEN 'demo_admission' END AS "destinationSource",
  ri.id AS "instructionId",ri.from_gate AS "fromGate",ri.route_detail AS "routeDetail",ri.map_data AS "mapData",
  au.confirmed_at AS "containerConfirmedAt",ev.occurred_at AS "yardCompletedAt",
  pr.arrived_at AS "arrivedAt",vehicle_position.current_node_id AS "currentNodeId",pr.destination_key AS "destinationKey",

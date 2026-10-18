@@ -35,6 +35,10 @@ const parameterSchema = (path: string) => [...path.matchAll(/\{([A-Za-z0-9_]+)\}
 }));
 
 const operationOverrides: Record<string, Record<string, unknown>> = {
+  'GET /api/v1/drivers/me/yard-map': {
+    summary: 'Read the approved 2D yard layout before Gate In without granting entry permission',
+    security: [{ BearerAuth: [] }],
+  },
   'GET /api/v1/gate/locations': {
     summary: 'Read configured physical gate IDs, codes and directions',
   },

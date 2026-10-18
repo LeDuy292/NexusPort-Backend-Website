@@ -5,6 +5,7 @@ jest.mock('../src/config/database', () => ({
 jest.mock('../src/config/socket', () => ({
   getIO: jest.fn(), emitToDispatchers: jest.fn(), emitToDriver: jest.fn(),
 }));
+jest.mock('../src/modules/booking-dispatch/yard-admission', () => ({ runAutoAdmission: jest.fn() }));
 const { sequelize } = require('../src/config/database');
 const { getIO, emitToDispatchers, emitToDriver } = require('../src/config/socket');
 const { pumpDispatchEvents, startDispatchRealtime } = require('../src/modules/booking-dispatch/dispatch.realtime');

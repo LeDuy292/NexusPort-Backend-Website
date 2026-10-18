@@ -2,6 +2,7 @@
 const { QueryTypes } = require('sequelize');
 const { sequelize } = require('../../config/database');
 const { getIO, emitToDispatchers, emitToDriver } = require('../../config/socket');
+const { runAutoAdmission } = require('./yard-admission');
 let running = null;
 let lastError = 0;
 async function deliver() {
@@ -50,7 +51,7 @@ async function expireCalls() {
   }
 }
 function pumpDispatchEvents() {
-  if (!running) running = (async () => { await expireCalls(); await deliver(); })()
+  if (!running) running = (async () => { await expireCalls(); await runAutoAdmission(); await deliver(); })()
     .catch(error => {
       if (Date.now() - lastError > 30000) { lastError = Date.now(); console.error('[Booking dispatch realtime]', error.message); }
     }).finally(() => { running = null; });

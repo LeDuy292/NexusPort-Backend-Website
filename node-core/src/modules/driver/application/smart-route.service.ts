@@ -34,18 +34,18 @@ export class SmartRouteService {
       })).digest('hex').slice(0, 24);
       return result;
     };
-    if (!target) return finish('YARD_LOCATION_NOT_ASSIGNED');
-    if (target.type === 'area' && /^(.*)-([0-9]+)-([0-9]+)-([0-9]+)$/.test(target.location)) return finish('YARD_LOCATION_INVALID');
     const snapshot = await this.maps.load(row.mapData);
-    if (!snapshot.map) return finish(snapshot.errorCode ?? 'YARD_MAP_NOT_CONFIGURED');
+    if (!snapshot.map) return finish(!target ? 'YARD_LOCATION_NOT_ASSIGNED' : snapshot.errorCode ?? 'YARD_MAP_NOT_CONFIGURED');
     const map = snapshot.map;
     result.map = map;
-    if (target.source !== 'gate' && row.slotStatus === 'maintenance') return finish('DESTINATION_RESTRICTED');
     result.mapVersion = map.version;
     const unique = (nodes: RouteNode[]) => nodes.length === 1 ? nodes[0] : null;
     result.origin = currentNodeId
       ? map.nodes.find(node => node.id === currentNodeId) ?? null
       : unique(map.nodes.filter(node => node.gateCode === row.gateCode));
+    if (!target) return finish('YARD_LOCATION_NOT_ASSIGNED');
+    if (target.type === 'area' && /^(.*)-([0-9]+)-([0-9]+)-([0-9]+)$/.test(target.location)) return finish('YARD_LOCATION_INVALID');
+    if (target.source !== 'gate' && row.slotStatus === 'maintenance') return finish('DESTINATION_RESTRICTED');
     if (!result.origin) return finish(currentNodeId ? 'CURRENT_POSITION_NOT_MAPPED' : 'ORIGIN_NOT_MAPPED');
     result.destinationNode = (target.source === 'gate' ? unique(map.nodes.filter(node => node.gateCode === target.location)) : null)
       ?? (target.slotId ? unique(map.nodes.filter(node => node.slotId === target.slotId)) : null)

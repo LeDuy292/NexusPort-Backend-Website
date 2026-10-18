@@ -4,12 +4,16 @@ jest.mock('../src/config/database', () => ({
 }));
 jest.mock('../src/models/User', () => ({ User: { findByPk: jest.fn() } }));
 jest.mock('../src/modules/booking-dispatch/dispatch.realtime', () => ({ pumpDispatchEvents: jest.fn() }));
+jest.mock('../src/modules/booking-dispatch/yard-admission', () => ({
+  lock: jest.fn(), requireSpace: jest.fn(), assignDestination: jest.fn(async () => true), snapshot: jest.fn(),
+}));
 const express = require('express');
 const request = require('supertest');
 const { sequelize } = require('../src/config/database');
 const { User } = require('../src/models/User');
 const { generateToken } = require('../src/utils/jwt');
 const service = require('../src/modules/booking-dispatch/dispatch.service');
+const admission = require('../src/modules/booking-dispatch/yard-admission');
 const { decorate, checkCall, checkArrival } = require('../src/modules/booking-dispatch/dispatch.policy');
 const router = require('../src/modules/booking-dispatch/dispatch.routes');
 const app = express(); app.use(express.json()); app.use('/dispatch', router);
@@ -63,6 +67,15 @@ test('dispatcher can issue a call for a ready vehicle six hours before appointme
   const updated = await service.act(id,'Dispatcher',id,'call',{expectedVersion:1});
   expect(updated.dispatch.status).toBe('called');
   expect(sequelize.query.mock.calls[4][1].replacements).toMatchObject({status:'called',nextVersion:2});
+  expect(admission.lock.mock.invocationCallOrder.at(-1)).toBeLessThan(sequelize.query.mock.invocationCallOrder[0]);
+});
+
+test('full capacity stops a manual call inside the transaction before an entry order is issued', async () => {
+  const booking = {...base,appointmentStart:new Date().toISOString(),dispatch:{status:'ready',version:1}};
+  sequelize.query.mockResolvedValueOnce([{id}]).mockResolvedValueOnce([booking]);
+  admission.requireSpace.mockRejectedValueOnce(Object.assign(new Error('Bãi đã đủ sức chứa'),{statusCode:409}));
+  await expect(service.act(id,'Dispatcher',id,'call',{expectedVersion:1})).rejects.toMatchObject({statusCode:409});
+  expect(sequelize.query).toHaveBeenCalledTimes(2);
 });
 test('late classification uses arrival timestamp, not time spent waiting for the port', () => {
   expect(decorate({...base,dispatch:{status:'ready',arrivedAt:base.appointmentStart}},new Date('2026-10-17T05:00:00Z')).coordination.isLate).toBe(false);

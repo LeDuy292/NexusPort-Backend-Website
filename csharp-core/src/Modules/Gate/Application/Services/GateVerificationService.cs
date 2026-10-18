@@ -445,6 +445,18 @@ public class GateVerificationService : IGateVerificationService
         await _context.SaveChangesAsync(cancellationToken);
         await gateTransaction.CommitAsync(cancellationToken);
 
+        try
+        {
+            await _messageBroker.PublishAsync("dispatcher.status.updated", new DispatcherStatusUpdatedEvent(
+                Guid.NewGuid(), "gate", gateRecordId.ToString(), "completed", now,
+                BookingId: booking!.Id, DriverId: booking.DriverId, VehicleId: booking.TruckId,
+                Label: request.GateCode), cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Gate In {GateRecordId} committed; realtime update unavailable", gateRecordId);
+        }
+
         // 6. Gửi thông báo cho Driver & Dispatcher
         bool driverNotified = false;
         bool dispatcherNotified = false;
