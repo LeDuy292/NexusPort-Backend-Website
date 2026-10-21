@@ -154,6 +154,7 @@ async function logoutController(req, res) {
         const decoded = verifyToken(token);
         if (decoded && decoded.id) {
           await User.update({ session_id: null }, { where: { id: decoded.id } });
+          authService.clearUserHeartbeat(decoded.id);
           const { kickUserSockets } = require('../../config/socket');
           kickUserSockets(decoded.id, 'LOGGED_OUT', 'Bạn đã đăng xuất.');
         }

@@ -2,6 +2,7 @@
 
 const { verifyToken } = require('../utils/jwt');
 const { User } = require('../models/User');
+const { recordUserHeartbeat } = require('../modules/auth/auth.service');
 
 /**
  * Middleware xác thực JWT.
@@ -31,7 +32,11 @@ async function authenticate(req, res, next) {
         err.name === 'TokenExpiredError'
           ? 'Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại.'
           : 'Token không hợp lệ.';
-      return res.status(401).json({ success: false, message });
+      return res.status(401).json({
+        success: false,
+        code: err.name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'TOKEN_INVALID',
+        message,
+      });
     }
 
     // Kiểm tra user vẫn còn tồn tại và đang active
@@ -56,6 +61,9 @@ async function authenticate(req, res, next) {
         message: 'Phiên làm việc đã kết thúc hoặc tài khoản vừa đăng nhập trên thiết bị khác. Vui lòng đăng nhập lại.',
       });
     }
+
+    // Cập nhật heartbeat hoạt động thời gian thực
+    recordUserHeartbeat(user.id);
 
     req.user = decoded;
     next();
