@@ -300,7 +300,22 @@ function emitContainerReadyForGateOut(request) {
  * @param {string} reason
  * @param {string} message
  */
-function kickUserSockets(userId, reason = 'CONCURRENT_LOGIN', message = 'Tài khoản của bạn vừa được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã bị đăng xuất.') {
+function hasActiveSockets(userId) {
+  if (!io || !userId) return false;
+  const userRoom = io.sockets?.adapter?.rooms?.get(`user:${userId}`);
+  const driverRoom = io.sockets?.adapter?.rooms?.get(`driver:${userId}`);
+  const userCount = userRoom ? userRoom.size : 0;
+  const driverCount = driverRoom ? driverRoom.size : 0;
+  return (userCount + driverCount) > 0;
+}
+
+/**
+ * Phát sự kiện kick session cũ khi tài khoản đăng nhập trên thiết bị / phiên khác.
+ * @param {string} userId
+ * @param {string} reason
+ * @param {string} message
+ */
+function kickUserSockets(userId, reason = 'DUPLICATE_LOGIN', message = 'Phát hiện đăng nhập trùng lặp! Toàn bộ phiên làm việc của tài khoản đã bị hủy để đảm bảo an toàn.') {
   if (!io || !userId) return;
   const payload = {
     userId,
@@ -343,5 +358,6 @@ module.exports = {
   emitYardOutboundRequested,
   emitCraneDispatched,
   emitContainerReadyForGateOut,
+  hasActiveSockets,
   kickUserSockets,
 };

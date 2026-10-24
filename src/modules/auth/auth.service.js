@@ -5,7 +5,28 @@ const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
 const { User } = require('../../models/User');
 const { generateToken } = require('../../utils/jwt');
-const { kickUserSockets } = require('../../config/socket');
+const { kickUserSockets, hasActiveSockets } = require('../../config/socket');
+
+// Map lưu thời điểm hoạt động gần nhất (heartbeat) của user: userId -> timestamp (ms)
+const activeHeartbeats = new Map();
+
+function recordUserHeartbeat(userId) {
+  if (userId) {
+    activeHeartbeats.set(userId, Date.now());
+  }
+}
+
+function clearUserHeartbeat(userId) {
+  if (userId) {
+    activeHeartbeats.delete(userId);
+  }
+}
+
+function isUserCurrentlyActive(userId) {
+  if (!userId) return false;
+  // Kiểm tra người dùng có kết nối socket đang hoạt động (trên web / mobile)
+  return hasActiveSockets(userId);
+}
 
 const { bcrypt: bcryptConfig } = require('../../config/env');
 
@@ -40,7 +61,7 @@ async function login(usernameOrEmail, password, rememberMe = false, expectedRole
   if (!user) {
     // Vẫn chạy bcrypt để tránh timing attack
     await bcrypt.compare(password, '$2b$12$invalidhashplaceholderXXXXXXXXXXXXXX');
-    const err = new Error('Tài khoản hoặc mật khẩu không chính xác.');
+    const err = new Error('Tài khoản không tồn tại!');
     err.statusCode = 401;
     throw err;
   }
@@ -55,7 +76,7 @@ async function login(usernameOrEmail, password, rememberMe = false, expectedRole
   // So sánh password
   const isPasswordValid = await bcrypt.compare(password, user.password);
   if (!isPasswordValid) {
-    const err = new Error('Tài khoản hoặc mật khẩu không chính xác.');
+    const err = new Error('Mật khẩu không chính xác!');
     err.statusCode = 401;
     throw err;
   }
@@ -86,22 +107,28 @@ async function login(usernameOrEmail, password, rememberMe = false, expectedRole
     }
   }
 
-  // KICK PHIÊN CŨ (Concurrent login kick-out):
-  // Nếu user đã có session_id hoặc đang có kết nối socket, lập tức phát lệnh kick toàn bộ phiên cũ
-  try {
-    kickUserSockets(
-      user.id,
-      'CONCURRENT_LOGIN',
-      'Tài khoản của bạn vừa được đăng nhập trên một thiết bị/trình duyệt khác. Phiên làm việc này đã bị đăng xuất.'
-    );
-  } catch (socketErr) {
-    console.error('[AuthService] Lỗi khi kickUserSockets:', socketErr.message);
+  // 5. XỬ LÝ PHIÊN ĐĂNG NHẬP (Single Active Session - Kickout Phiên 1, Phiên 2 thành công):
+  // Nếu tài khoản đang có phiên hoạt động (có kết nối socket hoặc session_id trước đó),
+  // ngay lập tức kick phiên cũ (Phiên 1) ra khỏi hệ thống qua WebSocket.
+  if (isUserCurrentlyActive(user.id) || user.session_id) {
+    console.warn(`[AuthService] Tài khoản "${user.username}" (${user.id}) có phiên mới đăng nhập. Cưỡng chế kick phiên cũ ra khỏi hệ thống.`);
+    try {
+      kickUserSockets(
+        user.id,
+        'CONCURRENT_LOGIN',
+        'Tài khoản của bạn vừa được đăng nhập trên một thiết bị hoặc trình duyệt khác. Để bảo vệ an toàn tài khoản, phiên làm việc trước đó đã tự động đăng xuất.'
+      );
+    } catch (socketErr) {
+      console.error('[AuthService] Lỗi khi kickUserSockets:', socketErr.message);
+    }
   }
 
-  // Tạo sessionId mới duy nhất cho phiên đăng nhập hiện tại
+  // Cấp sessionId mới cho Phiên 2 đăng nhập thành công
+  clearUserHeartbeat(user.id);
   const sessionId = crypto.randomUUID();
   user.session_id = sessionId;
   await user.save();
+  recordUserHeartbeat(user.id);
 
   // Fetch CarrierId if user is Transport Company, Carrier, or Carrier Staff
   let carrierId = null;
@@ -234,4 +261,4 @@ async function resetPassword(emailOrUsername, otp, newPassword) {
   };
 }
 
-module.exports = { login, forgotPassword, resetPassword };
+module.exports = { login, forgotPassword, resetPassword, recordUserHeartbeat, clearUserHeartbeat, isUserCurrentlyActive };
