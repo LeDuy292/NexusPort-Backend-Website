@@ -133,7 +133,7 @@ describe('POST /api/auth/login', () => {
 
       expect(res.status).toBe(401);
       expect(res.body.success).toBe(false);
-      expect(res.body.message).toBe('Mật khẩu không chính xác!');
+      expect(res.body.message).toBe('Tài khoản hoặc mật khẩu không chính xác.');
     });
 
     it('Username không tồn tại → 401', async () => {
@@ -144,7 +144,7 @@ describe('POST /api/auth/login', () => {
 
       expect(res.status).toBe(401);
       expect(res.body.success).toBe(false);
-      expect(res.body.message).toBe('Tài khoản không tồn tại!');
+      expect(res.body.message).toBe('Tài khoản hoặc mật khẩu không chính xác.');
     });
   });
 
