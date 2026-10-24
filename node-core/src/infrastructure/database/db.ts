@@ -1,12 +1,18 @@
 import { Pool } from 'pg';
 import { logger } from '../../shared/utils/logger';
 
+const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:11223344@localhost:5432/nexusport';
+const isSslRequired =
+  process.env.DB_SSL === 'true' ||
+  process.env.DB_TARGET === 'aiven' ||
+  connectionString.includes('sslmode=require');
+
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:120104@localhost:5432/nexusport',
+  connectionString,
   max: Number(process.env.DB_POOL_MAX || 5),
   idleTimeoutMillis: 10000,
   connectionTimeoutMillis: 10000,
-  ssl: { rejectUnauthorized: false },
+  ...(isSslRequired ? { ssl: { rejectUnauthorized: false } } : {}),
 });
 
 pool.on('error', (err) => {

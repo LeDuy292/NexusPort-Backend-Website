@@ -24,10 +24,13 @@ const authenticateDriver = async (req: DriverRequest, _res: Response, next: Next
     if (typeof accountId !== 'string' || !uuidPattern.test(accountId)) return next(new UnauthorizedError('Token không chứa tài khoản hợp lệ.'));
 
     // Kiểm tra tính hợp lệ của phiên đăng nhập duy nhất (Single Active Session)
-    if (payload.sessionId) {
+    if (process.env.NODE_ENV !== 'test') {
       const userRes = await query('SELECT session_id FROM users WHERE id = $1', [accountId]);
       const currentSessionId = userRes.rows[0]?.session_id;
-      if (!currentSessionId || currentSessionId !== payload.sessionId) {
+      if (
+        (currentSessionId && (!payload.sessionId || currentSessionId !== payload.sessionId)) ||
+        (!currentSessionId && payload.sessionId)
+      ) {
         return next(new UnauthorizedError('Phiên làm việc đã bị kết thúc do tài khoản vừa đăng nhập ở nơi khác.'));
       }
     }

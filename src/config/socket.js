@@ -43,9 +43,12 @@ function initSocket(server) {
       socket.data.user = decoded;
       socket.data.driverId = decoded.id;
       socket.data.role = decoded.role;
-      const expiryTimer = setTimeout(() => socket.disconnect(true), Math.max(0, decoded.exp * 1000 - Date.now()));
-      expiryTimer.unref?.();
-      socket.once('disconnect', () => clearTimeout(expiryTimer));
+      const remainingMs = Math.max(0, decoded.exp * 1000 - Date.now());
+      if (remainingMs > 0 && remainingMs <= 2147483647) {
+        const expiryTimer = setTimeout(() => socket.disconnect(true), remainingMs);
+        expiryTimer.unref?.();
+        socket.once('disconnect', () => clearTimeout(expiryTimer));
+      }
       next();
     } catch (err) {
       next(new Error('Token xác thực không hợp lệ hoặc đã hết hạn.'));
@@ -306,20 +309,25 @@ function kickUserSockets(userId, reason = 'CONCURRENT_LOGIN', message = 'Tài kh
     timestamp: new Date().toISOString(),
   };
 
-  // Gửi sự kiện cho toàn bộ client socket thuộc user này (cả phòng cá nhân và phòng driver)
+  // 1. Thu thập danh sách socket ĐANG TỒN TẠI tại thời điểm có yêu cầu kick
+  const userRoom = io.sockets?.adapter?.rooms?.get(`user:${userId}`);
+  const driverRoom = io.sockets?.adapter?.rooms?.get(`driver:${userId}`);
+  const targetSocketIds = new Set([
+    ...(userRoom ? Array.from(userRoom) : []),
+    ...(driverRoom ? Array.from(driverRoom) : []),
+  ]);
+
+  // 2. Gửi sự kiện cho toàn bộ client socket thuộc user này (cả phòng cá nhân và phòng driver)
   io.to(`user:${userId}`).emit('auth:session_kicked', payload);
   io.to(`driver:${userId}`).emit('auth:session_kicked', payload);
 
-  // Cho phép packet 'auth:session_kicked' bay tới client trước khi ngắt kết nối
+  // 3. Cho phép packet 'auth:session_kicked' bay tới client trước khi ngắt kết nối
+  // Chỉ ngắt những socket đã tồn tại lúc gọi kick (không ngắt socket của phiên mới vừa kết nối)
   setTimeout(() => {
-    const userRoom = io.sockets?.adapter?.rooms?.get(`user:${userId}`);
-    if (userRoom) {
-      const socketIds = Array.from(userRoom);
-      for (const sid of socketIds) {
-        const s = io.sockets.sockets.get(sid);
-        if (s) {
-          s.disconnect(true);
-        }
+    for (const sid of targetSocketIds) {
+      const s = io.sockets?.sockets?.get(sid);
+      if (s && s.connected) {
+        s.disconnect(true);
       }
     }
   }, 600);
