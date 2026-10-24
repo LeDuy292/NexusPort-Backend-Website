@@ -13,6 +13,8 @@ function generateToken(payload, expiresIn) {
   return jwt.sign(payload, jwtConfig.secret, {
     expiresIn: expiresIn || jwtConfig.expiresIn,
     algorithm: 'HS256',
+    issuer: 'NexusPort',
+    audience: 'NexusPortClients',
   });
 }
 
@@ -23,7 +25,11 @@ function generateToken(payload, expiresIn) {
  * @throws {Error} nếu token không hợp lệ hoặc đã hết hạn
  */
 function verifyToken(token) {
-  return jwt.verify(token, jwtConfig.secret, { algorithms: ['HS256'] });
+  return jwt.verify(token, jwtConfig.secret, { 
+    algorithms: ['HS256'],
+    issuer: 'NexusPort',
+    audience: 'NexusPortClients',
+  });
 }
 
 module.exports = { generateToken, verifyToken };

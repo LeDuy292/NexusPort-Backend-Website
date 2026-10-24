@@ -1,0 +1,17 @@
+{
+  "version": "example-only-replace-with-verified-yard-map",
+  "nodes": [
+    { "id": "entry", "label": "Cổng vào (ví dụ)", "x": 0, "y": 0, "gateCode": "G1" },
+    { "id": "main-road", "label": "Đường chính (ví dụ)", "x": 150, "y": 0 },
+    { "id": "bypass", "label": "Đường vòng (ví dụ)", "x": 0, "y": 120 },
+    { "id": "block-access", "label": "Lối vào Block (ví dụ)", "x": 150, "y": 120, "blockCode": "A01" },
+    { "id": "inspection", "label": "Khu kiểm hóa (ví dụ)", "x": 240, "y": 120, "location": "INSPECTION" }
+  ],
+  "edges": [
+    { "id": "entry-main", "from": "entry", "to": "main-road", "distanceMeters": 150, "travelSeconds": 35 },
+    { "id": "main-block", "from": "main-road", "to": "block-access", "distanceMeters": 120, "travelSeconds": 30, "congestion": 0 },
+    { "id": "entry-bypass", "from": "entry", "to": "bypass", "distanceMeters": 120, "travelSeconds": 40, "restricted": false },
+    { "id": "bypass-block", "from": "bypass", "to": "block-access", "distanceMeters": 150, "travelSeconds": 40 },
+    { "id": "block-inspection", "from": "block-access", "to": "inspection", "distanceMeters": 90, "travelSeconds": 25 }
+  ]
+}

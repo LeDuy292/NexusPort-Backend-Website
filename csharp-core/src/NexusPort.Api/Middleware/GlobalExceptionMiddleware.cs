@@ -1,3 +1,4 @@
+using Npgsql;
 using System.Net;
 using System.Text.Json;
 using NexusPort.Shared.Exceptions;
@@ -37,16 +38,30 @@ public class GlobalExceptionMiddleware
         var message = "An unexpected error occurred.";
         object? errors = null;
 
-        if (exception is AppException appEx)
+
+        var databaseError = exception as PostgresException ?? exception.InnerException as PostgresException;
+        if (databaseError?.SqlState == "23514")
+        {
+            statusCode = 422;
+            errorCode = "JOURNEY_CONFLICT";
+            message = databaseError.MessageText;
+        }
+        else if (exception is ValidationException valEx)
+        {
+            statusCode = valEx.StatusCode;
+            errorCode = valEx.ErrorCode;
+            message = valEx.Message;
+            errors = valEx.Errors;
+        }
+        else if (exception is AppException appEx)
         {
             statusCode = appEx.StatusCode;
             errorCode = appEx.ErrorCode;
             message = appEx.Message;
-
-            if (exception is ValidationException valEx)
-            {
-                errors = valEx.Errors;
-            }
+        }
+        else
+        {
+            message = exception.Message;
         }
 
         context.Response.StatusCode = statusCode;
@@ -57,6 +72,7 @@ public class GlobalExceptionMiddleware
             ErrorCode = errorCode,
             Message = message,
             Errors = errors,
+
             Timestamp = DateTime.UtcNow
         };
 

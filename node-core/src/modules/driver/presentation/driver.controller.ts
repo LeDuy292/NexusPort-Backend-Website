@@ -1,10 +1,105 @@
-﻿import { Request, Response } from 'express';
-import { Router } from 'express';
+import { Request, Response } from 'express';
+import { Router, NextFunction } from 'express';
+import jwt, { JwtPayload } from 'jsonwebtoken';
+import { query } from '../../../infrastructure/database/db';
 import { DriverRepository } from '../infrastructure/driver.repository';
+import { DriverRouteService } from '../application/driver-route.service';
+import { DriverDestinationRepository } from '../infrastructure/driver-destination.repository';
+import { DriverRouteRepository } from '../infrastructure/driver-route.repository';
+import { ConfiguredYardMapProvider } from '../infrastructure/yard-map.provider';
+import { ForbiddenError, UnauthorizedError, ValidationError } from '../../../shared/errors/app-error';
 import { sendSuccess, sendCreated } from '../../../shared/utils/response';
 
+interface DriverRequest extends Request { driverId?: string }
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const authenticateDriver = async (req: DriverRequest, _res: Response, next: NextFunction) => {
+  const token = req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
+  if (!token) return next(new UnauthorizedError('Driver cần đăng nhập để xem route.'));
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET || 'NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!', { algorithms: ['HS256'] }) as JwtPayload;
+    const role = String(payload.role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? '').toLowerCase();
+    if (role !== 'driver') return next(new ForbiddenError('Chỉ Driver được xem route của mình.'));
+    const accountId = payload.sub ?? payload.id ?? payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'];
+    if (typeof accountId !== 'string' || !uuidPattern.test(accountId)) return next(new UnauthorizedError('Token không chứa tài khoản hợp lệ.'));
+
+    // Kiểm tra tính hợp lệ của phiên đăng nhập duy nhất (Single Active Session)
+    if (process.env.NODE_ENV !== 'test') {
+      const userRes = await query('SELECT session_id FROM users WHERE id = $1', [accountId]);
+      const currentSessionId = userRes.rows[0]?.session_id;
+      if (
+        (currentSessionId && (!payload.sessionId || currentSessionId !== payload.sessionId)) ||
+        (!currentSessionId && payload.sessionId)
+      ) {
+        return next(new UnauthorizedError('Phiên làm việc đã bị kết thúc do tài khoản vừa đăng nhập ở nơi khác.'));
+      }
+    }
+
+    const driverId = await new DriverRouteRepository().resolveDriverId(accountId);
+    if (!driverId) return next(new ForbiddenError('Tài khoản chưa được liên kết với tài xế đang hoạt động.'));
+    req.driverId = driverId;
+    next();
+  } catch (error) {
+    if (error instanceof ForbiddenError || error instanceof UnauthorizedError) return next(error);
+    if (error instanceof jwt.JsonWebTokenError) return next(new UnauthorizedError('Token không hợp lệ hoặc đã hết hạn.'));
+    return next(error);
+  }
+};
+
 export class DriverController {
+  getYardMap = async (_req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      // Read the approved layout before Gate In; this grants no entry permission
+      // and does not expose another driver's booking or assigned destination.
+      sendSuccess(res, await new ConfiguredYardMapProvider().load(null));
+    } catch (error) { next(error); }
+  };
   private repository = new DriverRepository();
+  private routeService = new DriverRouteService();
+  private destinationRepository = new DriverDestinationRepository();
+
+  getMyDestinations = async (req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
+    try { sendSuccess(res, await this.destinationRepository.findForDriver(req.driverId!)); }
+    catch (error) { next(error); }
+  };
+
+  getMyRoutes = async (req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
+    try { res.setHeader('Cache-Control', 'no-store'); sendSuccess(res, await this.routeService.list(req.driverId!)); }
+    catch (error) { next(error); }
+  };
+
+  getMyContainerRoute = async (req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (!uuidPattern.test(req.params.containerId)) throw new ValidationError('Container ID không hợp lệ.');
+      const currentNodeId = req.query.currentNodeId;
+      const bookingId = req.query.bookingId;
+      if (bookingId !== undefined && (typeof bookingId !== 'string' || !uuidPattern.test(bookingId))) throw new ValidationError('Booking ID không hợp lệ.');
+      if (currentNodeId !== undefined && (typeof currentNodeId !== 'string' || !currentNodeId.trim() || currentNodeId.length > 120)) {
+        throw new ValidationError('Vị trí hiện tại không hợp lệ.');
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      sendSuccess(res, bookingId
+        ? await this.routeService.get(req.driverId!, req.params.containerId, currentNodeId as string | undefined, bookingId as string)
+        : await this.routeService.get(req.driverId!, req.params.containerId, currentNodeId as string | undefined));
+    } catch (error) { next(error); }
+  };
+
+  arrive = async (req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (!uuidPattern.test(req.params.containerId)) throw new ValidationError('Container ID không hợp lệ.');
+      res.setHeader('Cache-Control', 'no-store');
+      sendSuccess(res, await this.routeService.arrive(req.driverId!, req.params.containerId, req.body));
+    } catch (error) { next(error); }
+  };
+
+  confirm = async (req: DriverRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      if (!uuidPattern.test(req.params.containerId)) throw new ValidationError('Container ID không hợp lệ.');
+      res.setHeader('Cache-Control', 'no-store');
+      sendSuccess(res, await this.routeService.confirm(req.driverId!, req.params.containerId, req.body));
+    } catch (error) { next(error); }
+  };
 
   getAll = async (req: Request, res: Response): Promise<void> => {
     const items = await this.repository.findAll();
@@ -34,6 +129,12 @@ export const createDriverRouter = (): Router => {
   const router = Router();
   const controller = new DriverController();
 
+  router.get('/me/yard-map', authenticateDriver, controller.getYardMap);
+  router.get('/me/routes', authenticateDriver, controller.getMyRoutes);
+  router.get('/me/routes/:containerId', authenticateDriver, controller.getMyContainerRoute);
+  router.post('/me/routes/:containerId/progress', authenticateDriver, controller.arrive);
+  router.post('/me/routes/:containerId/confirm-container', authenticateDriver, controller.confirm);
+  router.get('/me/destinations', authenticateDriver, controller.getMyDestinations);
   router.get('/', controller.getAll);
   router.get('/:id', controller.getById);
   router.post('/', controller.create);
