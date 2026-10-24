@@ -62,8 +62,10 @@ async function authenticate(req, res, next) {
       });
     }
 
-    // Cập nhật heartbeat hoạt động thời gian thực
-    recordUserHeartbeat(user.id);
+    // Cập nhật heartbeat hoạt động thời gian thực (nếu service khả dụng)
+    if (typeof recordUserHeartbeat === 'function') {
+      recordUserHeartbeat(user.id);
+    }
 
     req.user = decoded;
     next();
