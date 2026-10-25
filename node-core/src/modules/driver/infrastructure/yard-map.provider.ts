@@ -1,6 +1,7 @@
 import { readFile } from 'fs/promises';
 import { query } from '../../../infrastructure/database/db';
 import { YardMap, yardMapSchema } from '../domain/smart-route';
+import referenceLayout from '../../../shared/yard/reference-layout.json';
 
 export interface YardMapSnapshot {
   map: YardMap | null;
@@ -69,7 +70,9 @@ export class ConfiguredYardMapProvider implements YardMapProvider {
           containerId: slot.containerId == null ? null : String(slot.containerId),
         }));
       }
-      return { map };
+      // Reference geometry is explicitly proposed. Never project an approved
+      // route onto this drawing or substitute it for the active road graph.
+      return { map: { ...map, referenceLayout } };
     } catch {
       return { map: null, errorCode: 'YARD_MAP_INVALID' };
     }

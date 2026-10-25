@@ -7,6 +7,27 @@ const ctrl = require('./yard.controller');
 
 const router = Router();
 
+// Staff-only: this response contains current physical container positions.
+router.get('/layout', authenticate,
+  authorize('Yard Operator', 'Dispatcher', 'Administrator', 'Gate Officer'),
+  async (_req, res, next) => {
+    try {
+      const { getLayoutSnapshot } = require('./yard-layout');
+      res.set('Cache-Control', 'no-store');
+      res.json({ success: true, data: await getLayoutSnapshot() });
+    } catch (error) { next(error); }
+  });
+
+router.post('/blocks',authenticate,authorize('Yard Operator','Administrator'),async(req,res,next)=>{
+  try{res.status(201).json({success:true,data:await require('./yard-layout.commands').createBlock(req.body)});}catch(error){next(error);}
+});
+router.get('/blocks',authenticate,authorize('Yard Operator','Dispatcher','Administrator','Gate Officer'),async(_req,res,next)=>{
+  try{const layout=require('./yard-layout');res.set('Cache-Control','no-store');res.json({success:true,data:layout.blockDirectory(await layout.getLayoutSnapshot())});}catch(error){next(error);}
+});
+router.post('/slots/:id/maintenance',authenticate,authorize('Yard Operator','Administrator'),async(req,res,next)=>{
+  try{res.json({success:true,data:await require('./yard-layout.commands').setMaintenance(req.params.id,req.body.maintenance)});}catch(error){next(error);}
+});
+
 /**
  * @openapi
  * /api/yard/gate-out-requests:

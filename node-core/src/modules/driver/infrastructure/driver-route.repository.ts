@@ -93,7 +93,7 @@ export const driverRouteQuery = `
  LEFT JOIN driver_route_progress pr ON pr.gate_transaction_id=gt.id AND pr.container_id=c.id
  LEFT JOIN LATERAL (SELECT p.current_node_id FROM driver_route_progress p WHERE p.gate_transaction_id=gt.id
    AND p.current_node_id IS NOT NULL ORDER BY p.updated_at DESC,p.container_id DESC LIMIT 1) vehicle_position ON true
- LEFT JOIN LATERAL (SELECT eg.code FROM gates eg WHERE eg.is_active AND eg.code='GATE-03' LIMIT 1) exit_gate ON true
+ LEFT JOIN LATERAL (SELECT eg.code FROM gates eg WHERE eg.is_active AND eg.code IN ('GATE-02','GATE-03') ORDER BY (eg.code='GATE-02') DESC LIMIT 1) exit_gate ON true
  WHERE ($1::uuid IS NULL OR gt.driver_id=$1) AND ($2::uuid IS NULL OR c.id=$2)
    AND ($3::uuid IS NULL OR b.id=$3) AND b.status::text NOT IN ('canceled','rejected','expired')
    AND (ex.checked_at IS NULL OR ex.checked_at>now()-interval '24 hours')

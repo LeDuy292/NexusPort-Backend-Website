@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import referenceLayout from '../../../shared/yard/reference-layout.json';
 
 const identifier = z.string().trim().min(1).max(120);
 // PostgreSQL jsonb_build_object(now()) emits an ISO timestamp with an offset,
@@ -31,6 +32,7 @@ export const yardMapSchema = z.object({
     instruction: z.string().trim().min(1).max(500).optional(),
   })).max(10000),
   layout: z.object({
+    drawingVersion: identifier.optional(),
     blocks: z.array(z.object({
       code: identifier, label: z.string().min(1).max(200),
       x: z.number().finite(), y: z.number().finite(),
@@ -54,7 +56,7 @@ export const yardMapSchema = z.object({
   }
 });
 
-export type YardMap = z.infer<typeof yardMapSchema>;
+export type YardMap = z.infer<typeof yardMapSchema> & { referenceLayout?: typeof referenceLayout };
 export type RouteNode = YardMap['nodes'][number];
 export type RouteEdge = YardMap['edges'][number];
 

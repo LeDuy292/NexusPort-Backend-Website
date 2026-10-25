@@ -17,7 +17,7 @@ export class GateMovementService {
       if(!booking) throw new NotFoundError('Booking',bookingId);
       const previous=(await client.query(`SELECT id FROM gate_transactions WHERE booking_id=$1 AND gate_type='gate_out' AND status='completed' LIMIT 1`,[bookingId])).rows[0];
       if(previous){await client.query('COMMIT');return previous;}
-      const gate=(await client.query(`SELECT id FROM gates WHERE id=$1 AND code='GATE-03' AND is_active`,[gateId])).rows[0];
+      const gate=(await client.query(`SELECT id FROM gates WHERE id=$1 AND code IN ('GATE-02','GATE-03') AND is_active`,[gateId])).rows[0];
       if(!gate) throw new ValidationError('Cổng ra không hợp lệ hoặc đã ngừng hoạt động.');
       if(booking.status!=='completed') throw new ConflictError('Xe chưa hoàn tất giao nhận tại bãi.');
       const entered=(await client.query(`SELECT id FROM gate_transactions WHERE booking_id=$1 AND gate_type='gate_in' AND status='completed' LIMIT 1`,[bookingId])).rows[0];

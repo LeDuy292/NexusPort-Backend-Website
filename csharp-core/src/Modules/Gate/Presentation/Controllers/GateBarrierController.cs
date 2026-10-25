@@ -52,7 +52,7 @@ public class GateBarrierController(AppDbContext context, ICurrentUser user, IBoo
         await using var transaction=await context.Database.BeginTransactionAsync(token);
         // Serialize commands for one gate, including retries with the same request ID.
         var gates=await context.Database.SqlQueryRaw<BarrierGate>(
-          "SELECT id AS \"Id\",CASE WHEN code='GATE-03' THEN 'gate_out' ELSE 'gate_in' END AS \"Type\" FROM gates WHERE code={0} AND code IN ('GATE-01','GATE-03') AND is_active FOR UPDATE",gateCode).ToListAsync(token);
+          "SELECT id AS \"Id\",CASE WHEN code IN ('GATE-02','GATE-03') THEN 'gate_out' ELSE 'gate_in' END AS \"Type\" FROM gates WHERE code={0} AND code IN ('GATE-01','GATE-02','GATE-03') AND is_active FOR UPDATE",gateCode).ToListAsync(token);
         if(gates.Count!=1) throw new ValidationException("Gate","Cổng không tồn tại hoặc đang ngừng hoạt động.");
         var previous=await context.Database.SqlQueryRaw<BarrierCommandResult>(CommandSelect+" WHERE id={0}",request.RequestId).FirstOrDefaultAsync(token);
         if(previous!=null)
