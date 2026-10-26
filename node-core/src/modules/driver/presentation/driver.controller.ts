@@ -7,6 +7,7 @@ import { DriverRouteService } from '../application/driver-route.service';
 import { DriverDestinationRepository } from '../infrastructure/driver-destination.repository';
 import { DriverRouteRepository } from '../infrastructure/driver-route.repository';
 import { ConfiguredYardMapProvider } from '../infrastructure/yard-map.provider';
+import referenceLayout from '../../../shared/yard/reference-layout.json';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '../../../shared/errors/app-error';
 import { sendSuccess, sendCreated } from '../../../shared/utils/response';
 
@@ -52,7 +53,7 @@ export class DriverController {
       res.setHeader('Cache-Control', 'no-store');
       // Read the approved layout before Gate In; this grants no entry permission
       // and does not expose another driver's booking or assigned destination.
-      sendSuccess(res, await new ConfiguredYardMapProvider().load(null));
+      sendSuccess(res, { ...await new ConfiguredYardMapProvider().load(null), referenceLayout });
     } catch (error) { next(error); }
   };
   private repository = new DriverRepository();

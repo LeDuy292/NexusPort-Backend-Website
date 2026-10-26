@@ -75,7 +75,10 @@ public class GateEntryOrderRule(AppDbContext database) : IGateRule
     public int Priority => 15;
     public async Task<GateRuleResult> EvaluateAsync(GateValidationContext context, CancellationToken cancellationToken = default)
     {
-        var expected=string.Equals(context.GateType,"GateOut",StringComparison.OrdinalIgnoreCase)?"GATE-03":"GATE-01";
+        var isExit=string.Equals(context.GateType,"GateOut",StringComparison.OrdinalIgnoreCase);
+        var expected=isExit
+            ? await database.Database.SqlQueryRaw<string>("SELECT code AS \"Value\" FROM gates WHERE is_active AND code IN ('GATE-02','GATE-03') ORDER BY (code='GATE-02') DESC LIMIT 1").FirstOrDefaultAsync(cancellationToken) ?? "GATE-02"
+            : "GATE-01";
         if(!string.Equals(context.GateCode,expected,StringComparison.OrdinalIgnoreCase))
             return GateRuleResult.Fail(RuleName,"GATE_DIRECTION_MISMATCH",$"Luồng này chỉ sử dụng cổng {expected}.");
         if (!string.Equals(context.GateType,"GateIn",StringComparison.OrdinalIgnoreCase) || context.Booking==null)
