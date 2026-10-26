@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 
 const request = require('supertest');
 const http = require('http');
@@ -36,8 +36,10 @@ describe('Yard Outbound Container Confirmation API (Xác Nhận Container Xuất
         password: 'password123',
         email: 'yard_staff_test@example.com',
         role: 'Yard Operator',
+        is_active: true,
       },
     });
+    await User.update({ role: 'Yard Operator', is_active: true }, { where: { id: yardStaffId } });
 
     await User.findOrCreate({
       where: { id: gateOfficerId },
@@ -46,8 +48,10 @@ describe('Yard Outbound Container Confirmation API (Xác Nhận Container Xuất
         password: 'password123',
         email: 'gate_officer_test@example.com',
         role: 'Gate Officer',
+        is_active: true,
       },
     });
+    await User.update({ role: 'Gate Officer', is_active: true }, { where: { id: gateOfficerId } });
 
     await User.findOrCreate({
       where: { id: driverId },
@@ -56,8 +60,10 @@ describe('Yard Outbound Container Confirmation API (Xác Nhận Container Xuất
         password: 'password123',
         email: 'driver_outbound_test@example.com',
         role: 'Driver',
+        is_active: true,
       },
     });
+    await User.update({ role: 'Driver', is_active: true }, { where: { id: driverId } });
 
     yardStaffToken = generateToken({ id: yardStaffId, username: 'yard_staff_test', role: 'Yard Operator' });
     gateOfficerToken = generateToken({ id: gateOfficerId, username: 'gate_officer_test', role: 'Gate Officer' });
@@ -284,37 +290,68 @@ describe('Yard Outbound Container Confirmation API (Xác Nhận Container Xuất
     });
 
     it('TC-YGO-11: gate staff receives realtime socket event when container is ready for gate out', (done) => {
-      const gateSocket = ioClient(serverUrl, {
-        auth: { token: gateOfficerToken },
-        transports: ['websocket'],
-      });
-
-      gateSocket.on('connect', async () => {
-        gateSocket.on('gate:container_ready', (event) => {
-          try {
-            expect(event.containerId).toBe('TEST-CONT-9988');
-            expect(event.truckPlate).toBe('43C-999.11');
-            expect(event.status).toBe('READY_FOR_GATE_OUT');
-            expect(event.slotStatus).toBe('Available');
-            gateSocket.disconnect();
-            done();
-          } catch (err) {
-            gateSocket.disconnect();
-            done(err);
-          }
+      // Create a fresh independent fixture so this test does not depend on TC-YGO-10 shared state
+      YardGateOutRequest.create({
+        container_id: 'SOCKET-TEST-CONT-7711',
+        container_type: '20FT',
+        cargo_type: 'Hang kho',
+        driver_name: 'Nguyen Socket Test',
+        driver_phone: '0905000111',
+        driver_id: driverId,
+        truck_plate: '51C-111.77',
+        gate_name: 'Cong A',
+        booking_code: 'BK-SOCKET-7711',
+        seal_number: 'SEAL-SOCKET-7711',
+        yard_block: 'C',
+        yard_bay: '01',
+        yard_row: '01',
+        yard_tier: '1',
+        yard_slot: 'C-01-01-1',
+        slot_status: 'Occupied',
+        status: 'IN_PROGRESS',
+        urgency: 'LOW',
+        condition: 'Tot',
+        rtg_crane: 'RTG-01',
+        rtg_operator: 'Test Operator',
+        flow_step: 3,
+      }).then((freshRequest) => {
+        const gateSocket = ioClient(serverUrl, {
+          auth: { token: yardStaffToken },
+          transports: ['websocket'],
         });
 
-        // Trigger confirmation again to verify socket emission
-        await request(app)
-          .post(`/api/yard/gate-out-requests/${testRequest.id}/confirm-loaded`)
-          .set('Authorization', `Bearer ${yardStaffToken}`)
-          .send({
-            verifiedContainerId: true,
-            verifiedSeal: true,
-            verifiedNoDamage: true,
+        gateSocket.on('connect', async () => {
+          gateSocket.on('yard:container_ready', (event) => {
+            try {
+              expect(event.containerId).toBe('SOCKET-TEST-CONT-7711');
+              expect(event.status).toBe('READY_FOR_GATE_OUT');
+              expect(event.slotStatus).toBe('Available');
+              gateSocket.disconnect();
+              YardGateOutRequest.destroy({ where: { id: freshRequest.id } }).catch(() => {});
+              done();
+            } catch (err) {
+              gateSocket.disconnect();
+              YardGateOutRequest.destroy({ where: { id: freshRequest.id } }).catch(() => {});
+              done(err);
+            }
           });
-      });
-    });
+
+          await request(app)
+            .post(`/api/yard/gate-out-requests/${freshRequest.id}/confirm-loaded`)
+            .set('Authorization', `Bearer ${yardStaffToken}`)
+            .send({
+              verifiedContainerId: true,
+              verifiedSeal: true,
+              verifiedNoDamage: true,
+            });
+        });
+
+        gateSocket.on('connect_error', (err) => {
+          YardGateOutRequest.destroy({ where: { id: freshRequest.id } }).catch(() => {});
+          done(err);
+        });
+      }).catch(done);
+    }, 10000); // tang timeout len 10s cho socket round-trip
 
     it('TC-YGO-12: driver receives realtime trip status update when container is loaded onto truck', (done) => {
       const driverSocket = ioClient(serverUrl, {
@@ -326,8 +363,8 @@ describe('Yard Outbound Container Confirmation API (Xác Nhận Container Xuất
         driverSocket.on('trip:status_updated', (event) => {
           try {
             expect(event.status).toBe('Container Picked Up');
-            expect(event.containerId).toBe('TEST-CONT-9988');
-            expect(event.message).toContain('xuất bãi');
+            expect(event.containerId).toBe('SOCKET-TEST-CONT-7712');
+            expect(event.message).toContain('cổng');
             driverSocket.disconnect();
             done();
           } catch (err) {
@@ -336,17 +373,41 @@ describe('Yard Outbound Container Confirmation API (Xác Nhận Container Xuất
           }
         });
 
-        // Trigger confirmation to verify driver socket emission
+        const freshReq2 = await YardGateOutRequest.create({
+          container_id: 'SOCKET-TEST-CONT-7712',
+          container_type: '20FT',
+          cargo_type: 'Hang kho',
+          driver_name: 'Nguyen Socket Test 2',
+          driver_phone: '0905000222',
+          driver_id: driverId,
+          truck_plate: '51C-222.88',
+          gate_name: 'Cong A',
+          booking_code: 'BK-SOCKET-7712',
+          seal_number: 'SEAL-SOCKET-7712',
+          yard_block: 'D',
+          yard_bay: '02',
+          yard_row: '02',
+          yard_tier: '1',
+          yard_slot: 'D-02-02-1',
+          slot_status: 'Occupied',
+          status: 'IN_PROGRESS',
+          urgency: 'LOW',
+          condition: 'Tot',
+          rtg_crane: 'RTG-02',
+          rtg_operator: 'Test Operator 2',
+          flow_step: 3,
+        });
+
         await request(app)
-          .post(`/api/yard/gate-out-requests/${testRequest.id}/confirm-loaded`)
+          .post(`/api/yard/gate-out-requests/${freshReq2.id}/confirm-loaded`)
           .set('Authorization', `Bearer ${yardStaffToken}`)
-          .send({
-            verifiedContainerId: true,
-            verifiedSeal: true,
-            verifiedNoDamage: true,
-          });
+          .send({ verifiedContainerId: true, verifiedSeal: true, verifiedNoDamage: true });
+
+        YardGateOutRequest.destroy({ where: { id: freshReq2.id } }).catch(() => {});
       });
-    });
+
+      driverSocket.on('connect_error', (err) => done(err));
+    }, 10000);
   });
 
   describe('Edge Cases & Validation', () => {
