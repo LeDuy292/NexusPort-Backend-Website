@@ -33,12 +33,141 @@ public class BookingDto
     public List<BookingContainerSelectionDto> ContainerSelections { get; set; } = new();
     public List<string> ContainerNumbers { get; set; } = new();
 
+    // Multi-operation and combined trip properties
+    public bool IsCombined { get; set; }
+    public string TripStatus { get; set; } = "Scheduled";
+    public Guid? CustomerId { get; set; }
+    public List<BookingOperationDto> Operations { get; set; } = new();
+    public List<BookingDocumentDto> Documents { get; set; } = new();
+
     // Payment & TOS Tariff details
     public string PaymentStatus { get; set; } = "Unpaid";
     public decimal TotalAmount { get; set; } = 583200m;
     public string? InvoiceNo { get; set; }
     public string? TransactionRef { get; set; }
     public DateTime? PaidAt { get; set; }
+
+    // Cold Storage Reefer Power Supply details
+    public bool IsReeferPowerRequired { get; set; }
+    public decimal? TargetTemperature { get; set; }
+    public string? TemperatureUnit { get; set; } = "C";
+    public decimal? TempTolerance { get; set; } = 2.0m;
+    public Guid? ReeferPlugId { get; set; }
+    public string? ReeferPlugCode { get; set; }
+    public string? ReeferPowerStatus { get; set; }
+    public decimal? RequiredPowerKw { get; set; } = 15.0m;
+}
+
+public class BookingOperationDto
+{
+    public Guid Id { get; set; }
+    public Guid BookingId { get; set; }
+    public string OperationType { get; set; } = "Export";
+    public int SequenceNumber { get; set; } = 1;
+    public string ExpectedGateDirection { get; set; } = "GateIn";
+    public string Status { get; set; } = "PendingVerification";
+
+    public Guid? ContainerId { get; set; }
+    public string ContainerNumber { get; set; } = string.Empty;
+    public string ContainerIsoSize { get; set; } = "20GP";
+    public string CargoStatus { get; set; } = "Loaded";
+    public string CargoType { get; set; } = "General";
+
+    public string? CarrierBookingNumber { get; set; }
+    public string? BillOfLadingNumber { get; set; }
+    public string? DeliveryOrderNumber { get; set; }
+    public string? CustomsDeclarationNumber { get; set; }
+    public string? SealNumber { get; set; }
+    public decimal? GrossWeightKg { get; set; }
+
+    public decimal? TemperatureSetpoint { get; set; }
+    public string? TemperatureUnit { get; set; } = "C";
+    public string? UnNumber { get; set; }
+    public string? DgClass { get; set; }
+    public string? SpecialHandlingRequirements { get; set; }
+
+    public string VerificationStatus { get; set; } = "Pending";
+    public Guid? VerifiedBy { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? VerificationNotes { get; set; }
+
+    public string? EirNumber { get; set; }
+    public DateTime? EirIssuedAt { get; set; }
+    public string? ContainerCondition { get; set; } = "Good";
+
+    public List<BookingDocumentDto> Documents { get; set; } = new();
+}
+
+public class CreateBookingOperationDto
+{
+    public string OperationType { get; set; } = "Export";
+    public int SequenceNumber { get; set; } = 1;
+    public string ExpectedGateDirection { get; set; } = "GateIn";
+    public Guid? ContainerId { get; set; }
+    public string ContainerNumber { get; set; } = string.Empty;
+    public string ContainerIsoSize { get; set; } = "20GP";
+    public string CargoStatus { get; set; } = "Loaded";
+    public string CargoType { get; set; } = "General";
+
+    public string? CarrierBookingNumber { get; set; }
+    public string? BillOfLadingNumber { get; set; }
+    public string? DeliveryOrderNumber { get; set; }
+    public string? CustomsDeclarationNumber { get; set; }
+    public string? SealNumber { get; set; }
+    public decimal? GrossWeightKg { get; set; }
+
+    public decimal? TemperatureSetpoint { get; set; }
+    public string? TemperatureUnit { get; set; } = "C";
+    public string? UnNumber { get; set; }
+    public string? DgClass { get; set; }
+    public string? SpecialHandlingRequirements { get; set; }
+
+    public List<CreateBookingDocumentDto> Documents { get; set; } = new();
+}
+
+public class BookingDocumentDto
+{
+    public Guid Id { get; set; }
+    public Guid BookingId { get; set; }
+    public Guid? BookingOperationId { get; set; }
+    public string DocumentType { get; set; } = string.Empty;
+    public string? DocumentNumber { get; set; }
+    public string? FileUrl { get; set; }
+    public string? FileName { get; set; }
+    public long? FileSizeBytes { get; set; }
+    public string? Issuer { get; set; }
+    public string VerificationStatus { get; set; } = "Uploaded";
+    public Guid? VerifiedBy { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? RejectionReason { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+public class CreateBookingDocumentDto
+{
+    public Guid? BookingOperationId { get; set; }
+    public string DocumentType { get; set; } = "Other";
+    public string? DocumentNumber { get; set; }
+    public string? FileUrl { get; set; }
+    public string? FileName { get; set; }
+    public long? FileSizeBytes { get; set; }
+    public string? Issuer { get; set; }
+    public DateTime? ExpiryDate { get; set; }
+}
+
+public class VerifyBookingDocumentDto
+{
+    public bool IsApproved { get; set; }
+    public string? Reason { get; set; }
+}
+
+public class UpdateBookingOperationStatusDto
+{
+    public string Status { get; set; } = "Approved"; // Approved, OnHold, InProgress, Completed, Rejected
+    public string? Notes { get; set; }
+    public string? EirNumber { get; set; }
+    public string? ContainerCondition { get; set; }
 }
 
 public class BookingContainerSelectionDto
@@ -75,6 +204,22 @@ public class CreateBookingDto
     public DateTime? ValidFrom { get; set; }
     public DateTime? ValidTo { get; set; }
     public string? GateType { get; set; } = "GateIn";
+
+    // Multi-operation and combined trip additions
+    public bool IsCombined { get; set; }
+    public Guid? CustomerId { get; set; }
+    public List<CreateBookingOperationDto> Operations { get; set; } = new();
+    public List<CreateBookingDocumentDto> Documents { get; set; } = new();
+
+    // Cold Storage Reefer Power Supply configuration
+    public bool IsReeferPowerRequired { get; set; }
+    public decimal? TargetTemperature { get; set; } = -18.0m;
+    public string? TemperatureUnit { get; set; } = "C";
+    public decimal? TempTolerance { get; set; } = 2.0m;
+    public Guid? ReeferPlugId { get; set; }
+    public string? ReeferPlugCode { get; set; }
+    public decimal? RequiredPowerKw { get; set; } = 15.0m;
+    public string? SpecialColdInstructions { get; set; }
 }
 
 public class UpdateBookingDto

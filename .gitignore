@@ -29,3 +29,6 @@ init_db.js
 schema.sql
 *.backup
 *.dump
+
+# Uploads & user files
+**/wwwroot/uploads/

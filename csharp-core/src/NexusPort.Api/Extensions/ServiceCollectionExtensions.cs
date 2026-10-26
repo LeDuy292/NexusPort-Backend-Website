@@ -152,6 +152,8 @@ public static class ServiceCollectionExtensions
 
         // Booking
         services.AddScoped<IBookingRepository, BookingRepository>();
+        services.AddScoped<IBookingCompatibilityPolicy, BookingCompatibilityPolicy>();
+        services.AddScoped<IBookingDocumentRequirementPolicy, BookingDocumentRequirementPolicy>();
         services.AddScoped<IBookingValidationService, BookingValidationService>();
         services.AddScoped<IBookingService, BookingService>();
 

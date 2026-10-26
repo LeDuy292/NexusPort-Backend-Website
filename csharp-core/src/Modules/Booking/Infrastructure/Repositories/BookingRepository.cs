@@ -21,6 +21,9 @@ public class BookingRepository : IBookingRepository
     {
         return await _dbSet
             .Include(b => b.BookingContainers)
+            .Include(b => b.BookingOperations)
+                .ThenInclude(o => o.Documents)
+            .Include(b => b.BookingDocuments)
             .FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
     }
 
@@ -28,6 +31,9 @@ public class BookingRepository : IBookingRepository
     {
         return await _dbSet
             .Include(b => b.BookingContainers)
+            .Include(b => b.BookingOperations)
+                .ThenInclude(o => o.Documents)
+            .Include(b => b.BookingDocuments)
             .FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
     }
 
@@ -35,6 +41,8 @@ public class BookingRepository : IBookingRepository
     {
         return await _dbSet
             .Include(b => b.BookingContainers)
+            .Include(b => b.BookingOperations)
+            .Include(b => b.BookingDocuments)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
     }
@@ -43,6 +51,8 @@ public class BookingRepository : IBookingRepository
     {
         var query = _dbSet
             .Include(b => b.BookingContainers)
+            .Include(b => b.BookingOperations)
+            .Include(b => b.BookingDocuments)
             .AsNoTracking()
             .AsQueryable();
 

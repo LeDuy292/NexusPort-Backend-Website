@@ -8,8 +8,8 @@ const isSslRequired =
   connectionString.includes('sslmode=require');
 
 const pool = new Pool({
-  connectionString,
-  max: Number(process.env.DB_POOL_MAX || 5),
+  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:120104@localhost:5432/nexusport',
+  max: Number(process.env.DB_POOL_MAX || 2),
   idleTimeoutMillis: 10000,
   connectionTimeoutMillis: 10000,
   ...(isSslRequired ? { ssl: { rejectUnauthorized: false } } : {}),

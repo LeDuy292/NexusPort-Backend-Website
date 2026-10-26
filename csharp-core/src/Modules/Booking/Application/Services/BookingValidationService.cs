@@ -10,10 +10,17 @@ namespace NexusPort.Modules.Booking.Application.Services;
 public class BookingValidationService : IBookingValidationService
 {
     private readonly AppDbContext _context;
+    private readonly IBookingCompatibilityPolicy _compatibilityPolicy;
+    private readonly IBookingDocumentRequirementPolicy _documentRequirementPolicy;
 
-    public BookingValidationService(AppDbContext context)
+    public BookingValidationService(
+        AppDbContext context,
+        IBookingCompatibilityPolicy compatibilityPolicy,
+        IBookingDocumentRequirementPolicy documentRequirementPolicy)
     {
         _context = context;
+        _compatibilityPolicy = compatibilityPolicy;
+        _documentRequirementPolicy = documentRequirementPolicy;
     }
 
     public async Task ValidateBookingAsync(CreateBookingDto dto, CancellationToken cancellationToken = default)
@@ -96,8 +103,49 @@ public class BookingValidationService : IBookingValidationService
             }
         }
 
-        // 5. Container Validation
-        if (dto.ContainerIds != null && dto.ContainerIds.Any())
+        // 5. Multi-operation & Combined Operation Validation
+        if (dto.Operations != null && dto.Operations.Count > 0)
+        {
+            var combinationCheck = _compatibilityPolicy.ValidateCombination(dto.Operations);
+            if (!combinationCheck.IsValid)
+            {
+                AddError("Operations", combinationCheck.ErrorMessage ?? "Tổ hợp tác nghiệp không hợp lệ.");
+            }
+
+            foreach (var op in dto.Operations)
+            {
+                if (string.IsNullOrWhiteSpace(op.ContainerNumber))
+                {
+                    AddError("ContainerNumber", $"Tác nghiệp '{op.OperationType}' yêu cầu số container.");
+                }
+
+                // Kiểm tra loại hàng và trạng thái tải
+                if (string.Equals(op.CargoStatus, "Empty", StringComparison.OrdinalIgnoreCase) &&
+                    (string.Equals(op.OperationType, "Export", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(op.OperationType, "Import", StringComparison.OrdinalIgnoreCase)))
+                {
+                    AddError("CargoStatus", $"Tác nghiệp '{op.OperationType}' phải là container hàng có tải (Loaded), không thể là vỏ rỗng.");
+                }
+
+                // Kiểm tra chứng từ đính kèm
+                var uploadedDocTypes = (op.Documents ?? new List<CreateBookingDocumentDto>())
+                    .Select(d => d.DocumentType)
+                    .Concat((dto.Documents ?? new List<CreateBookingDocumentDto>()).Select(d => d.DocumentType))
+                    .ToList();
+
+                var docValidation = _documentRequirementPolicy.ValidateUploadedDocuments(
+                    op.OperationType,
+                    op.CargoStatus,
+                    op.CargoType,
+                    uploadedDocTypes);
+
+                if (!docValidation.IsValid)
+                {
+                    AddError($"Documents_{op.OperationType}", $"Tác nghiệp '{op.OperationType}' ({op.ContainerNumber}) còn thiếu chứng từ bắt buộc: {string.Join(", ", docValidation.MissingMandatoryDocuments)}");
+                }
+            }
+        }
+        else if (dto.ContainerIds != null && dto.ContainerIds.Any())
         {
             var distinctContainerIds = dto.ContainerIds.Distinct().ToList();
             var containers = await _context.Set<Container.Domain.Entities.Container>()
@@ -116,6 +164,7 @@ public class BookingValidationService : IBookingValidationService
         // 6. Duplicate / Overlapping Booking Validation
         var overlappingBookings = await _context.Set<Domain.Entities.Booking>()
             .Include(b => b.BookingContainers)
+            .Include(b => b.BookingOperations)
             .AsNoTracking()
             .Where(b => b.Id != dto.ExcludeBookingId && b.Status != BookingStatus.Canceled &&
                         b.Status != BookingStatus.Completed &&
@@ -139,7 +188,26 @@ public class BookingValidationService : IBookingValidationService
                 AddError(nameof(dto.TruckId), "Xe đầu kéo đã có một lịch hẹn đặt chỗ khác đang hoạt động trong khung giờ bị trùng lặp này.");
             }
 
-            if (dto.ContainerIds != null && dto.ContainerIds.Any())
+            if (dto.Operations != null && dto.Operations.Count > 0)
+            {
+                var activeContainerNos = overlappingBookings
+                    .SelectMany(b => b.BookingOperations)
+                    .Select(bo => bo.ContainerNumber?.Trim().ToUpperInvariant())
+                    .Where(no => !string.IsNullOrWhiteSpace(no))
+                    .ToHashSet();
+
+                var requestedNos = dto.Operations
+                    .Select(o => o.ContainerNumber?.Trim().ToUpperInvariant())
+                    .Where(no => !string.IsNullOrWhiteSpace(no))
+                    .ToList();
+
+                var duplicates = requestedNos.Where(no => activeContainerNos.Contains(no)).ToList();
+                if (duplicates.Any())
+                {
+                    AddError("ContainerNumber", $"Các Container sau đã được đặt lịch trong khung giờ này: {string.Join(", ", duplicates)}");
+                }
+            }
+            else if (dto.ContainerIds != null && dto.ContainerIds.Any())
             {
                 var reservedContainerIds = overlappingBookings
                     .SelectMany(b => b.BookingContainers)

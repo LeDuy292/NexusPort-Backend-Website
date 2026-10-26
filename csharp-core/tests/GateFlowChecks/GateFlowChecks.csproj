@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Modules/Gate/NexusPort.Modules.Gate.csproj" />
+    <ProjectReference Include="../../src/Modules/Booking/NexusPort.Modules.Booking.csproj" />
   </ItemGroup>
 </Project>

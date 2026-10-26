@@ -427,6 +427,19 @@ public class GateVerificationService : IGateVerificationService
             vehicle.UpdatedAt = now;
         }
 
+        // Update Booking Operations
+        var bookingOperations = await _context.Set<Booking.Domain.Entities.BookingOperation>()
+            .Where(o => o.BookingId == booking.Id)
+            .ToListAsync(cancellationToken);
+        var gateInOp = bookingOperations.FirstOrDefault(o => o.ExpectedGateDirection == "GateIn");
+        var inEirNo = $"EIR-IN-{now:yyyyMMdd}-{evidence.Id.ToString().Substring(0, 8).ToUpper()}";
+        if (gateInOp != null)
+        {
+            gateInOp.Complete(inEirNo);
+            gateInOp.ContainerCondition = "Good";
+        }
+        booking.TripStatus = booking.IsCombined ? "Processing" : "Arrived";
+
         // 5. Tạo hoặc cập nhật Gate-In Record (Lưu Timestamp)
         var gateIds = await _context.Database.SqlQueryRaw<Guid>(
             "SELECT id AS \"Value\" FROM gates WHERE code={0} AND is_active", request.GateCode.Trim().ToUpper()).ToListAsync(cancellationToken);
@@ -434,11 +447,17 @@ public class GateVerificationService : IGateVerificationService
         var previous = await _context.Database.SqlQueryRaw<Guid>(
             "SELECT id AS \"Value\" FROM gate_transactions WHERE booking_id={0} AND gate_type='gate_in' AND status='completed'", booking.Id).ToListAsync(cancellationToken);
         var gateRecordId = previous.FirstOrDefault();
+        var opId = gateInOp?.Id;
+        var contNo = container?.ContainerNumber ?? gateInOp?.ContainerNumber ?? request.ContainerNumber;
+
         if (gateRecordId == Guid.Empty)
         {
             gateRecordId = Guid.NewGuid();
-            await _context.Database.ExecuteSqlInterpolatedAsync($@"INSERT INTO gate_transactions(id,booking_id,gate_id,driver_id,truck_id,gate_type,status,plate_number_detected,checked_at,completed_at)
-              VALUES({gateRecordId},{booking.Id},{gateIds[0]},{booking.DriverId},{booking.TruckId},'gate_in','completed',{plate},{now},{now})", cancellationToken);
+            await _context.Database.ExecuteSqlInterpolatedAsync($@"INSERT INTO gate_transactions(
+                id, booking_id, gate_id, driver_id, truck_id, gate_type, status, plate_number_detected, 
+                checked_at, completed_at, booking_operation_id, container_number, eir_number)
+              VALUES({gateRecordId}, {booking.Id}, {gateIds[0]}, {booking.DriverId}, {booking.TruckId}, 
+                     'gate_in', 'completed', {plate}, {now}, {now}, {opId}, {contNo}, {inEirNo})", cancellationToken);
         }
         await _context.Database.ExecuteSqlInterpolatedAsync($@"UPDATE gate_entry_orders SET status='consumed',
           consumed_at={now},gate_transaction_id={gateRecordId} WHERE id={entry.Id} AND status='active'",cancellationToken);

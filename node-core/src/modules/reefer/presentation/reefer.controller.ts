@@ -247,6 +247,38 @@ export class ReeferController {
       next(err);
     }
   };
+
+  createPlug = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const plug = await this.service.createPlug(req.body);
+      sendCreated(res, plug);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  togglePlugPower = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const isPowerOn = Boolean(req.body.is_power_on);
+      const plug = await this.service.togglePlugPower(req.params.id, isPowerOn);
+      sendSuccess(res, plug);
+    } catch (err) {
+      next(err);
+    }
+  };
+
+  autoAllocate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = getUserIdFromReq(req);
+      const result = await this.service.autoAllocatePlug({
+        ...req.body,
+        assigned_by: userId
+      });
+      sendCreated(res, result);
+    } catch (err) {
+      next(err);
+    }
+  };
 }
 
 export const createReeferRouter = (): Router => {
@@ -257,8 +289,10 @@ export const createReeferRouter = (): Router => {
   router.get('/eligible-containers', controller.getEligibleContainers);
 
   router.get('/plugs', controller.getPlugs);
+  router.post('/plugs', controller.createPlug);
   router.get('/plugs/:id', controller.getPlugById);
   router.patch('/plugs/:id/technical-status', controller.updatePlugStatus);
+  router.post('/plugs/:id/power-toggle', controller.togglePlugPower);
 
   router.get('/requests', controller.getRequests);
   router.get('/requests/:id', controller.getRequestById);
@@ -272,6 +306,7 @@ export const createReeferRouter = (): Router => {
   router.post('/sessions/:id/terminate', controller.terminateSession);
   router.post('/sessions/:id/cancel-reservation', controller.cancelReservation);
   router.post('/sessions/:id/transfer', controller.transferPlug);
+  router.post('/auto-allocate', controller.autoAllocate);
 
   router.post('/sessions/:id/temperature', controller.recordTemperature);
   router.get('/sessions/:id/temperature-history', controller.getTemperatureHistory);

@@ -24,6 +24,13 @@ public class Booking : BaseEntity, IAggregateRoot
     public DateTime? CanceledAt { get; set; }
 
     public ICollection<BookingContainer> BookingContainers { get; set; } = new List<BookingContainer>();
+    public ICollection<BookingOperation> BookingOperations { get; set; } = new List<BookingOperation>();
+    public ICollection<BookingDocument> BookingDocuments { get; set; } = new List<BookingDocument>();
+
+    // Multi-operation and Trip tracking
+    public bool IsCombined { get; set; } = false;
+    public string TripStatus { get; set; } = "Scheduled"; // Scheduled, Arrived, Processing, PartiallyCompleted, Completed, Cancelled
+    public Guid? CustomerId { get; set; }
 
     // Associated Vehicle & Driver
     public string? VehiclePlate { get; set; }
@@ -36,6 +43,16 @@ public class Booking : BaseEntity, IAggregateRoot
 
     // Gate operation type (e.g. GateIn, GateOut, Delivery, Receiving)
     public string? GateType { get; set; } = "GateIn";
+
+    // Cold Storage Reefer Power Supply properties
+    public bool IsReeferPowerRequired { get; set; }
+    public decimal? TargetTemperature { get; set; }
+    public string? TemperatureUnit { get; set; } = "C";
+    public decimal? TempTolerance { get; set; } = 2.0m;
+    public Guid? ReeferPlugId { get; set; }
+    public string? ReeferPlugCode { get; set; }
+    public string? ReeferPowerStatus { get; set; }
+    public decimal? RequiredPowerKw { get; set; } = 15.0m;
 
     public Booking() { }
 
@@ -121,5 +138,57 @@ public class Booking : BaseEntity, IAggregateRoot
     public void MarkReady()
     {
         Status = BookingStatus.Ready;
+    }
+
+    public void AddOperation(BookingOperation operation)
+    {
+        operation.BookingId = Id;
+        BookingOperations.Add(operation);
+        if (BookingOperations.Count > 1)
+        {
+            IsCombined = true;
+        }
+    }
+
+    public void AddDocument(BookingDocument document)
+    {
+        document.BookingId = Id;
+        BookingDocuments.Add(document);
+    }
+
+    public void UpdateDerivedStatus()
+    {
+        if (!BookingOperations.Any()) return;
+
+        var allCompleted = BookingOperations.All(o => o.Status == "Completed");
+        var anyInProgress = BookingOperations.Any(o => o.Status == "InProgress");
+        var anyCompleted = BookingOperations.Any(o => o.Status == "Completed");
+        var allApproved = BookingOperations.All(o => o.Status == "Approved");
+        var allCancelled = BookingOperations.All(o => o.Status == "Cancelled");
+
+        if (allCompleted)
+        {
+            Status = BookingStatus.Completed;
+            TripStatus = "Completed";
+        }
+        else if (anyInProgress)
+        {
+            Status = BookingStatus.CheckedIn;
+            TripStatus = "Processing";
+        }
+        else if (anyCompleted)
+        {
+            TripStatus = "PartiallyCompleted";
+        }
+        else if (allApproved)
+        {
+            Status = BookingStatus.Approved;
+            TripStatus = "Scheduled";
+        }
+        else if (allCancelled)
+        {
+            Status = BookingStatus.Canceled;
+            TripStatus = "Cancelled";
+        }
     }
 }

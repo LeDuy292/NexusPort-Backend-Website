@@ -38,7 +38,7 @@ module.exports = {
     user: useAivenDatabase ? process.env.AIVEN_DB_USER : process.env.DB_USER,
     password: useAivenDatabase ? process.env.AIVEN_DB_PASSWORD : process.env.DB_PASSWORD,
     sslMode: useAivenDatabase ? (process.env.AIVEN_DB_SSLMODE || 'require') : (process.env.DB_SSL_MODE || 'disable'),
-    poolMax: parseInt(process.env.DB_POOL_MAX, 10) || 5,
+    poolMax: parseInt(process.env.DB_POOL_MAX, 10) || 3,
   },
 
   jwt: {

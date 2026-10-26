@@ -80,4 +80,134 @@ Check(!GateEntryAccess.IsFreshVerification(now.AddMinutes(-3).ToLocalTime(),now)
 Check(!GateEntryAccess.IsFreshVerification(now.AddMinutes(1).ToLocalTime(),now),"future verification cannot open barrier");
 var http=new DefaultHttpContext{User=new ClaimsPrincipal(new ClaimsIdentity(new[]{new Claim("id",actorId.ToString())},"test"))};
 Check(new CurrentUser(new HttpContextAccessor{HttpContext=http}).UserId==actorId,"develop JWT id-claim fallback retained");
-Console.WriteLine($"PASS {count} gate flow checks (no database writes)");
+
+// =========================================================================
+// REFACTORED BOOKING MODULE & OPERATION TESTS (15 SCENARIOS)
+// =========================================================================
+var compatPolicy = new NexusPort.Modules.Booking.Application.Services.BookingCompatibilityPolicy();
+var docPolicy = new NexusPort.Modules.Booking.Application.Services.BookingDocumentRequirementPolicy();
+
+// 1. Valid export loaded-container Gate In
+var exportReqs = docPolicy.GetRequiredDocuments("Export", "Loaded", "General");
+Check(exportReqs.Any(r => r.DocumentType == "CarrierBookingReference" && r.IsMandatory), "Export requires CarrierBookingReference");
+Check(exportReqs.Any(r => r.DocumentType == "VgmCertificate" && r.IsMandatory), "Export requires VGM Certificate for loaded container");
+var exportOp = new NexusPort.Modules.Booking.Application.DTOs.CreateBookingOperationDto
+{
+    OperationType = "Export",
+    ExpectedGateDirection = "GateIn",
+    CargoStatus = "Loaded",
+    ContainerNumber = "EXP-CONT-8891"
+};
+Check(compatPolicy.ValidateCombination(new[] { exportOp }).IsValid, "Single valid Export operation is compatible");
+
+// 2. Valid import loaded-container Gate Out
+var importReqs = docPolicy.GetRequiredDocuments("Import", "Loaded", "General");
+Check(importReqs.Any(r => r.DocumentType == "BillOfLading" && r.IsMandatory), "Import requires BillOfLading");
+Check(importReqs.Any(r => r.DocumentType == "DeliveryOrder" && r.IsMandatory), "Import requires DeliveryOrder (eDO)");
+Check(importReqs.Any(r => r.DocumentType == "CustomsDeclaration" && r.IsMandatory), "Import requires CustomsDeclaration clearance");
+var importOp = new NexusPort.Modules.Booking.Application.DTOs.CreateBookingOperationDto
+{
+    OperationType = "Import",
+    ExpectedGateDirection = "GateOut",
+    CargoStatus = "Loaded",
+    ContainerNumber = "IMP-CONT-7712"
+};
+Check(compatPolicy.ValidateCombination(new[] { importOp }).IsValid, "Single valid Import operation is compatible");
+
+// 3. Disallow empty pickup (only Export/Import allowed)
+var emptyPickupReqs = docPolicy.GetRequiredDocuments("EmptyPickup", "Empty", "General");
+var emptyPickupOp = new NexusPort.Modules.Booking.Application.DTOs.CreateBookingOperationDto
+{
+    OperationType = "EmptyPickup",
+    ExpectedGateDirection = "GateOut",
+    CargoStatus = "Empty",
+    ContainerNumber = "EMPTY-PKP-002"
+};
+Check(!compatPolicy.ValidateCombination(new[] { emptyPickupOp }).IsValid, "Single EmptyPickup operation is rejected (system only supports Export and Import)");
+
+// 4. Disallow empty return (only Export/Import allowed)
+var emptyReturnReqs = docPolicy.GetRequiredDocuments("EmptyReturn", "Empty", "General");
+var emptyReturnOp = new NexusPort.Modules.Booking.Application.DTOs.CreateBookingOperationDto
+{
+    OperationType = "EmptyReturn",
+    ExpectedGateDirection = "GateIn",
+    CargoStatus = "Empty",
+    ContainerNumber = "EMPTY-RTN-001"
+};
+Check(!compatPolicy.ValidateCombination(new[] { emptyReturnOp }).IsValid, "Single EmptyReturn operation is rejected (system only supports Export and Import)");
+
+// 5. Combined empty return and empty pickup in one visit is rejected
+var combinedReturnPickup = compatPolicy.ValidateCombination(new[] { emptyReturnOp, emptyPickupOp });
+Check(!combinedReturnPickup.IsValid, "Combined Empty Return + Empty Pickup is rejected (no empty container operations)");
+
+// 6. Combined export and import in one visit is allowed
+var combinedExportImport = compatPolicy.ValidateCombination(new[] { exportOp, importOp });
+Check(combinedExportImport.IsValid, "Combined Export + Import on single truck visit is allowed");
+
+// 7. Invalid combination: two GateIn operations (e.g. Export + Export)
+var exportOp2 = new NexusPort.Modules.Booking.Application.DTOs.CreateBookingOperationDto { OperationType = "Export", ExpectedGateDirection = "GateIn", ContainerNumber = "CONT-EXP-99" };
+var dualGateIn = compatPolicy.ValidateCombination(new[] { exportOp, exportOp2 });
+Check(!dualGateIn.IsValid, "Dual simultaneous Gate-In legs on 1 truck are rejected");
+
+// 8. Invalid combination: identical container for return and pickup
+var sameContOp1 = new NexusPort.Modules.Booking.Application.DTOs.CreateBookingOperationDto { OperationType = "Export", ExpectedGateDirection = "GateIn", ContainerNumber = "CONT-DUP-99" };
+var sameContOp2 = new NexusPort.Modules.Booking.Application.DTOs.CreateBookingOperationDto { OperationType = "Import", ExpectedGateDirection = "GateOut", ContainerNumber = "CONT-DUP-99" };
+Check(!compatPolicy.ValidateCombination(new[] { sameContOp1, sameContOp2 }).IsValid, "Same container for both drop and pick simultaneously is rejected");
+
+// 9. Invalid combination: more than 2 operations for a single chassis visit
+Check(!compatPolicy.ValidateCombination(new[] { exportOp, importOp, exportOp2 }).IsValid, "Exceeding dual-cycle limit is rejected");
+
+// 10. Conditional document rules: Reefer and DangerousGoods
+var reeferReqs = docPolicy.GetRequiredDocuments("Export", "Loaded", "Reefer");
+Check(reeferReqs.Any(r => r.DocumentType == "ReeferTemperatureInstructions" && r.IsMandatory), "Reefer cargo mandates temperature instructions");
+
+var dgReqs = docPolicy.GetRequiredDocuments("Export", "Loaded", "DangerousGoods");
+Check(dgReqs.Any(r => r.DocumentType == "DangerousGoodsDeclaration" && r.IsMandatory), "Dangerous Goods cargo mandates DG Declaration");
+
+// 11. Multi-operation entity state and derived status
+var testBooking = new NexusPort.Modules.Booking.Domain.Entities.Booking
+{
+    BookingCode = "BK-TEST-MULTI-01",
+    BookingType = BookingType.Dropoff,
+    IsCombined = true
+};
+var op1 = new NexusPort.Modules.Booking.Domain.Entities.BookingOperation { BookingId = testBooking.Id, OperationType = "EmptyReturn", Status = "Approved" };
+var op2 = new NexusPort.Modules.Booking.Domain.Entities.BookingOperation { BookingId = testBooking.Id, OperationType = "EmptyPickup", Status = "Approved" };
+testBooking.AddOperation(op1);
+testBooking.AddOperation(op2);
+testBooking.UpdateDerivedStatus();
+Check(testBooking.Status == BookingStatus.Approved, "Derived booking status is Approved when all operations approved");
+Check(testBooking.TripStatus == "Scheduled", "Trip is Scheduled when operations approved");
+
+// 12. One combined operation fails / on hold while the other remains valid
+op1.Status = "Completed";
+op2.Status = "OnHold";
+testBooking.UpdateDerivedStatus();
+Check(op1.Status == "Completed", "Operation 1 completion is independent of Operation 2 hold");
+Check(testBooking.TripStatus == "PartiallyCompleted", "Trip status is PartiallyCompleted when leg 1 done and leg 2 on hold");
+
+// 13. Cancellation of one operation does not destroy valid operation
+op2.Status = "Cancelled";
+testBooking.UpdateDerivedStatus();
+Check(op1.Status == "Completed", "Operation 1 remains Completed even if Operation 2 is Cancelled");
+
+// 14. Document verification status transition
+var testDoc = new NexusPort.Modules.Booking.Domain.Entities.BookingDocument
+{
+    BookingId = testBooking.Id,
+    BookingOperationId = op1.Id,
+    DocumentType = "CarrierBookingReference",
+    DocumentNumber = "REF-889900",
+    VerificationStatus = "Uploaded"
+};
+Check(testDoc.VerificationStatus == "Uploaded", "Initial doc status is Uploaded");
+testDoc.Verify(actorId);
+Check(testDoc.VerificationStatus == "Verified" && testDoc.VerifiedBy == actorId, "Document transition to Verified with auditor identity");
+
+// 15. All operations completed closes the parent booking and trip
+op2.Status = "Completed";
+testBooking.UpdateDerivedStatus();
+Check(testBooking.Status == BookingStatus.Completed, "Parent booking completes when all operations complete");
+Check(testBooking.TripStatus == "Completed", "Port visit completes when all operations complete");
+
+Console.WriteLine($"PASS {count} gate and booking operation checks (all 15 scenarios verified, no database writes)");

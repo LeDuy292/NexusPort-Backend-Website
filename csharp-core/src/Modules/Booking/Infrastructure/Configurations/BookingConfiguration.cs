@@ -73,6 +73,7 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
 
         // Ignore unmapped helper properties for DB-first schema compatibility
         builder.Ignore(x => x.BookingNumber);
+        builder.Ignore(x => x.RequiredPowerKw);
         builder.Property(x => x.VehiclePlate).HasColumnName("vehicle_plate");
         builder.Property(x => x.VehicleId).HasColumnName("vehicle_id");
         builder.Property(x => x.DriverName).HasColumnName("driver_name");
@@ -80,8 +81,28 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
         builder.Property(x => x.ValidTo).HasColumnName("valid_to");
         builder.Property(x => x.GateType).HasColumnName("gate_type");
         builder.Property(x => x.Description).HasColumnName("description");
+        builder.Property(x => x.IsReeferPowerRequired).HasColumnName("is_reefer_power_required");
+        builder.Property(x => x.TargetTemperature).HasColumnName("target_temperature");
+        builder.Property(x => x.TemperatureUnit).HasColumnName("temperature_unit");
+        builder.Property(x => x.TempTolerance).HasColumnName("temp_tolerance");
+        builder.Property(x => x.ReeferPlugId).HasColumnName("reefer_plug_id");
+        builder.Property(x => x.ReeferPlugCode).HasColumnName("reefer_plug_code");
+        builder.Property(x => x.ReeferPowerStatus).HasColumnName("reefer_power_status");
+        builder.Property(x => x.IsCombined).HasColumnName("is_combined");
+        builder.Property(x => x.TripStatus).HasColumnName("trip_status");
+        builder.Property(x => x.CustomerId).HasColumnName("customer_id");
 
         builder.HasMany(x => x.BookingContainers)
+            .WithOne(x => x.Booking)
+            .HasForeignKey(x => x.BookingId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(x => x.BookingOperations)
+            .WithOne(x => x.Booking)
+            .HasForeignKey(x => x.BookingId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasMany(x => x.BookingDocuments)
             .WithOne(x => x.Booking)
             .HasForeignKey(x => x.BookingId)
             .OnDelete(DeleteBehavior.Cascade);
