@@ -12,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using NexusPort.Infrastructure.Database;
 using NexusPort.Modules.Container.Domain.Entities;
 using NexusPort.Modules.Driver.Domain.Enums;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace NexusPort.Modules.Booking.Application.Services;
 
@@ -22,19 +23,25 @@ public class BookingService : IBookingService
     private readonly INotificationService _notificationService;
     private readonly AppDbContext _context;
     private readonly ILogger<BookingService> _logger;
+    private readonly IBookingCompatibilityPolicy _compatibilityPolicy;
+    private readonly IBookingDocumentRequirementPolicy _documentRequirementPolicy;
 
     public BookingService(
         IBookingRepository repository,
         IBookingValidationService validationService,
         INotificationService notificationService,
         AppDbContext context,
-        ILogger<BookingService> logger)
+        ILogger<BookingService> logger,
+        IBookingCompatibilityPolicy compatibilityPolicy,
+        IBookingDocumentRequirementPolicy documentRequirementPolicy)
     {
         _repository = repository;
         _validationService = validationService;
         _notificationService = notificationService;
         _context = context;
         _logger = logger;
+        _compatibilityPolicy = compatibilityPolicy;
+        _documentRequirementPolicy = documentRequirementPolicy;
     }
 
     public async Task<IReadOnlyList<BookingDto>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -70,8 +77,13 @@ public class BookingService : IBookingService
 
     public async Task<BookingDto> CreateAsync(CreateBookingDto dto, CancellationToken cancellationToken = default)
     {
-        dto.ContainerIds = dto.ContainerSelections.Select(x => x.ContainerId).ToList();
-        // Execute Business Validation Rules (NXP-042)
+        bool hasMultiOperations = dto.Operations != null && dto.Operations.Count > 0;
+        if (!hasMultiOperations)
+        {
+            dto.ContainerIds = dto.ContainerSelections.Select(x => x.ContainerId).ToList();
+        }
+
+        // Execute Business Validation Rules
         await _validationService.ValidateBookingAsync(dto, cancellationToken);
 
         var entity = new Domain.Entities.Booking(
@@ -84,6 +96,9 @@ public class BookingService : IBookingService
             dto.TruckId
         );
 
+        entity.IsCombined = dto.IsCombined || (hasMultiOperations && dto.Operations.Count > 1);
+        entity.CustomerId = dto.CustomerId;
+        entity.TripStatus = "Scheduled";
         entity.VehiclePlate = dto.VehiclePlate;
         entity.VehicleId = dto.VehicleId;
         entity.DriverName = dto.DriverName;
@@ -108,32 +123,241 @@ public class BookingService : IBookingService
             if (truck != null) entity.VehiclePlate = truck.PlateNumber;
         }
 
-        if (dto.ContainerSelections.Count == 0 ||
-            dto.ContainerSelections.Select(x => x.ContainerId).Distinct().Count() != dto.ContainerSelections.Count)
-            throw new ValidationException("ContainerSelections", "Chọn container từ trang khai báo trước khi đặt lịch.");
         await using var bookingTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-        foreach (var selection in dto.ContainerSelections.OrderBy(x => x.ContainerId))
+
+        if (hasMultiOperations)
         {
-            if (dto.BookingType == BookingType.Pickup)
+            foreach (var opDto in dto.Operations.OrderBy(x => x.SequenceNumber))
             {
-                if (string.IsNullOrWhiteSpace(selection.YardCode) ||
-                    !System.Text.RegularExpressions.Regex.IsMatch(NormalizeYardCode(selection.YardCode), @"^TC-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$"))
-                    throw new ValidationException("YardCode", "Nhập mã lượt bãi nhận được từ booking Dropoff.");
-                var links = await _context.Database.SqlQueryRaw<PickupCodeLink>(
-                    "SELECT * FROM yard_prepare_pickup({0},{1},{2})", selection.ContainerId, NormalizeYardCode(selection.YardCode), dto.CarrierId)
-                    .ToListAsync(cancellationToken);
-                selection.DeclarationId = links.Single().DeclarationId;
-                selection.ContainerVisitId = links.Single().ContainerVisitId;
+                var op = new Domain.Entities.BookingOperation(
+                    entity.Id,
+                    opDto.OperationType,
+                    opDto.ContainerNumber,
+                    opDto.ExpectedGateDirection,
+                    opDto.CargoStatus ?? "Loaded",
+                    opDto.SequenceNumber);
+
+                op.ContainerIsoSize = string.IsNullOrWhiteSpace(opDto.ContainerIsoSize) ? "20GP" : opDto.ContainerIsoSize;
+                op.CargoType = string.IsNullOrWhiteSpace(opDto.CargoType) ? "General" : opDto.CargoType;
+                op.CarrierBookingNumber = opDto.CarrierBookingNumber;
+                op.BillOfLadingNumber = opDto.BillOfLadingNumber;
+                op.DeliveryOrderNumber = opDto.DeliveryOrderNumber;
+                op.CustomsDeclarationNumber = opDto.CustomsDeclarationNumber;
+                op.SealNumber = opDto.SealNumber;
+                op.GrossWeightKg = opDto.GrossWeightKg;
+                op.TemperatureSetpoint = opDto.TemperatureSetpoint;
+                op.TemperatureUnit = opDto.TemperatureUnit ?? "C";
+                op.UnNumber = opDto.UnNumber;
+                op.DgClass = opDto.DgClass;
+                op.SpecialHandlingRequirements = opDto.SpecialHandlingRequirements;
+
+                // Lookup container ID in DB if available
+                Guid? contId = opDto.ContainerId;
+                if (!contId.HasValue || contId.Value == Guid.Empty)
+                {
+                    var cleanNo = opDto.ContainerNumber.Trim().ToUpperInvariant();
+                    var existingCont = await _context.Set<Container.Domain.Entities.Container>()
+                        .FirstOrDefaultAsync(x => x.ContainerNumber.ToUpper() == cleanNo, cancellationToken);
+                    if (existingCont != null) contId = existingCont.Id;
+                }
+
+                if (contId.HasValue && contId.Value != Guid.Empty)
+                {
+                    op.ContainerId = contId.Value;
+                    entity.AddContainer(contId.Value);
+                }
+
+                if (opDto.Documents != null)
+                {
+                    foreach (var docDto in opDto.Documents)
+                    {
+                        var doc = new Domain.Entities.BookingDocument(
+                            entity.Id,
+                            docDto.DocumentType,
+                            docDto.DocumentNumber,
+                            docDto.FileUrl,
+                            docDto.FileName,
+                            op.Id);
+                        doc.Issuer = docDto.Issuer;
+                        doc.FileSizeBytes = docDto.FileSizeBytes;
+                        doc.ExpiryDate = docDto.ExpiryDate;
+                        op.Documents.Add(doc);
+                    }
+                }
+
+                entity.AddOperation(op);
             }
-            else if (selection.DeclarationId == Guid.Empty || selection.ContainerVisitId.HasValue)
-                throw new ValidationException("ContainerSelections", "Chọn khai báo chưa đặt Dropoff từ trang khai báo container.");
+
+            if (dto.Documents != null)
+            {
+                foreach (var docDto in dto.Documents)
+                {
+                    var doc = new Domain.Entities.BookingDocument(
+                        entity.Id,
+                        docDto.DocumentType,
+                        docDto.DocumentNumber,
+                        docDto.FileUrl,
+                        docDto.FileName,
+                        docDto.BookingOperationId);
+                    doc.Issuer = docDto.Issuer;
+                    doc.FileSizeBytes = docDto.FileSizeBytes;
+                    doc.ExpiryDate = docDto.ExpiryDate;
+                    entity.AddDocument(doc);
+                }
+            }
         }
-        foreach (var selection in dto.ContainerSelections.OrderBy(x => x.ContainerId))
+        else
         {
-            entity.AddContainer(selection.ContainerId);
-            var link = entity.BookingContainers.Last();
-            link.DeclarationId = selection.DeclarationId;
-            link.ContainerVisitId = selection.ContainerVisitId;
+            if (dto.ContainerSelections.Count == 0 ||
+                dto.ContainerSelections.Select(x => x.ContainerId).Distinct().Count() != dto.ContainerSelections.Count)
+                throw new ValidationException("ContainerSelections", "Chọn container từ trang khai báo trước khi đặt lịch.");
+
+            foreach (var selection in dto.ContainerSelections.OrderBy(x => x.ContainerId))
+            {
+                if (dto.BookingType == BookingType.Pickup)
+                {
+                    if (string.IsNullOrWhiteSpace(selection.YardCode) ||
+                        !System.Text.RegularExpressions.Regex.IsMatch(NormalizeYardCode(selection.YardCode), @"^TC-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$"))
+                        throw new ValidationException("YardCode", "Nhập mã lượt bãi nhận được từ booking Dropoff.");
+                    var links = await _context.Database.SqlQueryRaw<PickupCodeLink>(
+                        "SELECT * FROM yard_prepare_pickup({0},{1},{2})", selection.ContainerId, NormalizeYardCode(selection.YardCode), dto.CarrierId)
+                        .ToListAsync(cancellationToken);
+                    selection.DeclarationId = links.Single().DeclarationId;
+                    selection.ContainerVisitId = links.Single().ContainerVisitId;
+                }
+                else if (selection.DeclarationId == Guid.Empty || selection.ContainerVisitId.HasValue)
+                    throw new ValidationException("ContainerSelections", "Chọn khai báo chưa đặt Dropoff từ trang khai báo container.");
+            }
+            foreach (var selection in dto.ContainerSelections.OrderBy(x => x.ContainerId))
+            {
+                entity.AddContainer(selection.ContainerId);
+                var link = entity.BookingContainers.Last();
+                link.DeclarationId = selection.DeclarationId;
+                link.ContainerVisitId = selection.ContainerVisitId;
+
+                var opType = dto.BookingType == BookingType.Dropoff ? "Export" : "Import";
+                var gateDir = dto.BookingType == BookingType.Dropoff ? "GateIn" : "GateOut";
+                var op = new Domain.Entities.BookingOperation(
+                    entity.Id,
+                    opType,
+                    selection.ContainerNumber ?? "CONT-UNSPECIFIED",
+                    gateDir,
+                    "Loaded",
+                    1)
+                {
+                    ContainerId = selection.ContainerId,
+                    CargoType = selection.CargoTypeName ?? "General"
+                };
+                entity.AddOperation(op);
+            }
+        }
+
+        // Tích hợp Cấp điện Kho Đông Lạnh (Reefer Cold Storage Power Supply Integration)
+        if (dto.IsReeferPowerRequired || dto.ContainerSelections.Any(s => s.CargoTypeName != null && (s.CargoTypeName.Contains("Lạnh", StringComparison.OrdinalIgnoreCase) || s.CargoTypeName.Contains("Reefer", StringComparison.OrdinalIgnoreCase) || s.CargoTypeName.Contains("Đông", StringComparison.OrdinalIgnoreCase))))
+        {
+            entity.IsReeferPowerRequired = true;
+            entity.TargetTemperature = dto.TargetTemperature ?? -18.0m;
+            entity.TemperatureUnit = string.IsNullOrWhiteSpace(dto.TemperatureUnit) ? "C" : dto.TemperatureUnit;
+            entity.TempTolerance = dto.TempTolerance ?? 2.0m;
+            entity.RequiredPowerKw = dto.RequiredPowerKw ?? 15.0m;
+
+            Guid? assignedPlugId = dto.ReeferPlugId;
+            string? assignedPlugCode = dto.ReeferPlugCode;
+
+            try
+            {
+                var conn = _context.Database.GetDbConnection();
+                if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(cancellationToken);
+
+                // Nếu chưa chỉ định máy/ổ cắm, tự động tìm và giữ chỗ 1 máy khả dụng và hoạt động tốt (Available & Healthy)
+                if (!assignedPlugId.HasValue || assignedPlugId == Guid.Empty)
+                {
+                    using var findCmd = conn.CreateCommand();
+                    findCmd.Transaction = bookingTransaction.GetDbTransaction();
+                    findCmd.CommandText = @"
+                        SELECT id, plug_code 
+                        FROM public.reefer_plugs 
+                        WHERE usage_status = 'AVAILABLE' AND technical_status = 'HEALTHY'
+                        ORDER BY plug_code ASC 
+                        LIMIT 1 
+                        FOR UPDATE SKIP LOCKED;";
+                    using var reader = await findCmd.ExecuteReaderAsync(cancellationToken);
+                    if (await reader.ReadAsync(cancellationToken))
+                    {
+                        assignedPlugId = reader.GetGuid(0);
+                        assignedPlugCode = reader.GetString(1);
+                    }
+                }
+
+                entity.ReeferPlugId = assignedPlugId;
+                entity.ReeferPlugCode = assignedPlugCode;
+                entity.ReeferPowerStatus = assignedPlugId.HasValue ? "Reserved" : "PendingAssignment";
+
+                // Tạo yêu cầu cấp điện ReeferPowerRequest và Phiên cấp điện ReeferPowerSession
+                var primaryContainerId = dto.ContainerSelections.FirstOrDefault()?.ContainerId ?? Guid.Empty;
+                if (primaryContainerId != Guid.Empty)
+                {
+                    var requestId = Guid.NewGuid();
+                    var rawCode = entity.BookingCode.Replace("BK-", "").Replace("-", "");
+                    var reqNo = $"REQ-RFR-{(rawCode.Length > 16 ? rawCode.Substring(0, 16) : rawCode)}";
+
+                    using var insertReqCmd = conn.CreateCommand();
+                    insertReqCmd.Transaction = bookingTransaction.GetDbTransaction();
+                    insertReqCmd.CommandText = @"
+                        INSERT INTO public.reefer_power_requests 
+                        (id, request_no, container_id, booking_id, booking_code, target_temperature, temperature_unit, temp_tolerance, required_power_kw, cargo_description, special_instructions, status, created_at, updated_at)
+                        VALUES 
+                        (@id, @reqNo, @contId, @bId, @bCode, @targetTemp, @tempUnit, @tolerance, @powerKw, @cargoDesc, @instructions, @status::reefer_request_status, NOW(), NOW());";
+                    
+                    var pId = insertReqCmd.CreateParameter(); pId.ParameterName = "@id"; pId.Value = requestId; insertReqCmd.Parameters.Add(pId);
+                    var pReqNo = insertReqCmd.CreateParameter(); pReqNo.ParameterName = "@reqNo"; pReqNo.Value = reqNo; insertReqCmd.Parameters.Add(pReqNo);
+                    var pContId = insertReqCmd.CreateParameter(); pContId.ParameterName = "@contId"; pContId.Value = primaryContainerId; insertReqCmd.Parameters.Add(pContId);
+                    var pBId = insertReqCmd.CreateParameter(); pBId.ParameterName = "@bId"; pBId.Value = entity.Id; insertReqCmd.Parameters.Add(pBId);
+                    var pBCode = insertReqCmd.CreateParameter(); pBCode.ParameterName = "@bCode"; pBCode.Value = entity.BookingCode; insertReqCmd.Parameters.Add(pBCode);
+                    var pTarget = insertReqCmd.CreateParameter(); pTarget.ParameterName = "@targetTemp"; pTarget.Value = entity.TargetTemperature.Value; insertReqCmd.Parameters.Add(pTarget);
+                    var pUnit = insertReqCmd.CreateParameter(); pUnit.ParameterName = "@tempUnit"; pUnit.Value = entity.TemperatureUnit; insertReqCmd.Parameters.Add(pUnit);
+                    var pTol = insertReqCmd.CreateParameter(); pTol.ParameterName = "@tolerance"; pTol.Value = entity.TempTolerance.Value; insertReqCmd.Parameters.Add(pTol);
+                    var pPower = insertReqCmd.CreateParameter(); pPower.ParameterName = "@powerKw"; pPower.Value = entity.RequiredPowerKw ?? 15.0m; insertReqCmd.Parameters.Add(pPower);
+                    var pDesc = insertReqCmd.CreateParameter(); pDesc.ParameterName = "@cargoDesc"; pDesc.Value = (object?)entity.Description ?? "Hàng đông lạnh theo Booking " + entity.BookingCode; insertReqCmd.Parameters.Add(pDesc);
+                    var pInst = insertReqCmd.CreateParameter(); pInst.ParameterName = "@instructions"; pInst.Value = (object?)dto.SpecialColdInstructions ?? DBNull.Value; insertReqCmd.Parameters.Add(pInst);
+                    var pStatus = insertReqCmd.CreateParameter(); pStatus.ParameterName = "@status"; pStatus.Value = assignedPlugId.HasValue ? "ASSIGNED" : "PENDING_ASSIGNMENT"; insertReqCmd.Parameters.Add(pStatus);
+                    
+                    await insertReqCmd.ExecuteNonQueryAsync(cancellationToken);
+
+                    if (assignedPlugId.HasValue)
+                    {
+                        // Cập nhật trạng thái máy/ổ cấp điện thành RESERVED
+                        using var updatePlugCmd = conn.CreateCommand();
+                        updatePlugCmd.Transaction = bookingTransaction.GetDbTransaction();
+                        updatePlugCmd.CommandText = "UPDATE public.reefer_plugs SET usage_status = 'RESERVED'::socket_usage_status, updated_at = NOW() WHERE id = @plugId;";
+                        var pPlugId = updatePlugCmd.CreateParameter(); pPlugId.ParameterName = "@plugId"; pPlugId.Value = assignedPlugId.Value; updatePlugCmd.Parameters.Add(pPlugId);
+                        await updatePlugCmd.ExecuteNonQueryAsync(cancellationToken);
+
+                        // Tạo session cấp điện trạng thái AWAITING_POWER (Chờ cắm điện khi xe vào bãi kho lạnh)
+                        using var insertSessCmd = conn.CreateCommand();
+                        insertSessCmd.Transaction = bookingTransaction.GetDbTransaction();
+                        insertSessCmd.CommandText = @"
+                            INSERT INTO public.reefer_power_sessions 
+                            (id, container_id, plug_id, request_id, booking_id, booking_code, required_power_kw, session_status, actual_power_status, assigned_at, is_active, created_at, updated_at)
+                            VALUES 
+                            (@sessId, @contId, @plugId, @reqId, @bId, @bCode, @powerKw, 'AWAITING_POWER'::power_session_status, 'UNKNOWN'::actual_power_status, NOW(), false, NOW(), NOW());";
+                        
+                        var pSessId = insertSessCmd.CreateParameter(); pSessId.ParameterName = "@sessId"; pSessId.Value = Guid.NewGuid(); insertSessCmd.Parameters.Add(pSessId);
+                        var pSessCont = insertSessCmd.CreateParameter(); pSessCont.ParameterName = "@contId"; pSessCont.Value = primaryContainerId; insertSessCmd.Parameters.Add(pSessCont);
+                        var pSessPlug = insertSessCmd.CreateParameter(); pSessPlug.ParameterName = "@plugId"; pSessPlug.Value = assignedPlugId.Value; insertSessCmd.Parameters.Add(pSessPlug);
+                        var pSessReq = insertSessCmd.CreateParameter(); pSessReq.ParameterName = "@reqId"; pSessReq.Value = requestId; insertSessCmd.Parameters.Add(pSessReq);
+                        var pSessBId = insertSessCmd.CreateParameter(); pSessBId.ParameterName = "@bId"; pSessBId.Value = entity.Id; insertSessCmd.Parameters.Add(pSessBId);
+                        var pSessBCode = insertSessCmd.CreateParameter(); pSessBCode.ParameterName = "@bCode"; pSessBCode.Value = entity.BookingCode; insertSessCmd.Parameters.Add(pSessBCode);
+                        var pSessPower = insertSessCmd.CreateParameter(); pSessPower.ParameterName = "@powerKw"; pSessPower.Value = entity.RequiredPowerKw ?? 15.0m; insertSessCmd.Parameters.Add(pSessPower);
+
+                        await insertSessCmd.ExecuteNonQueryAsync(cancellationToken);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[BookingService] Lỗi tự động gán máy cấp điện kho lạnh cho Booking {BookingCode}", entity.BookingCode);
+            }
         }
 
         // Theo yêu cầu: Luôn đặt trạng thái là Pending để chờ Dispatcher duyệt
@@ -1257,6 +1481,102 @@ public class BookingService : IBookingService
         return info;
     }
 
+    public async Task<IReadOnlyList<BookingOperationDto>> GetOperationsAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    {
+        var ops = await _context.Set<Domain.Entities.BookingOperation>()
+            .Include(o => o.Documents)
+            .Where(o => o.BookingId == bookingId)
+            .OrderBy(o => o.SequenceNumber)
+            .ToListAsync(cancellationToken);
+
+        return ops.Select(MapOperationToDto).ToList();
+    }
+
+    public async Task<BookingOperationDto> UpdateOperationStatusAsync(Guid bookingId, Guid operationId, UpdateBookingOperationStatusDto dto, Guid? updatedBy = null, CancellationToken cancellationToken = default)
+    {
+        var booking = await _context.Set<Domain.Entities.Booking>()
+            .Include(b => b.BookingOperations)
+            .FirstOrDefaultAsync(b => b.Id == bookingId, cancellationToken);
+
+        if (booking == null) throw new NotFoundException("Booking", bookingId);
+
+        var op = booking.BookingOperations.FirstOrDefault(o => o.Id == operationId);
+        if (op == null) throw new NotFoundException("BookingOperation", operationId);
+
+        op.Status = dto.Status;
+        if (!string.IsNullOrWhiteSpace(dto.Notes)) op.VerificationNotes = dto.Notes;
+        if (!string.IsNullOrWhiteSpace(dto.EirNumber))
+        {
+            op.EirNumber = dto.EirNumber;
+            op.EirIssuedAt = DateTime.UtcNow;
+        }
+        if (!string.IsNullOrWhiteSpace(dto.ContainerCondition)) op.ContainerCondition = dto.ContainerCondition;
+        if (updatedBy.HasValue)
+        {
+            op.VerifiedBy = updatedBy.Value;
+            op.VerifiedAt = DateTime.UtcNow;
+        }
+
+        booking.UpdateDerivedStatus();
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return MapOperationToDto(op);
+    }
+
+    public async Task<BookingDocumentDto> AddDocumentAsync(Guid bookingId, CreateBookingDocumentDto dto, CancellationToken cancellationToken = default)
+    {
+        var booking = await _repository.GetByIdAsync(bookingId, cancellationToken);
+        if (booking == null) throw new NotFoundException("Booking", bookingId);
+
+        var doc = new Domain.Entities.BookingDocument(
+            bookingId,
+            dto.DocumentType,
+            dto.DocumentNumber,
+            dto.FileUrl,
+            dto.FileName,
+            dto.BookingOperationId);
+        doc.Issuer = dto.Issuer;
+        doc.FileSizeBytes = dto.FileSizeBytes;
+        doc.ExpiryDate = dto.ExpiryDate;
+
+        _context.Set<Domain.Entities.BookingDocument>().Add(doc);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        return MapDocumentToDto(doc);
+    }
+
+    public async Task<BookingDocumentDto> VerifyDocumentAsync(Guid bookingId, Guid documentId, VerifyBookingDocumentDto dto, Guid verifiedBy, CancellationToken cancellationToken = default)
+    {
+        var doc = await _context.Set<Domain.Entities.BookingDocument>()
+            .FirstOrDefaultAsync(d => d.Id == documentId && d.BookingId == bookingId, cancellationToken);
+
+        if (doc == null) throw new NotFoundException("BookingDocument", documentId);
+
+        if (dto.IsApproved)
+        {
+            doc.Verify(verifiedBy);
+        }
+        else
+        {
+            doc.Reject(verifiedBy, dto.Reason ?? "Chứng từ bị từ chối.");
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        return MapDocumentToDto(doc);
+    }
+
+    public Task<IReadOnlyList<DocumentRequirementSpec>> GetDocumentRequirementsAsync(string operationType, string cargoStatus, string cargoType, CancellationToken cancellationToken = default)
+    {
+        var specs = _documentRequirementPolicy.GetRequiredDocuments(operationType, cargoStatus, cargoType);
+        return Task.FromResult(specs);
+    }
+
+    public Task<OperationCombinationValidationResult> ValidateCombinationAsync(IReadOnlyList<CreateBookingOperationDto> operations, CancellationToken cancellationToken = default)
+    {
+        var result = _compatibilityPolicy.ValidateCombination(operations);
+        return Task.FromResult(result);
+    }
+
     private static BookingDto MapToDto(Domain.Entities.Booking entity)
     {
         return new BookingDto
@@ -1278,6 +1598,12 @@ public class BookingService : IBookingService
             ContainerIds = entity.BookingContainers?.Select(bc => bc.ContainerId).ToList() ?? new List<Guid>(),
             ContainerSelections = (entity.BookingContainers ?? new List<BookingContainer>()).Select(x=>new BookingContainerSelectionDto { ContainerId=x.ContainerId, DeclarationId=x.DeclarationId??Guid.Empty, ContainerVisitId=x.ContainerVisitId }).ToList(),
 
+            IsCombined = entity.IsCombined,
+            TripStatus = entity.TripStatus ?? "Scheduled",
+            CustomerId = entity.CustomerId,
+            Operations = entity.BookingOperations?.Select(MapOperationToDto).OrderBy(o => o.SequenceNumber).ToList() ?? new List<BookingOperationDto>(),
+            Documents = entity.BookingDocuments?.Select(MapDocumentToDto).ToList() ?? new List<BookingDocumentDto>(),
+
             Description = entity.Description,
             VehiclePlate = entity.VehiclePlate,
             VehicleId = entity.VehicleId,
@@ -1285,7 +1611,75 @@ public class BookingService : IBookingService
             ValidFrom = entity.ValidFrom ?? entity.AppointmentStart,
             ValidTo = entity.ValidTo ?? entity.AppointmentEnd,
             PaymentStatus = (entity.Status == BookingStatus.Ready || entity.Status == BookingStatus.CheckedIn || entity.Status == BookingStatus.Completed) ? "Paid" : "Unpaid",
-            TotalAmount = 583200m
+            TotalAmount = 583200m,
+
+            IsReeferPowerRequired = entity.IsReeferPowerRequired,
+            TargetTemperature = entity.TargetTemperature,
+            TemperatureUnit = entity.TemperatureUnit,
+            TempTolerance = entity.TempTolerance,
+            ReeferPlugId = entity.ReeferPlugId,
+            ReeferPlugCode = entity.ReeferPlugCode,
+            ReeferPowerStatus = entity.ReeferPowerStatus ?? (entity.IsReeferPowerRequired ? "Reserved" : "None"),
+            RequiredPowerKw = entity.RequiredPowerKw ?? (entity.IsReeferPowerRequired ? 15.0m : null)
+        };
+    }
+
+    private static BookingOperationDto MapOperationToDto(Domain.Entities.BookingOperation op)
+    {
+        return new BookingOperationDto
+        {
+            Id = op.Id,
+            BookingId = op.BookingId,
+            OperationType = op.OperationType,
+            SequenceNumber = op.SequenceNumber,
+            ExpectedGateDirection = op.ExpectedGateDirection,
+            Status = op.Status,
+            ContainerId = op.ContainerId,
+            ContainerNumber = op.ContainerNumber,
+            ContainerIsoSize = op.ContainerIsoSize,
+            CargoStatus = op.CargoStatus,
+            CargoType = op.CargoType,
+            CarrierBookingNumber = op.CarrierBookingNumber,
+            BillOfLadingNumber = op.BillOfLadingNumber,
+            DeliveryOrderNumber = op.DeliveryOrderNumber,
+            CustomsDeclarationNumber = op.CustomsDeclarationNumber,
+            SealNumber = op.SealNumber,
+            GrossWeightKg = op.GrossWeightKg,
+            TemperatureSetpoint = op.TemperatureSetpoint,
+            TemperatureUnit = op.TemperatureUnit,
+            UnNumber = op.UnNumber,
+            DgClass = op.DgClass,
+            SpecialHandlingRequirements = op.SpecialHandlingRequirements,
+            VerificationStatus = op.VerificationStatus,
+            VerifiedBy = op.VerifiedBy,
+            VerifiedAt = op.VerifiedAt,
+            VerificationNotes = op.VerificationNotes,
+            EirNumber = op.EirNumber,
+            EirIssuedAt = op.EirIssuedAt,
+            ContainerCondition = op.ContainerCondition,
+            Documents = op.Documents?.Select(MapDocumentToDto).ToList() ?? new List<BookingDocumentDto>()
+        };
+    }
+
+    private static BookingDocumentDto MapDocumentToDto(Domain.Entities.BookingDocument doc)
+    {
+        return new BookingDocumentDto
+        {
+            Id = doc.Id,
+            BookingId = doc.BookingId,
+            BookingOperationId = doc.BookingOperationId,
+            DocumentType = doc.DocumentType,
+            DocumentNumber = doc.DocumentNumber,
+            FileUrl = doc.FileUrl,
+            FileName = doc.FileName,
+            FileSizeBytes = doc.FileSizeBytes,
+            Issuer = doc.Issuer,
+            VerificationStatus = doc.VerificationStatus,
+            VerifiedBy = doc.VerifiedBy,
+            VerifiedAt = doc.VerifiedAt,
+            RejectionReason = doc.RejectionReason,
+            ExpiryDate = doc.ExpiryDate,
+            CreatedAt = doc.CreatedAt
         };
     }
 }

@@ -58,6 +58,8 @@ export interface ReeferPowerRequest {
   requested_by?: string | null;
   requester_name?: string | null;
   cancelled_reason?: string | null;
+  booking_id?: string | null;
+  booking_code?: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -72,6 +74,8 @@ export interface ReeferPowerSession {
   slot_code?: string | null;
   block_code?: string | null;
   request_id?: string | null;
+  booking_id?: string | null;
+  booking_code?: string | null;
   assigned_by?: string | null;
   assigned_by_name?: string | null;
   assigned_at: Date;

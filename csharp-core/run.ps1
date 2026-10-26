@@ -54,7 +54,7 @@ $password = [Environment]::GetEnvironmentVariable('AIVEN_DB_PASSWORD', 'Process'
 $poolSize = [Environment]::GetEnvironmentVariable('DB_POOL_MAX', 'Process')
 
 if ([string]::IsNullOrWhiteSpace($poolSize)) {
-    $poolSize = '5'
+    $poolSize = '3'
 }
 
 $connectionString = "Host=$hostName;Port=$port;Database=$database;Username=$username;Password=$password;SSL Mode=Require;Trust Server Certificate=true;Maximum Pool Size=$poolSize"

@@ -144,6 +144,8 @@ export class ReeferRepository {
         rps.session_status AS active_session_status,
         rps.actual_power_status AS active_power_status,
         rps.started_at AS active_started_at,
+        rps.booking_code AS active_booking_code,
+        rps.required_power_kw AS active_required_power_kw,
         rpr.target_temperature,
         rpr.temp_tolerance
       FROM public.reefer_plugs rp
@@ -183,7 +185,7 @@ export class ReeferRepository {
       usage_status: row.usage_status,
       technical_status: row.technical_status,
       voltage_type: row.voltage_type,
-      max_power_kw: row.max_power_kw ? parseFloat(row.max_power_kw) : null,
+      max_power_kw: row.max_power_kw ? parseFloat(row.max_power_kw) : 15.0,
       last_maintained_at: row.last_maintained_at,
       slot_code: row.slot_code,
       block_code: row.block_code,
@@ -191,6 +193,8 @@ export class ReeferRepository {
         id: row.active_session_id,
         container_id: row.active_container_id,
         container_no: row.active_container_no,
+        booking_code: row.active_booking_code,
+        required_power_kw: row.active_required_power_kw != null ? parseFloat(row.active_required_power_kw) : (row.max_power_kw ? parseFloat(row.max_power_kw) : 15.0),
         plug_id: row.id,
         session_status: row.active_session_status,
         actual_power_status: row.active_power_status || (row.usage_status === 'OCCUPIED' ? 'POWERED_ON' : 'UNKNOWN'),
@@ -239,6 +243,64 @@ export class ReeferRepository {
       WHERE id = $2
       RETURNING *;
     `, [technical_status, id]);
+    return res.rows[0];
+  }
+
+  /**
+   * Thêm máy / ổ cấp điện kho lạnh mới
+   */
+  async createPlug(data: {
+    plug_code: string;
+    slot_id?: string | null;
+    voltage_type?: string;
+    max_power_kw?: number;
+  }): Promise<ReeferPlug> {
+    const res = await query(`
+      INSERT INTO public.reefer_plugs (
+        plug_code,
+        slot_id,
+        is_available,
+        is_power_on,
+        usage_status,
+        technical_status,
+        voltage_type,
+        max_power_kw,
+        created_at,
+        updated_at
+      ) VALUES ($1, $2, TRUE, FALSE, 'AVAILABLE', 'HEALTHY', $3, $4, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      RETURNING *;
+    `, [
+      data.plug_code,
+      data.slot_id || null,
+      data.voltage_type || '380V-3Ph-32A',
+      data.max_power_kw || 15.00
+    ]);
+    return res.rows[0];
+  }
+
+  /**
+   * Bật / Tắt trực tiếp nguồn điện máy cấp điện kho lạnh
+   */
+  async togglePlugPower(id: string, is_power_on: boolean): Promise<ReeferPlug> {
+    const res = await query(`
+      UPDATE public.reefer_plugs
+      SET 
+        is_power_on = $1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+      RETURNING *;
+    `, [is_power_on, id]);
+
+    // Đồng bộ session đang active nếu có
+    if (res.rows.length > 0) {
+      await query(`
+        UPDATE public.reefer_power_sessions
+        SET 
+          actual_power_status = $1,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE plug_id = $2 AND session_status = 'ACTIVE';
+      `, [is_power_on ? 'POWERED_ON' : 'POWERED_OFF', id]);
+    }
     return res.rows[0];
   }
 
@@ -311,6 +373,8 @@ export class ReeferRepository {
     cargo_description?: string;
     special_instructions?: string;
     requested_by?: string;
+    booking_id?: string;
+    booking_code?: string;
   }): Promise<ReeferPowerRequest> {
     // Validate chỉ container lạnh mới được tạo yêu cầu cấp điện
     const contCheck = await query(`
@@ -347,8 +411,10 @@ export class ReeferRepository {
         cargo_description,
         special_instructions,
         status,
-        requested_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING_ASSIGNMENT', $8)
+        requested_by,
+        booking_id,
+        booking_code
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING_ASSIGNMENT', $8, $9, $10)
       RETURNING *;
     `, [
       requestNo,
@@ -358,7 +424,9 @@ export class ReeferRepository {
       data.temp_tolerance ?? 2.0,
       data.cargo_description || null,
       data.special_instructions || null,
-      data.requested_by || null
+      data.requested_by || null,
+      data.booking_id || null,
+      data.booking_code || null
     ]);
     return res.rows[0];
   }
@@ -498,6 +566,8 @@ export class ReeferRepository {
     cargo_description?: string;
     assigned_by: string;
     note?: string;
+    booking_id?: string;
+    booking_code?: string;
   }): Promise<ReeferPowerSession> {
     const client = await pool.connect();
     try {
@@ -620,15 +690,19 @@ export class ReeferRepository {
           session_status,
           actual_power_status,
           is_active,
-          note
-        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, NULL, 'AWAITING_POWER', 'UNKNOWN', TRUE, $5)
+          note,
+          booking_id,
+          booking_code
+        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, NULL, 'AWAITING_POWER', 'UNKNOWN', TRUE, $5, $6, $7)
         RETURNING *;
       `, [
         data.container_id,
         data.plug_id,
         finalRequestId || null,
         data.assigned_by,
-        data.note || 'Đã phân bổ ổ cắm, chờ kỹ thuật viên cắm cáp và đóng điện'
+        data.note || 'Đã phân bổ ổ cắm, chờ kỹ thuật viên cắm cáp và đóng điện',
+        data.booking_id || null,
+        data.booking_code || null
       ]);
 
       await client.query('COMMIT');

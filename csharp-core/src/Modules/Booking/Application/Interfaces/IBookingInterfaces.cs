@@ -32,4 +32,12 @@ public interface IBookingService
     Task<PayloadEvaluationDto> EvaluatePayloadAsync(Guid? containerId = null, Guid? truckId = null, decimal? customGrossWeightTon = null, CancellationToken cancellationToken = default);
     Task<BookingPaymentInfoDto> GetPaymentInfoAsync(Guid id, CancellationToken cancellationToken = default);
     Task<BookingPaymentInfoDto> ProcessPaymentAsync(Guid id, ProcessBookingPaymentDto dto, CancellationToken cancellationToken = default);
+
+    // Multi-operation and Conditional Document management
+    Task<IReadOnlyList<BookingOperationDto>> GetOperationsAsync(Guid bookingId, CancellationToken cancellationToken = default);
+    Task<BookingOperationDto> UpdateOperationStatusAsync(Guid bookingId, Guid operationId, UpdateBookingOperationStatusDto dto, Guid? updatedBy = null, CancellationToken cancellationToken = default);
+    Task<BookingDocumentDto> AddDocumentAsync(Guid bookingId, CreateBookingDocumentDto dto, CancellationToken cancellationToken = default);
+    Task<BookingDocumentDto> VerifyDocumentAsync(Guid bookingId, Guid documentId, VerifyBookingDocumentDto dto, Guid verifiedBy, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<NexusPort.Modules.Booking.Application.Services.DocumentRequirementSpec>> GetDocumentRequirementsAsync(string operationType, string cargoStatus, string cargoType, CancellationToken cancellationToken = default);
+    Task<NexusPort.Modules.Booking.Application.Services.OperationCombinationValidationResult> ValidateCombinationAsync(IReadOnlyList<CreateBookingOperationDto> operations, CancellationToken cancellationToken = default);
 }

@@ -4,14 +4,17 @@ using NexusPort.Infrastructure.Database;
 using NexusPort.Shared.Exceptions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Hosting;
+using System.IO;
 using NexusPort.Infrastructure.Authentication;
+using NexusPort.Infrastructure.ExternalServices;
 using NexusPort.Modules.Booking.Application.DTOs;
 using NexusPort.Modules.Booking.Application.Interfaces;
 using NexusPort.Shared.Results;
 
 namespace NexusPort.Modules.Booking.Presentation.Controllers;
 
-[Authorize(Roles = "Administrator,Admin,Dispatcher,Carrier,Transport Company,Carrier Staff,Driver")]
+[Authorize(Roles = "Administrator,Admin,Dispatcher,Carrier,Transport Company,Carrier Staff,Driver,Gate Officer,Gate")]
 [ApiController]
 [Route("api/v1/[controller]")]
 [Produces("application/json")]
@@ -20,18 +23,27 @@ public class BookingController : ControllerBase
     private readonly IBookingService _service;
     private readonly ICurrentUser _currentUser;
     private readonly AppDbContext _context;
+    private readonly IS3StorageService _s3StorageService;
+    private readonly IWebHostEnvironment _env;
 
-    public BookingController(IBookingService service, ICurrentUser currentUser, AppDbContext context)
+    public BookingController(
+        IBookingService service, 
+        ICurrentUser currentUser, 
+        AppDbContext context,
+        IS3StorageService s3StorageService,
+        IWebHostEnvironment env)
     {
         _service = service;
         _currentUser = currentUser;
         _context = context;
+        _s3StorageService = s3StorageService;
+        _env = env;
     }
 
     /// <summary>
     /// Lấy danh sách Booking hỗ trợ Tìm kiếm, Lọc và Phân trang (Search, Filter, Pagination)
     /// </summary>
-    [Authorize(Roles = "Administrator,Admin,Dispatcher,Carrier,Transport Company,Carrier Staff")]
+    [Authorize(Roles = "Administrator,Admin,Dispatcher,Carrier,Transport Company,Carrier Staff,Gate Officer,Gate")]
     [HttpGet]
     [ProducesResponseType(typeof(PagedResult<BookingDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<PagedResult<BookingDto>>> GetPaged(
@@ -51,7 +63,7 @@ public class BookingController : ControllerBase
     /// <summary>
     /// Xem chi tiết thông tin Booking theo ID
     /// </summary>
-    [Authorize(Roles = "Administrator,Admin,Dispatcher,Carrier,Transport Company,Carrier Staff")]
+    [Authorize(Roles = "Administrator,Admin,Dispatcher,Carrier,Transport Company,Carrier Staff,Gate Officer,Gate")]
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(BookingDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -302,6 +314,201 @@ public class BookingController : ControllerBase
         await _service.GetByIdAsync(id, IsCarrierRole() ? GetUserCarrierId() : null, cancellationToken);
         var result = await _service.ProcessPaymentAsync(id, dto, cancellationToken);
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Lấy danh sách các tác nghiệp của Booking (Export, Import)
+    /// </summary>
+    [Authorize(Roles = "Administrator,Admin,Dispatcher,Carrier,Transport Company,Carrier Staff,Gate Officer,Gate")]
+    [HttpGet("{id:guid}/operations")]
+    [ProducesResponseType(typeof(IReadOnlyList<BookingOperationDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<BookingOperationDto>>> GetOperations(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.GetOperationsAsync(id, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Cập nhật trạng thái tác nghiệp (Approved, OnHold, InProgress, Completed, Rejected)
+    /// </summary>
+    [Authorize(Roles = "Administrator,Admin,Dispatcher,Gate Officer,Gate")]
+    [HttpPut("{id:guid}/operations/{operationId:guid}/status")]
+    [ProducesResponseType(typeof(BookingOperationDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<BookingOperationDto>> UpdateOperationStatus(
+        Guid id,
+        Guid operationId,
+        [FromBody] UpdateBookingOperationStatusDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.UpdateOperationStatusAsync(id, operationId, dto, _currentUser.UserId, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Thêm chứng từ / tài liệu cho Booking hoặc Tác nghiệp (eDO, B/L, Hải quan, VGM, Lệnh cấp vỏ, v.v.)
+    /// </summary>
+    [Authorize(Roles = "Administrator,Admin,Dispatcher,Carrier,Transport Company,Carrier Staff")]
+    [HttpPost("{id:guid}/documents")]
+    [ProducesResponseType(typeof(BookingDocumentDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<BookingDocumentDto>> AddDocument(
+        Guid id,
+        [FromBody] CreateBookingDocumentDto dto,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.AddDocumentAsync(id, dto, cancellationToken);
+        return StatusCode(StatusCodes.Status201Created, result);
+    }
+
+    /// <summary>
+    /// Thẩm định / Duyệt chứng từ đính kèm (Verified hoặc Rejected)
+    /// </summary>
+    [Authorize(Roles = "Administrator,Admin,Dispatcher,Gate Officer,Gate")]
+    [HttpPost("{id:guid}/documents/{documentId:guid}/verify")]
+    [ProducesResponseType(typeof(BookingDocumentDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<BookingDocumentDto>> VerifyDocument(
+        Guid id,
+        Guid documentId,
+        [FromBody] VerifyBookingDocumentDto dto,
+        CancellationToken cancellationToken)
+    {
+        var verifiedBy = _currentUser.UserId ?? Guid.Empty;
+        var result = await _service.VerifyDocumentAsync(id, documentId, dto, verifiedBy, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Tra cứu danh mục chứng từ bắt buộc / khuyến nghị theo từng loại tác nghiệp & phân loại hàng
+    /// </summary>
+    [AllowAnonymous]
+    [HttpGet("operation-requirements")]
+    [ProducesResponseType(typeof(IReadOnlyList<NexusPort.Modules.Booking.Application.Services.DocumentRequirementSpec>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<NexusPort.Modules.Booking.Application.Services.DocumentRequirementSpec>>> GetDocumentRequirements(
+        [FromQuery] string operationType,
+        [FromQuery] string? cargoStatus,
+        [FromQuery] string? cargoType,
+        CancellationToken cancellationToken)
+    {
+        var result = await _service.GetDocumentRequirementsAsync(operationType, cargoStatus ?? "Loaded", cargoType ?? "General", cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Kiểm tra tính tương thích của tổ hợp tác nghiệp kết hợp (VD: Trả rỗng + Bốc rỗng)
+    /// </summary>
+    [AllowAnonymous]
+    [HttpPost("validate-combination")]
+    [ProducesResponseType(typeof(NexusPort.Modules.Booking.Application.Services.OperationCombinationValidationResult), StatusCodes.Status200OK)]
+    public async Task<ActionResult<NexusPort.Modules.Booking.Application.Services.OperationCombinationValidationResult>> ValidateCombination(
+        [FromBody] System.Text.Json.JsonElement body,
+        CancellationToken cancellationToken)
+    {
+        List<CreateBookingOperationDto>? operations = null;
+        var options = new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+
+        if (body.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            operations = System.Text.Json.JsonSerializer.Deserialize<List<CreateBookingOperationDto>>(body.GetRawText(), options);
+        }
+        else if (body.ValueKind == System.Text.Json.JsonValueKind.Object)
+        {
+            if (body.TryGetProperty("operations", out var opProp) || body.TryGetProperty("Operations", out opProp))
+            {
+                operations = System.Text.Json.JsonSerializer.Deserialize<List<CreateBookingOperationDto>>(opProp.GetRawText(), options);
+            }
+        }
+
+        var result = await _service.ValidateCombinationAsync(operations ?? new List<CreateBookingOperationDto>(), cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Tải lên tệp chứng từ đính kèm trực tiếp từ máy tính (AWS S3 hoặc lưu trữ cục bộ)
+    /// </summary>
+    [AllowAnonymous]
+    [HttpPost("upload-document")]
+    [Consumes("multipart/form-data")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> UploadDocument([FromForm] IFormFile file, CancellationToken cancellationToken)
+    {
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(new { message = "Vui lòng chọn tệp chứng từ từ máy tính để tải lên." });
+        }
+
+        // Limit size: 25MB
+        if (file.Length > 25 * 1024 * 1024)
+        {
+            return BadRequest(new { message = "Dung lượng tệp không được vượt quá 25MB." });
+        }
+
+        var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
+        var safeFileName = $"doc_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid().ToString("N")[..8]}{ext}";
+
+        // 1. Thử tải lên AWS S3
+        try
+        {
+            if (_s3StorageService != null)
+            {
+                using var stream = file.OpenReadStream();
+                var s3Url = await _s3StorageService.UploadFileAsync(stream, safeFileName, file.ContentType, "documents", cancellationToken);
+                if (!string.IsNullOrEmpty(s3Url))
+                {
+                    return Ok(new
+                    {
+                        fileUrl = s3Url,
+                        fileName = file.FileName,
+                        fileSizeBytes = file.Length,
+                        contentType = file.ContentType
+                    });
+                }
+            }
+        }
+        catch
+        {
+            // Fallback khi AWS S3 không khả dụng hoặc chưa cấu hình AccessKey
+        }
+
+        // 2. Dự phòng lưu trữ cục bộ (Local fallback in wwwroot/uploads/documents)
+        try
+        {
+            var webRoot = _env.WebRootPath;
+            if (string.IsNullOrEmpty(webRoot))
+            {
+                webRoot = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+            }
+
+            var uploadsDir = Path.Combine(webRoot, "uploads", "documents");
+            if (!Directory.Exists(uploadsDir))
+            {
+                Directory.CreateDirectory(uploadsDir);
+            }
+
+            var filePath = Path.Combine(uploadsDir, safeFileName);
+            using (var localStream = new FileStream(filePath, FileMode.Create))
+            {
+                await file.CopyToAsync(localStream, cancellationToken);
+            }
+
+            var localUrl = $"/uploads/documents/{safeFileName}";
+            return Ok(new
+            {
+                fileUrl = localUrl,
+                fileName = file.FileName,
+                fileSizeBytes = file.Length,
+                contentType = file.ContentType
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = $"Lỗi khi lưu trữ tệp đính kèm: {ex.Message}" });
+        }
     }
 
     private bool IsCarrierRole()

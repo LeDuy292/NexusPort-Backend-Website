@@ -41,6 +41,26 @@ public class GateController : ControllerBase
     }
 
     /// <summary>
+    /// API tiếp nhận sự kiện nhận diện từ thiết bị IoT / Camera tại cổng (Hỗ trợ gọi trực tiếp từ vi điều khiển / ESP32 / Raspberry Pi)
+    /// </summary>
+    [HttpPost("iot/recognition-event")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(GateVerificationResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<GateVerificationResultDto>> ProcessIotRecognitionEvent(
+        [FromBody] GateRecognitionEventDto request, 
+        CancellationToken cancellationToken)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(ModelState);
+        }
+
+        var result = await _verificationService.VerifyGateScanAsync(request, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Kiểm tra trước (Pre-check) toàn diện các điều kiện phương tiện, tài xế, container và booking qua Rule Engine
     /// </summary>
     [HttpPost("rules/evaluate")]

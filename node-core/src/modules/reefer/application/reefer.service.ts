@@ -44,6 +44,19 @@ export class ReeferService {
     return this.repository.updatePlugTechnicalStatus(id, technical_status);
   }
 
+  async createPlug(data: {
+    plug_code: string;
+    slot_id?: string | null;
+    voltage_type?: string;
+    max_power_kw?: number;
+  }): Promise<ReeferPlug> {
+    return this.repository.createPlug(data);
+  }
+
+  async togglePlugPower(id: string, is_power_on: boolean): Promise<ReeferPlug> {
+    return this.repository.togglePlugPower(id, is_power_on);
+  }
+
   async getRequests(filters?: {
     status?: ReeferRequestStatus;
     container_id?: string;
@@ -66,6 +79,8 @@ export class ReeferService {
     cargo_description?: string;
     special_instructions?: string;
     requested_by?: string;
+    booking_id?: string;
+    booking_code?: string;
   }): Promise<ReeferPowerRequest> {
     return this.repository.createRequest(data);
   }
@@ -103,9 +118,45 @@ export class ReeferService {
     cargo_description?: string;
     assigned_by: string;
     note?: string;
+    booking_id?: string;
+    booking_code?: string;
   }): Promise<ReeferPowerSession> {
     try {
       return await this.repository.assignPlugToContainer(data);
+    } catch (err: any) {
+      throw new AppError(err.message, 400);
+    }
+  }
+
+  async autoAllocatePlug(data: {
+    container_id: string;
+    plug_id?: string;
+    target_temperature?: number;
+    temp_tolerance?: number;
+    cargo_description?: string;
+    preferred_block?: string;
+    assigned_by: string;
+    note?: string;
+    booking_id?: string;
+    booking_code?: string;
+  }): Promise<ReeferPowerSession> {
+    try {
+      let plugId = data.plug_id;
+      if (!plugId) {
+        // Tự động tìm máy cấp điện sẵn sàng trong bãi đông lạnh
+        const availablePlugs = await this.repository.getPlugs({
+          usage_status: 'AVAILABLE',
+          technical_status: 'HEALTHY'
+        });
+        if (!availablePlugs || availablePlugs.length === 0) {
+          throw new AppError('Không còn máy/ổ cấp điện nào còn trống trong kho đông lạnh.', 400);
+        }
+        plugId = availablePlugs[0].id;
+      }
+      return await this.repository.assignPlugToContainer({
+        ...data,
+        plug_id: plugId
+      });
     } catch (err: any) {
       throw new AppError(err.message, 400);
     }

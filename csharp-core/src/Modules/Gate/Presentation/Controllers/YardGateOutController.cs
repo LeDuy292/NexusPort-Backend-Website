@@ -25,26 +25,64 @@ public class YardGateOutController : ControllerBase
         var booking = await _context.Database.SqlQueryRaw<GateOutBooking>(
             "SELECT id AS \"Id\",status::text AS \"Status\",booking_type::text AS \"Type\" FROM bookings WHERE id={0} FOR UPDATE", request.BookingId).FirstOrDefaultAsync(cancellationToken);
         if (booking == null) throw new NotFoundException("Booking", request.BookingId);
+        var bookingEntity = await _context.Set<Booking.Domain.Entities.Booking>()
+            .Include(b => b.BookingOperations)
+            .FirstOrDefaultAsync(b => b.Id == request.BookingId, cancellationToken);
+        if (bookingEntity == null) throw new NotFoundException("Booking", request.BookingId);
+
         var previous = await _context.Database.SqlQueryRaw<Guid>(
             "SELECT id AS \"Value\" FROM gate_transactions WHERE booking_id={0} AND gate_type='gate_out' AND status='completed'", request.BookingId).ToListAsync(cancellationToken);
         if (previous.Count > 0) { await transaction.CommitAsync(cancellationToken); return Ok(new { id = previous[0] }); }
-        if (booking.Type != "pickup" || booking.Status != "completed")
-            throw new ValidationException("Booking", "Pickup phải hoàn tất giao nhận trước khi xác nhận ra cổng.");
-        var eligible = await _context.Database.SqlQueryRaw<int>(
-            "SELECT count(*)::int AS \"Value\" FROM booking_containers bc JOIN container_visits v ON v.id=bc.container_visit_id WHERE bc.booking_id={0} AND v.visit_status='active'", request.BookingId).SingleAsync(cancellationToken);
-        var total = await _context.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM booking_containers WHERE booking_id={0}",request.BookingId).SingleAsync(cancellationToken);
-        if (total == 0 || total != eligible) throw new ValidationException("Visit", "Booking chưa có đủ lượt bãi đang hoạt động.");
+
+        // Find relevant GateOut operation
+        var gateOutOp = bookingEntity.BookingOperations
+            .FirstOrDefault(o => string.Equals(o.ExpectedGateDirection, "GateOut", StringComparison.OrdinalIgnoreCase));
+
+        var isLegacyPickup = booking.Type == "pickup";
+        if (gateOutOp == null && !isLegacyPickup)
+        {
+            throw new ValidationException("Booking", "Lịch hẹn không có tác nghiệp ra cổng (Gate Out) hợp lệ.");
+        }
+
         var validGate = await _context.Database.SqlQueryRaw<Guid>("SELECT id AS \"Value\" FROM gates WHERE id={0} AND is_active", request.GateId).ToListAsync(cancellationToken);
         if (validGate.Count != 1) throw new ValidationException("Gate", "Cổng không hợp lệ hoặc đã ngừng hoạt động.");
+
         var id = Guid.NewGuid();
-        await _context.Database.ExecuteSqlInterpolatedAsync($@"INSERT INTO gate_transactions(id,booking_id,gate_id,driver_id,truck_id,checked_by,gate_type,status,plate_number_detected,checked_at,completed_at)
-          SELECT {id},id,{request.GateId},driver_id,truck_id,{_user.UserId},'gate_out','completed',vehicle_plate,now(),now() FROM bookings WHERE id={request.BookingId}",cancellationToken);
+        var opId = gateOutOp?.Id;
+        var contNo = gateOutOp?.ContainerNumber;
+
+        await _context.Database.ExecuteSqlInterpolatedAsync($@"INSERT INTO gate_transactions(
+            id, booking_id, gate_id, driver_id, truck_id, checked_by, gate_type, status, plate_number_detected, 
+            checked_at, completed_at, booking_operation_id, container_number)
+          SELECT {id}, id, {request.GateId}, driver_id, truck_id, {_user.UserId}, 'gate_out', 'completed', vehicle_plate, 
+                 now(), now(), {opId}, {contNo} 
+          FROM bookings WHERE id={request.BookingId}", cancellationToken);
+
+        // Update booking operation and trip status
+        if (gateOutOp != null)
+        {
+            gateOutOp.Complete($"EIR-OUT-{DateTime.UtcNow:yyyyMMdd}-{id.ToString().Substring(0, 8).ToUpper()}");
+        }
+
+        bookingEntity.UpdateDerivedStatus();
+        bookingEntity.Status = Booking.Domain.Enums.BookingStatus.Completed;
+        bookingEntity.TripStatus = "Completed";
+
+        // Release yard slot if container was assigned in yard
         await _context.Database.ExecuteSqlInterpolatedAsync($@"WITH released AS (
           DELETE FROM container_positions p USING booking_containers bc
           WHERE p.container_id=bc.container_id AND bc.booking_id={request.BookingId} RETURNING p.slot_id)
-          UPDATE yard_slots SET status='empty'::yard_slot_status WHERE id IN (SELECT slot_id FROM released)",cancellationToken);
+          UPDATE yard_slots SET status='empty'::yard_slot_status WHERE id IN (SELECT slot_id FROM released)", cancellationToken);
+
+        // Update container status to gate_out
+        await _context.Database.ExecuteSqlInterpolatedAsync($@"UPDATE containers c
+          SET status = 'gate_out'::container_status, left_at = now(), updated_at = now()
+          FROM booking_containers bc
+          WHERE c.id = bc.container_id AND bc.booking_id = {request.BookingId}", cancellationToken);
+
+        await _context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
-        return Ok(new { id });
+        return Ok(new { id, message = "Xác nhận Gate Out và hoàn tất chuyến xe thành công." });
     }
 }
 public class CompleteYardGateOut
