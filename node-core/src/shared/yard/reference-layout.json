@@ -1,0 +1,1503 @@
+{
+  "version": "excel-yard-layout-20261025-v2",
+  "status": "proposed",
+  "width": 1000,
+  "height": 1094,
+  "source": "Sơ đồ bãi container tham khảo, Sheet1",
+  "units": "schematic",
+  "zones": [
+    {
+      "code": "A",
+      "label": "Lưu trữ dài hạn",
+      "maxContainerRows": 5
+    },
+    {
+      "code": "B",
+      "label": "Container hãng tàu",
+      "maxContainerRows": null
+    },
+    {
+      "code": "C",
+      "label": "Lưu trữ",
+      "maxContainerRows": 4
+    },
+    {
+      "code": "D",
+      "label": "Lưu trữ",
+      "maxContainerRows": 3
+    },
+    {
+      "code": "S",
+      "label": "Sửa chữa và rửa container",
+      "maxContainerRows": null
+    }
+  ],
+  "gates": [
+    {
+      "code": "GATE-01",
+      "label": "Cổng vào",
+      "direction": "in",
+      "x": 691,
+      "y": 90
+    },
+    {
+      "code": "GATE-02",
+      "label": "Cổng ra",
+      "direction": "out",
+      "x": 949,
+      "y": 90
+    }
+  ],
+  "roads": [
+    {
+      "id": "access",
+      "points": [
+        [
+          25,
+          79
+        ],
+        [
+          975,
+          79
+        ]
+      ],
+      "direction": "both"
+    },
+    {
+      "id": "main",
+      "points": [
+        [
+          691,
+          90
+        ],
+        [
+          691,
+          962
+        ],
+        [
+          949,
+          962
+        ],
+        [
+          949,
+          90
+        ]
+      ],
+      "direction": "one-way"
+    },
+    {
+      "id": "west-aisle",
+      "points": [
+        [
+          300,
+          118
+        ],
+        [
+          300,
+          962
+        ]
+      ],
+      "direction": "both"
+    },
+    {
+      "id": "cross-14",
+      "points": [
+        [
+          25,
+          346.53
+        ],
+        [
+          691,
+          346.53
+        ]
+      ],
+      "direction": "both"
+    },
+    {
+      "id": "cross-21",
+      "points": [
+        [
+          25,
+          474.84
+        ],
+        [
+          691,
+          474.84
+        ]
+      ],
+      "direction": "both"
+    },
+    {
+      "id": "cross-31",
+      "points": [
+        [
+          25,
+          621.85
+        ],
+        [
+          691,
+          621.85
+        ]
+      ],
+      "direction": "both"
+    },
+    {
+      "id": "south-access",
+      "points": [
+        [
+          25,
+          962
+        ],
+        [
+          691,
+          962
+        ]
+      ],
+      "direction": "both"
+    }
+  ],
+  "facilities": [
+    {
+      "code": "office",
+      "label": "Văn phòng / Phòng nghỉ",
+      "x": 749,
+      "y": 116,
+      "width": 145,
+      "height": 42
+    },
+    {
+      "code": "staging",
+      "label": "Khu hạ tạm",
+      "x": 749,
+      "y": 166,
+      "width": 145,
+      "height": 26
+    },
+    {
+      "code": "unassigned-east",
+      "label": "Chưa đánh số",
+      "x": 749,
+      "y": 381.74,
+      "width": 145,
+      "height": 46.0
+    },
+    {
+      "code": "unassigned-west",
+      "label": "Chưa đánh số",
+      "x": 40,
+      "y": 594.69,
+      "width": 208,
+      "height": 20.159999999999968
+    },
+    {
+      "code": "light",
+      "label": "Cột đèn",
+      "x": 495,
+      "y": 431.74,
+      "width": 45,
+      "height": 36.099999999999966
+    }
+  ],
+  "areas": [
+    {
+      "code": "A1",
+      "zone": "A",
+      "bay": 1,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 118.0,
+      "width": 208,
+      "height": 35.31,
+      "orientation": "horizontal",
+      "note": "XLN (40HC), JJL (40HC), CAI (40HC), COE (40RH)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B1",
+      "zone": "B",
+      "bay": 1,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "x": 355,
+      "y": 118.0,
+      "width": 286,
+      "height": 35.31,
+      "orientation": "horizontal",
+      "note": "YTS (40RH), COE (40RH)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A2",
+      "zone": "A",
+      "bay": 2,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 163.44,
+      "width": 208,
+      "height": 43.33,
+      "orientation": "horizontal",
+      "note": "CAI AV (40HC)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B2",
+      "zone": "B",
+      "bay": 2,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "x": 355,
+      "y": 163.44,
+      "width": 286,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "KAJ (20GP), VVUU, BE",
+      "sourceHighlight": false
+    },
+    {
+      "code": "S1",
+      "zone": "S",
+      "bay": 1,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 209.77,
+      "width": 145,
+      "height": 30.86,
+      "orientation": "horizontal",
+      "note": "Rửa container",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A3",
+      "zone": "A",
+      "bay": 3,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 216.9,
+      "width": 208,
+      "height": 37.1,
+      "orientation": "horizontal",
+      "note": "CAI AV (40HC)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B3",
+      "zone": "B",
+      "bay": 3,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "x": 355,
+      "y": 216.9,
+      "width": 286,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "JSH (20GP), ACCU",
+      "sourceHighlight": false
+    },
+    {
+      "code": "S2",
+      "zone": "S",
+      "bay": 2,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 243.63,
+      "width": 145,
+      "height": 18,
+      "orientation": "horizontal",
+      "note": "MITOS",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A4",
+      "zone": "A",
+      "bay": 4,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 264.12,
+      "width": 208,
+      "height": 51.36,
+      "orientation": "horizontal",
+      "note": "SCB (40HC), COE (40HC)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B4",
+      "zone": "B",
+      "bay": 4,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "x": 355,
+      "y": 264.12,
+      "width": 286,
+      "height": 51.36,
+      "orientation": "horizontal",
+      "note": "DM (40HC)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "S3",
+      "zone": "S",
+      "bay": 3,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 264.12,
+      "width": 145,
+      "height": 20.17,
+      "orientation": "horizontal",
+      "note": "MITOS",
+      "sourceHighlight": false
+    },
+    {
+      "code": "S4",
+      "zone": "S",
+      "bay": 4,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 287.29,
+      "width": 145,
+      "height": 28.19,
+      "orientation": "horizontal",
+      "note": "NAMKHANH",
+      "sourceHighlight": false
+    },
+    {
+      "code": "S5",
+      "zone": "S",
+      "bay": 5,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 318.48,
+      "width": 145,
+      "height": 21.05,
+      "orientation": "horizontal",
+      "note": "NAMKHANH",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A5",
+      "zone": "A",
+      "bay": 5,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 348.77,
+      "width": 208,
+      "height": 24.62,
+      "orientation": "horizontal",
+      "note": "JSH (CIMU / SKYU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B5",
+      "zone": "B",
+      "bay": 5,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "x": 355,
+      "y": 348.77,
+      "width": 286,
+      "height": 24.62,
+      "orientation": "horizontal",
+      "note": "HLC (40HC), DM",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A6",
+      "zone": "A",
+      "bay": 6,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 381.74,
+      "width": 208,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "JSH (SORU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B6",
+      "zone": "B",
+      "bay": 6,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "x": 355,
+      "y": 381.74,
+      "width": 286,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "20GP, DM",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B7",
+      "zone": "B",
+      "bay": 7,
+      "rows": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "x": 355,
+      "y": 406.69,
+      "width": 286,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "DM (20GP)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A7",
+      "zone": "A",
+      "bay": 7,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 444.11,
+      "width": 208,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "KRN (CIMU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "C1",
+      "zone": "C",
+      "bay": 1,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 444.11,
+      "width": 145,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "JSH (20GP), CWWU",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A8",
+      "zone": "A",
+      "bay": 8,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 477.97,
+      "width": 208,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "JSH 20GP (HHXU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B8",
+      "zone": "B",
+      "bay": 8,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "x": 355,
+      "y": 477.97,
+      "width": 286,
+      "height": 46.0,
+      "orientation": "horizontal",
+      "note": "Hạ DM 40HC: CAI, TEX, SBC, UFL",
+      "sourceHighlight": false
+    },
+    {
+      "code": "C2",
+      "zone": "C",
+      "bay": 2,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 477.97,
+      "width": 145,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "JSH (20GP), CWWU",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A9",
+      "zone": "A",
+      "bay": 9,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 504.7,
+      "width": 208,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "JSH 20GP (VSTU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "C3",
+      "zone": "C",
+      "bay": 3,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 504.7,
+      "width": 145,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "JSH (20GP), GSBU",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A10",
+      "zone": "A",
+      "bay": 10,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 534.1,
+      "width": 208,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "JSH 20GP (SJCU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B9",
+      "zone": "B",
+      "bay": 9,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "x": 355,
+      "y": 534.1,
+      "width": 286,
+      "height": 57.59,
+      "orientation": "horizontal",
+      "note": "Hạ HLC 40HC DM (40HQ)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "C4",
+      "zone": "C",
+      "bay": 4,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 534.1,
+      "width": 145,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "JSH (40HQ), AURU",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A11",
+      "zone": "A",
+      "bay": 11,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 567.96,
+      "width": 208,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "MXN 20GP (MCCU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "C5",
+      "zone": "C",
+      "bay": 5,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 567.96,
+      "width": 145,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "JJL (40HQ)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B10",
+      "zone": "B",
+      "bay": 10,
+      "rows": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "x": 355,
+      "y": 594.69,
+      "width": 286,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "HLC 20GP AV",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A12",
+      "zone": "A",
+      "bay": 12,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 624.98,
+      "width": 208,
+      "height": 40.66,
+      "orientation": "horizontal",
+      "note": "MAF 40HC",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B11",
+      "zone": "B",
+      "bay": 11,
+      "rows": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "x": 355,
+      "y": 624.98,
+      "width": 286,
+      "height": 40.66,
+      "orientation": "horizontal",
+      "note": "Dãy HLC 40HQ, AV",
+      "sourceHighlight": false
+    },
+    {
+      "code": "C6",
+      "zone": "C",
+      "bay": 6,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 624.98,
+      "width": 145,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "Chưa có ghi chú trong bản gốc",
+      "sourceHighlight": true
+    },
+    {
+      "code": "C7",
+      "zone": "C",
+      "bay": 7,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 647.26,
+      "width": 145,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "KRN (20GP), ZXJU",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B12",
+      "zone": "B",
+      "bay": 12,
+      "rows": [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10
+      ],
+      "x": 355,
+      "y": 670.64,
+      "width": 286,
+      "height": 27.97,
+      "orientation": "horizontal",
+      "note": "HLC 20GP AV",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A13",
+      "zone": "A",
+      "bay": 13,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 675.77,
+      "width": 208,
+      "height": 22.84,
+      "orientation": "horizontal",
+      "note": "EOT AV",
+      "sourceHighlight": false
+    },
+    {
+      "code": "C8",
+      "zone": "C",
+      "bay": 8,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 675.77,
+      "width": 145,
+      "height": 22.84,
+      "orientation": "horizontal",
+      "note": "KRN 20GP (ZXJU), màu tím",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A14",
+      "zone": "A",
+      "bay": 14,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 708.74,
+      "width": 208,
+      "height": 25.51,
+      "orientation": "horizontal",
+      "note": "XLN (NWRU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B13",
+      "zone": "B",
+      "bay": 13,
+      "rows": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "x": 355,
+      "y": 708.74,
+      "width": 286,
+      "height": 25.51,
+      "orientation": "horizontal",
+      "note": "HLC 20GP AV",
+      "sourceHighlight": false
+    },
+    {
+      "code": "C9",
+      "zone": "C",
+      "bay": 9,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 708.74,
+      "width": 145,
+      "height": 25.51,
+      "orientation": "horizontal",
+      "note": "SPC 20GP AV (XHCU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A15",
+      "zone": "A",
+      "bay": 15,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 742.59,
+      "width": 208,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "JSH (AURU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B14",
+      "zone": "B",
+      "bay": 14,
+      "rows": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "x": 355,
+      "y": 742.59,
+      "width": 286,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "HLC (40HC), AV",
+      "sourceHighlight": false
+    },
+    {
+      "code": "C10",
+      "zone": "C",
+      "bay": 10,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 742.59,
+      "width": 145,
+      "height": 49.57,
+      "orientation": "horizontal",
+      "note": "MXN (40HQ), MCCU",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A16",
+      "zone": "A",
+      "bay": 16,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 775.56,
+      "width": 208,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "JSH (DHSU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B15",
+      "zone": "B",
+      "bay": 15,
+      "rows": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "x": 355,
+      "y": 775.56,
+      "width": 286,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "HLC 20GP AV",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A17",
+      "zone": "A",
+      "bay": 17,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 800.51,
+      "width": 208,
+      "height": 23.73,
+      "orientation": "horizontal",
+      "note": "JSH (SKYU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B16",
+      "zone": "B",
+      "bay": 16,
+      "rows": [
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11
+      ],
+      "x": 355,
+      "y": 800.51,
+      "width": 286,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "HLC 20GP (sàn gỗ)",
+      "sourceHighlight": true
+    },
+    {
+      "code": "C11",
+      "zone": "C",
+      "bay": 11,
+      "rows": [
+        5,
+        4,
+        3,
+        2,
+        1
+      ],
+      "x": 749,
+      "y": 800.51,
+      "width": 145,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "SPC (20GP), XHCU",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A18",
+      "zone": "A",
+      "bay": 18,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 827.24,
+      "width": 208,
+      "height": 26.4,
+      "orientation": "horizontal",
+      "note": "QDJ (40HC), JJL (40HC)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "B17",
+      "zone": "B",
+      "bay": 17,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "x": 355,
+      "y": 832.59,
+      "width": 286,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "HLC 20GP (nặng, sàn gỗ)",
+      "sourceHighlight": true
+    },
+    {
+      "code": "C12",
+      "zone": "C",
+      "bay": 12,
+      "rows": [
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "x": 749,
+      "y": 832.59,
+      "width": 145,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "HTK 2021",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A19",
+      "zone": "A",
+      "bay": 19,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 861.1,
+      "width": 208,
+      "height": 25.51,
+      "orientation": "horizontal",
+      "note": "XLN 40HC, MXN 40HC",
+      "sourceHighlight": false
+    },
+    {
+      "code": "A20",
+      "zone": "A",
+      "bay": 20,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 889.61,
+      "width": 208,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "Chưa có ghi chú trong bản gốc",
+      "sourceHighlight": true
+    },
+    {
+      "code": "A21",
+      "zone": "A",
+      "bay": 21,
+      "rows": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "x": 40,
+      "y": 914.56,
+      "width": 208,
+      "height": 22,
+      "orientation": "horizontal",
+      "note": "MAF 20GP",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D1",
+      "zone": "D",
+      "bay": 1,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 40,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "XLN",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D2",
+      "zone": "D",
+      "bay": 2,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 117,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "MXN (OOLU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D3",
+      "zone": "D",
+      "bay": 3,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 194,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "Vị trí chỉ định",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D4",
+      "zone": "D",
+      "bay": 4,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 271,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "XLN 20GP",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D5",
+      "zone": "D",
+      "bay": 5,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 348,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "Vị trí chỉ định",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D6",
+      "zone": "D",
+      "bay": 6,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 425,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "Vị trí chỉ định",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D7",
+      "zone": "D",
+      "bay": 7,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 502,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "MXN OOLU",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D8",
+      "zone": "D",
+      "bay": 8,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 579,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "YXB, CAI 20GP",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D9",
+      "zone": "D",
+      "bay": 9,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 656,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "Vị trí chỉ định",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D10",
+      "zone": "D",
+      "bay": 10,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 733,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "HPT (CICU)",
+      "sourceHighlight": false
+    },
+    {
+      "code": "D11",
+      "zone": "D",
+      "bay": 11,
+      "rows": [
+        1,
+        2,
+        3
+      ],
+      "x": 810,
+      "y": 979,
+      "width": 57,
+      "height": 43,
+      "orientation": "vertical",
+      "note": "ZXJU",
+      "sourceHighlight": false
+    }
+  ]
+}
