@@ -36,6 +36,9 @@ public class Booking : BaseEntity, IAggregateRoot
     public string? VehiclePlate { get; set; }
     public Guid? VehicleId { get; set; }
     public string? DriverName { get; set; }
+    public string? VehicleSnapshot { get; set; }
+    public string? DriverSnapshot { get; set; }
+    public string? TrailerNumber { get; set; }
 
     // Time validity window
     public DateTime? ValidFrom { get; set; }

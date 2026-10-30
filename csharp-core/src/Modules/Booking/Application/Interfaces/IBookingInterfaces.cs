@@ -16,6 +16,8 @@ public interface IBookingRepository
 
 public interface IBookingService
 {
+    Task<IReadOnlyList<BookingCargoSource>> GetBookingSourcesAsync(Guid carrierId, string? search, CancellationToken token, string bookingType = "Dropoff");
+    Task<BookingPlan> PlanBookingAsync(Guid carrierId, BookingPlanningRequest request, CancellationToken token);
     Task<IReadOnlyList<BookingDto>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<PagedResult<BookingDto>> GetPagedAsync(BookingFilterParams filter, CancellationToken cancellationToken = default);
     Task<BookingDto?> GetByIdAsync(Guid id, Guid? userCarrierId = null, CancellationToken cancellationToken = default);
@@ -28,7 +30,7 @@ public interface IBookingService
     Task<ContainerConfirmationResultDto> ConfirmContainerAsync(ContainerConfirmationDto dto, Guid driverId, CancellationToken cancellationToken = default);
     Task<BookingDto> AssignResourcesAsync(Guid id, AssignBookingResourcesDto dto, Guid? userCarrierId = null, CancellationToken cancellationToken = default);
     Task<AvailableFleetResourcesDto> GetAvailableResourcesAsync(Guid? carrierId = null, CancellationToken cancellationToken = default);
-    Task<FleetRecommendationDto> RecommendFleetAsync(Guid? containerId = null, string? bookingType = null, Guid? carrierId = null, CancellationToken cancellationToken = default, Guid? declarationId = null, string? yardCode = null);
+    Task<FleetRecommendationDto> RecommendFleetAsync(Guid? containerId = null, string? bookingType = null, Guid? carrierId = null, CancellationToken cancellationToken = default, Guid? declarationId = null, string? yardCode = null, Guid? bookingId = null);
     Task<PayloadEvaluationDto> EvaluatePayloadAsync(Guid? containerId = null, Guid? truckId = null, decimal? customGrossWeightTon = null, CancellationToken cancellationToken = default);
     Task<BookingPaymentInfoDto> GetPaymentInfoAsync(Guid id, CancellationToken cancellationToken = default);
     Task<BookingPaymentInfoDto> ProcessPaymentAsync(Guid id, ProcessBookingPaymentDto dto, CancellationToken cancellationToken = default);

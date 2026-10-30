@@ -4,6 +4,9 @@ namespace NexusPort.Modules.Booking.Application.DTOs;
 
 public class BookingDto
 {
+    public BookingVehicleDetailsDto? VehicleDetails { get; set; }
+    public BookingDriverDetailsDto? DriverDetails { get; set; }
+    public string? TrailerNumber { get; set; }
     public Guid Id { get; set; }
     public Guid CarrierId { get; set; }
     public Guid? DriverId { get; set; }
@@ -183,6 +186,7 @@ public class BookingContainerSelectionDto
 
 public class CreateBookingDto
 {
+    public string? TrailerNumber { get; set; }
     [System.Text.Json.Serialization.JsonIgnore]
     public Guid? ExcludeBookingId { get; set; }
     public Guid CarrierId { get; set; }
@@ -194,6 +198,7 @@ public class CreateBookingDto
     public DateTime AppointmentStart { get; set; }
     public DateTime AppointmentEnd { get; set; }
     public List<Guid> ContainerIds { get; set; } = new();
+    [System.ComponentModel.DataAnnotations.Required]
     public List<BookingContainerSelectionDto> ContainerSelections { get; set; } = new();
 
     public string? Status { get; set; } = "Active";
@@ -208,12 +213,14 @@ public class CreateBookingDto
     // Multi-operation and combined trip additions
     public bool IsCombined { get; set; }
     public Guid? CustomerId { get; set; }
+    [System.ComponentModel.DataAnnotations.Required]
     public List<CreateBookingOperationDto> Operations { get; set; } = new();
+    [System.ComponentModel.DataAnnotations.Required]
     public List<CreateBookingDocumentDto> Documents { get; set; } = new();
 
     // Cold Storage Reefer Power Supply configuration
     public bool IsReeferPowerRequired { get; set; }
-    public decimal? TargetTemperature { get; set; } = -18.0m;
+    public decimal? TargetTemperature { get; set; }
     public string? TemperatureUnit { get; set; } = "C";
     public decimal? TempTolerance { get; set; } = 2.0m;
     public Guid? ReeferPlugId { get; set; }
@@ -224,6 +231,7 @@ public class CreateBookingDto
 
 public class UpdateBookingDto
 {
+    public string? TrailerNumber { get; set; }
     public Guid? DriverId { get; set; }
     public Guid? TruckId { get; set; }
     public DateTime AppointmentStart { get; set; }
@@ -315,23 +323,14 @@ public class EligibleContainerDto
     public string Status { get; set; } = "in_yard";
 }
 
-public class AvailableTruckDto
+public class AvailableTruckDto : BookingVehicleDetailsDto
 {
-    public Guid Id { get; set; }
-    public string PlateNumber { get; set; } = string.Empty;
-    public string VehicleType { get; set; } = "Truck 24T";
-    public decimal MaxPayloadTon { get; set; } = 24m;
-    public string Status { get; set; } = "active";
-    public Guid? DriverId { get; set; }
+    public decimal MaxPayloadTon { get; set; }
 }
 
-public class AvailableDriverDto
+public class AvailableDriverDto : BookingDriverDetailsDto
 {
-    public Guid Id { get; set; }
-    public string FullName { get; set; } = string.Empty;
     public string LicenseClass { get; set; } = "FC";
-    public string Phone { get; set; } = string.Empty;
-    public string Status { get; set; } = "active";
 }
 
 // NXP-048: AI Recommendation DTO processed completely in Backend

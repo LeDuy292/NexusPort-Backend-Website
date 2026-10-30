@@ -77,6 +77,9 @@ public class BookingConfiguration : IEntityTypeConfiguration<NexusPort.Modules.B
         builder.Property(x => x.VehiclePlate).HasColumnName("vehicle_plate");
         builder.Property(x => x.VehicleId).HasColumnName("vehicle_id");
         builder.Property(x => x.DriverName).HasColumnName("driver_name");
+        builder.Property(x => x.VehicleSnapshot).HasColumnName("vehicle_snapshot").HasColumnType("jsonb");
+        builder.Property(x => x.DriverSnapshot).HasColumnName("driver_snapshot").HasColumnType("jsonb");
+        builder.Property(x => x.TrailerNumber).HasColumnName("trailer_number");
         builder.Property(x => x.ValidFrom).HasColumnName("valid_from");
         builder.Property(x => x.ValidTo).HasColumnName("valid_to");
         builder.Property(x => x.GateType).HasColumnName("gate_type");

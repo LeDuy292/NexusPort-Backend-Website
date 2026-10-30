@@ -162,6 +162,9 @@ public class BookingValidationService : IBookingValidationService
         }
 
         // 6. Duplicate / Overlapping Booking Validation
+        var requestedContainerIds=(dto.ContainerIds ?? new()).Concat(dto.ContainerSelections.Select(selection=>selection.ContainerId)).Distinct().ToList();
+        var requestedContainerNumbers=(dto.Operations ?? new()).Where(operation=>!string.IsNullOrWhiteSpace(operation.ContainerNumber))
+            .Select(operation=>operation.ContainerNumber.Trim().ToUpperInvariant()).Distinct().ToList();
         var overlappingBookings = await _context.Set<Domain.Entities.Booking>()
             .Include(b => b.BookingContainers)
             .Include(b => b.BookingOperations)
@@ -171,7 +174,11 @@ public class BookingValidationService : IBookingValidationService
                         b.Status != BookingStatus.Expired &&
                         b.Status != BookingStatus.Rejected &&
                         b.AppointmentStart < dto.AppointmentEnd &&
-                        b.AppointmentEnd > dto.AppointmentStart)
+                        b.AppointmentEnd > dto.AppointmentStart &&
+                        ((dto.DriverId.HasValue && b.DriverId==dto.DriverId) ||
+                         (dto.TruckId.HasValue && b.TruckId==dto.TruckId) ||
+                         b.BookingContainers.Any(link=>requestedContainerIds.Contains(link.ContainerId)) ||
+                         b.BookingOperations.Any(operation=>requestedContainerNumbers.Contains(operation.ContainerNumber.Trim().ToUpper()))))
             .ToListAsync(cancellationToken);
 
         if (overlappingBookings.Any())
@@ -204,7 +211,7 @@ public class BookingValidationService : IBookingValidationService
                 var duplicates = requestedNos.Where(no => activeContainerNos.Contains(no)).ToList();
                 if (duplicates.Any())
                 {
-                    AddError("ContainerNumber", $"Các Container sau đã được đặt lịch trong khung giờ này: {string.Join(", ", duplicates)}");
+                    AddError("ContainerNumber", $"Trùng lịch của cùng container: {string.Join(", ", duplicates)}. Hãy chọn giờ khác hoặc sửa Booking hiện có; các xe và container khác vẫn được đặt cùng khung giờ.");
                 }
             }
             else if (dto.ContainerIds != null && dto.ContainerIds.Any())
