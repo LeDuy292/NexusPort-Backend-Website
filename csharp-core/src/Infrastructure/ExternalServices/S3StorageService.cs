@@ -15,8 +15,6 @@ public interface IS3StorageService
 
 public class S3StorageService : IS3StorageService
 {
-    private readonly string? _accessKey;
-    private readonly string? _secretKey;
     private readonly string _bucketName;
     private readonly string _region;
     private readonly IAmazonS3 _s3Client;
@@ -24,20 +22,24 @@ public class S3StorageService : IS3StorageService
 
     private readonly string _defaultFolder;
 
-    public S3StorageService(IConfiguration configuration, ILogger<S3StorageService> logger)
+    public S3StorageService(IConfiguration configuration, ILogger<S3StorageService> logger, IAmazonS3? s3Client = null)
     {
         _logger = logger;
-        _accessKey = configuration["AWS:AccessKey"] ?? configuration["AWS:AccessKeyId"];
-        _secretKey = configuration["AWS:SecretKey"] ?? configuration["AWS:SecretAccessKey"];
+        var accessKey = configuration["AWS:AccessKey"] ?? configuration["AWS:AccessKeyId"];
+        var secretKey = configuration["AWS:SecretKey"] ?? configuration["AWS:SecretAccessKey"];
         _bucketName = configuration["AWS:BucketName"] ?? "nexusport";
         _region = configuration["AWS:Region"] ?? "us-east-1";
         _defaultFolder = configuration["AWS:Folder"] ?? "NexusPort/drivers";
 
         var regionEndpoint = RegionEndpoint.GetBySystemName(_region);
         
-        if (!string.IsNullOrEmpty(_accessKey) && !string.IsNullOrEmpty(_secretKey))
+        if (s3Client != null)
         {
-            _s3Client = new AmazonS3Client(_accessKey, _secretKey, regionEndpoint);
+            _s3Client = s3Client;
+        }
+        else if (!string.IsNullOrWhiteSpace(accessKey) && !string.IsNullOrWhiteSpace(secretKey))
+        {
+            _s3Client = new AmazonS3Client(accessKey, secretKey, regionEndpoint);
         }
         else
         {
@@ -48,12 +50,6 @@ public class S3StorageService : IS3StorageService
     public string GetPresignedUrl(string? keyOrUrl, int expireDays = 7)
     {
         if (string.IsNullOrWhiteSpace(keyOrUrl)) return string.Empty;
-
-        // If it's already a presigned URL containing X-Amz-Signature, return as is
-        if (keyOrUrl.Contains("X-Amz-Signature") || keyOrUrl.Contains("X-Amz-Credential"))
-        {
-            return keyOrUrl;
-        }
 
         // If it's a local/relative URL not on S3, return as is
         if (!keyOrUrl.Contains("amazonaws.com") && !keyOrUrl.StartsWith("NexusPort", StringComparison.OrdinalIgnoreCase) && !keyOrUrl.StartsWith("drivers", StringComparison.OrdinalIgnoreCase))
@@ -67,7 +63,12 @@ public class S3StorageService : IS3StorageService
             try
             {
                 var uri = new Uri(keyOrUrl);
-                key = uri.AbsolutePath.TrimStart('/');
+                key = Uri.UnescapeDataString(uri.AbsolutePath.TrimStart('/'));
+                if (uri.Host.StartsWith("s3.", StringComparison.OrdinalIgnoreCase) || uri.Host.StartsWith("s3-", StringComparison.OrdinalIgnoreCase))
+                {
+                    var bucketPrefix = _bucketName + "/";
+                    if (key.StartsWith(bucketPrefix, StringComparison.Ordinal)) key = key[bucketPrefix.Length..];
+                }
             }
             catch
             {
@@ -98,6 +99,8 @@ public class S3StorageService : IS3StorageService
 
     public async Task<string> UploadFileAsync(Stream stream, string fileName, string contentType, string folder = "NexusPort/drivers", CancellationToken cancellationToken = default)
     {
+        // Each upload has its own object identity, even when two users choose the same filename.
+        fileName = Guid.NewGuid().ToString("N") + Path.GetExtension(Path.GetFileName(fileName)).ToLowerInvariant();
         string key;
         if (string.IsNullOrEmpty(folder))
         {
@@ -122,22 +125,6 @@ public class S3StorageService : IS3StorageService
 
         try
         {
-            if (string.IsNullOrEmpty(_accessKey) || string.IsNullOrEmpty(_secretKey))
-            {
-                _logger.LogWarning("AWS Credentials not configured. Saving locally to wwwroot/uploads for {Key}", key);
-                var uploadPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads", folder ?? "drivers");
-                Directory.CreateDirectory(uploadPath);
-                
-                var localFilePath = Path.Combine(uploadPath, fileName);
-                stream.Position = 0;
-                using (var fileStream = new FileStream(localFilePath, FileMode.Create, FileAccess.Write))
-                {
-                    await stream.CopyToAsync(fileStream, cancellationToken);
-                }
-                
-                return $"http://localhost:5000/uploads/{(folder ?? "drivers")}/{fileName}";
-            }
-
             await _s3Client.PutObjectAsync(request, cancellationToken);
             var presignedUrl = GetPresignedUrl(key, 7);
             _logger.LogInformation("Successfully uploaded file to AWS S3: {Key}, Presigned URL generated", key);

@@ -47,7 +47,7 @@ public class BookingOperationConfiguration : IEntityTypeConfiguration<BookingOpe
         builder.Property(x => x.ContainerCondition).HasColumnName("container_condition").HasMaxLength(100);
 
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
-        builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
+        builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()").IsRequired();
 
         builder.Ignore(x => x.CreatedBy);
         builder.Ignore(x => x.UpdatedBy);

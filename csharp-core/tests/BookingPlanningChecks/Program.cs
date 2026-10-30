@@ -1,0 +1,41 @@
+using NexusPort.Modules.Booking.Application.DTOs;
+using NexusPort.Modules.Booking.Application.Services;
+
+var count = 0;
+void Check(bool condition, string message) { if (!condition) throw new Exception(message); count++; }
+var vehicleDto = new NexusPort.Modules.Vehicle.Application.DTOs.CreateVehicleDto();
+var validation = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
+Check(System.ComponentModel.DataAnnotations.Validator.TryValidateObject(vehicleDto,new System.ComponentModel.DataAnnotations.ValidationContext(vehicleDto),validation,true),"vehicle DTO has no payload requirement");
+var end = new DateTime(2026, 10, 30, 10, 0, 0, DateTimeKind.Utc);
+foreach (var status in new[] { "transporting", "waiting_confirmation", "booking_confirmed", "receiving_vehicle", "inactive", "banned" })
+    Check(!BookingFleetPolicy.IsAvailableDriver(status, null, end), "busy/disabled driver excluded: " + status);
+Check(!BookingFleetPolicy.IsAvailableDriver("active", end.AddDays(-1), end), "expired license excluded");
+Check(BookingFleetPolicy.IsAvailableDriver("active", end, end), "valid expiry boundary");
+var assigned = new AvailableDriverDto { Id = Guid.NewGuid(), FullName = "Assigned driver" };
+var other = new AvailableDriverDto { Id = Guid.NewGuid(), FullName = "Other driver" };
+var tooSmall = new AvailableTruckDto { Id=Guid.NewGuid(), PlateNumber="SMALL", MaxPayloadTon=20 };
+var fitting = new AvailableTruckDto { Id=Guid.NewGuid(), PlateNumber="FIT", MaxPayloadTon=24, DriverId=assigned.Id };
+var larger = new AvailableTruckDto { Id=Guid.NewGuid(), PlateNumber="LARGE", MaxPayloadTon=35 };
+var unknown = new AvailableTruckDto { Id=Guid.NewGuid(), PlateNumber="UNKNOWN" };
+var trucks = new[] { tooSmall, larger, fitting, unknown };
+var plan = BookingFleetPolicy.Rank(trucks, new[] { other, assigned });
+Check(plan.Trucks.Count == 4 && plan.Trucks.Any(t=>t.Id==tooSmall.Id) && plan.Trucks.Any(t=>t.Id==unknown.Id), "available trucks are included regardless of missing or insufficient payload");
+Check(plan.RecommendedTruckId == fitting.Id && plan.RecommendedDriverId == assigned.Id, "fit truck and its available assigned driver preferred");
+Check(BookingFleetPolicy.Rank(trucks, new[] { other }).RecommendedDriverId == other.Id, "busy assigned driver not reintroduced");
+Check(!BookingFleetPolicy.Rank(trucks, Array.Empty<AvailableDriverDto>()).RecommendedTruckId.HasValue, "no complete pair means no automatic recommendation");
+Check(BookingFleetPolicy.Rank(new[] { unknown }, new[] { assigned }).RecommendedTruckId == unknown.Id, "a truck without payload is recommended when it is the only free truck");
+var signingService=new BookingService(null!,null!,null!,null!,null!,null!,null!,new TestStorage());
+var sign=typeof(BookingService).GetMethod("SignFleetDocuments",System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic)!;
+const string original="https://fleet-test.s3.ap-southeast-1.amazonaws.com/NexusPort/document.png";
+const string expired=original+"?X-Amz-Signature=expired&X-Amz-Date=20200101T000000Z";
+var imageTruck=new BookingVehicleDetailsDto {PhotoUrl=expired,RegistrationImageUrl=expired};
+var imageDriver=new BookingDriverDetailsDto {PhotoUrl=expired,IdCardFrontUrl=expired,IdCardBackUrl=expired,LicenseImageUrl=expired,LicenseBackImageUrl=expired};
+sign.Invoke(signingService,new object[] {imageTruck,imageDriver});
+Check(imageTruck.PhotoUrl==original&&imageTruck.RegistrationImageUrl==original,"vehicle image references are re-signed from original S3 objects rather than expired signatures");
+Check(new[] {imageDriver.PhotoUrl,imageDriver.IdCardFrontUrl,imageDriver.IdCardBackUrl,imageDriver.LicenseImageUrl,imageDriver.LicenseBackImageUrl}.All(url=>url==original),"all five driver document references use the original S3 object for fresh signing");
+imageTruck.PhotoUrl="https://example.invalid/image.png?version=original";
+imageTruck.RegistrationImageUrl="NexusPort/vehicles/raw-key.png";
+sign.Invoke(signingService,new object?[] {imageTruck,null});
+Check(imageTruck.PhotoUrl=="https://example.invalid/image.png?version=original"&&imageTruck.RegistrationImageUrl=="NexusPort/vehicles/raw-key.png","external links and raw S3 object keys retain their identity");
+Console.WriteLine($"PASS {count} Booking planning checks. In-memory data only; no database connection.");
+if (args.Length == 3 && args[0] == "--postgres") await PostgresPlanningChecks.RunAsync(args[1],args[2]);

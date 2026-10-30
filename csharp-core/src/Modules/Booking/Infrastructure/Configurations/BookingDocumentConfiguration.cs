@@ -28,7 +28,7 @@ public class BookingDocumentConfiguration : IEntityTypeConfiguration<BookingDocu
         builder.Property(x => x.ExpiryDate).HasColumnName("expiry_date");
 
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
-        builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").IsRequired();
+        builder.Property(x => x.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()").IsRequired();
 
         builder.Ignore(x => x.CreatedBy);
         builder.Ignore(x => x.UpdatedBy);

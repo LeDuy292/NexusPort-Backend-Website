@@ -16,8 +16,9 @@ using Microsoft.EntityFrameworkCore.Storage;
 
 namespace NexusPort.Modules.Booking.Application.Services;
 
-public class BookingService : IBookingService
+public partial class BookingService : IBookingService
 {
+    private readonly NexusPort.Infrastructure.ExternalServices.IS3StorageService _fleetStorage;
     private readonly IBookingRepository _repository;
     private readonly IBookingValidationService _validationService;
     private readonly INotificationService _notificationService;
@@ -33,8 +34,10 @@ public class BookingService : IBookingService
         AppDbContext context,
         ILogger<BookingService> logger,
         IBookingCompatibilityPolicy compatibilityPolicy,
-        IBookingDocumentRequirementPolicy documentRequirementPolicy)
+        IBookingDocumentRequirementPolicy documentRequirementPolicy,
+        NexusPort.Infrastructure.ExternalServices.IS3StorageService fleetStorage)
     {
+        _fleetStorage = fleetStorage;
         _repository = repository;
         _validationService = validationService;
         _notificationService = notificationService;
@@ -47,7 +50,9 @@ public class BookingService : IBookingService
     public async Task<IReadOnlyList<BookingDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         var entities = await _repository.GetAllAsync(cancellationToken);
-        return entities.Select(MapToDto).ToList();
+        var dtos=entities.Select(MapToDto).ToList();
+        foreach(var dto in dtos) SignFleetDocuments(dto.VehicleDetails,dto.DriverDetails);
+        return dtos;
     }
 
     public async Task<PagedResult<BookingDto>> GetPagedAsync(BookingFilterParams filter, CancellationToken cancellationToken = default)
@@ -77,11 +82,13 @@ public class BookingService : IBookingService
 
     public async Task<BookingDto> CreateAsync(CreateBookingDto dto, CancellationToken cancellationToken = default)
     {
-        bool hasMultiOperations = dto.Operations != null && dto.Operations.Count > 0;
-        if (!hasMultiOperations)
-        {
-            dto.ContainerIds = dto.ContainerSelections.Select(x => x.ContainerId).ToList();
-        }
+        BookingFleetPolicy.ValidateWindow(dto.AppointmentStart, dto.AppointmentEnd);
+        await using var bookingTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        await LockBookingFleetAsync(dto.TruckId, dto.DriverId, cancellationToken);
+        await PrepareBookingCargoAsync(dto, cancellationToken);
+        await EnsureBookingFleetAsync(dto.CarrierId, dto.TruckId, dto.DriverId, dto.AppointmentStart,
+            dto.AppointmentEnd, null, cancellationToken);
+        bool hasMultiOperations = dto.Operations.Count > 0;
 
         // Execute Business Validation Rules
         await _validationService.ValidateBookingAsync(dto, cancellationToken);
@@ -107,6 +114,9 @@ public class BookingService : IBookingService
         entity.GateType = dto.GateType ?? "GateIn";
         entity.Description = dto.Description;
 
+        entity.TrailerNumber = string.IsNullOrWhiteSpace(dto.TrailerNumber) ? null : dto.TrailerNumber.Trim().ToUpperInvariant();
+        await CaptureFleetDetailsAsync(entity,cancellationToken);
+
         // Auto populate DriverName if empty
         if (string.IsNullOrWhiteSpace(entity.DriverName) && dto.DriverId.HasValue && dto.DriverId.Value != Guid.Empty)
         {
@@ -122,8 +132,6 @@ public class BookingService : IBookingService
                 .AsNoTracking().FirstOrDefaultAsync(v => v.Id == dto.TruckId.Value, cancellationToken);
             if (truck != null) entity.VehiclePlate = truck.PlateNumber;
         }
-
-        await using var bookingTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
 
         if (hasMultiOperations)
         {
@@ -165,6 +173,18 @@ public class BookingService : IBookingService
                 {
                     op.ContainerId = contId.Value;
                     entity.AddContainer(contId.Value);
+                    var selection = dto.ContainerSelections.Single(s => s.ContainerId == contId.Value);
+                    if (dto.BookingType == BookingType.Pickup)
+                    {
+                        var prepared = await _context.Database.SqlQueryRaw<PickupCodeLink>(
+                            "SELECT * FROM yard_prepare_pickup({0},{1},{2})", selection.ContainerId,
+                            NormalizeYardCode(selection.YardCode), dto.CarrierId).ToListAsync(cancellationToken);
+                        selection.DeclarationId = prepared.Single().DeclarationId;
+                        selection.ContainerVisitId = prepared.Single().ContainerVisitId;
+                    }
+                    var link = entity.BookingContainers.Single(c => c.ContainerId == contId.Value);
+                    link.DeclarationId = selection.DeclarationId;
+                    link.ContainerVisitId = selection.ContainerVisitId;
                 }
 
                 if (opDto.Documents != null)
@@ -252,118 +272,34 @@ public class BookingService : IBookingService
             }
         }
 
-        // Tích hợp Cấp điện Kho Đông Lạnh (Reefer Cold Storage Power Supply Integration)
-        if (dto.IsReeferPowerRequired || dto.ContainerSelections.Any(s => s.CargoTypeName != null && (s.CargoTypeName.Contains("Lạnh", StringComparison.OrdinalIgnoreCase) || s.CargoTypeName.Contains("Reefer", StringComparison.OrdinalIgnoreCase) || s.CargoTypeName.Contains("Đông", StringComparison.OrdinalIgnoreCase))))
+        // A future appointment requests power, but does not occupy a physical socket.
+        if (dto.IsReeferPowerRequired && dto.BookingType == BookingType.Dropoff)
         {
             entity.IsReeferPowerRequired = true;
-            entity.TargetTemperature = dto.TargetTemperature ?? -18.0m;
-            entity.TemperatureUnit = string.IsNullOrWhiteSpace(dto.TemperatureUnit) ? "C" : dto.TemperatureUnit;
-            entity.TempTolerance = dto.TempTolerance ?? 2.0m;
-            entity.RequiredPowerKw = dto.RequiredPowerKw ?? 15.0m;
-
-            Guid? assignedPlugId = dto.ReeferPlugId;
-            string? assignedPlugCode = dto.ReeferPlugCode;
-
-            try
-            {
-                var conn = _context.Database.GetDbConnection();
-                if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(cancellationToken);
-
-                // Nếu chưa chỉ định máy/ổ cắm, tự động tìm và giữ chỗ 1 máy khả dụng và hoạt động tốt (Available & Healthy)
-                if (!assignedPlugId.HasValue || assignedPlugId == Guid.Empty)
-                {
-                    using var findCmd = conn.CreateCommand();
-                    findCmd.Transaction = bookingTransaction.GetDbTransaction();
-                    findCmd.CommandText = @"
-                        SELECT id, plug_code 
-                        FROM public.reefer_plugs 
-                        WHERE usage_status = 'AVAILABLE' AND technical_status = 'HEALTHY'
-                        ORDER BY plug_code ASC 
-                        LIMIT 1 
-                        FOR UPDATE SKIP LOCKED;";
-                    using var reader = await findCmd.ExecuteReaderAsync(cancellationToken);
-                    if (await reader.ReadAsync(cancellationToken))
-                    {
-                        assignedPlugId = reader.GetGuid(0);
-                        assignedPlugCode = reader.GetString(1);
-                    }
-                }
-
-                entity.ReeferPlugId = assignedPlugId;
-                entity.ReeferPlugCode = assignedPlugCode;
-                entity.ReeferPowerStatus = assignedPlugId.HasValue ? "Reserved" : "PendingAssignment";
-
-                // Tạo yêu cầu cấp điện ReeferPowerRequest và Phiên cấp điện ReeferPowerSession
-                var primaryContainerId = dto.ContainerSelections.FirstOrDefault()?.ContainerId ?? Guid.Empty;
-                if (primaryContainerId != Guid.Empty)
-                {
-                    var requestId = Guid.NewGuid();
-                    var rawCode = entity.BookingCode.Replace("BK-", "").Replace("-", "");
-                    var reqNo = $"REQ-RFR-{(rawCode.Length > 16 ? rawCode.Substring(0, 16) : rawCode)}";
-
-                    using var insertReqCmd = conn.CreateCommand();
-                    insertReqCmd.Transaction = bookingTransaction.GetDbTransaction();
-                    insertReqCmd.CommandText = @"
-                        INSERT INTO public.reefer_power_requests 
-                        (id, request_no, container_id, booking_id, booking_code, target_temperature, temperature_unit, temp_tolerance, required_power_kw, cargo_description, special_instructions, status, created_at, updated_at)
-                        VALUES 
-                        (@id, @reqNo, @contId, @bId, @bCode, @targetTemp, @tempUnit, @tolerance, @powerKw, @cargoDesc, @instructions, @status::reefer_request_status, NOW(), NOW());";
-                    
-                    var pId = insertReqCmd.CreateParameter(); pId.ParameterName = "@id"; pId.Value = requestId; insertReqCmd.Parameters.Add(pId);
-                    var pReqNo = insertReqCmd.CreateParameter(); pReqNo.ParameterName = "@reqNo"; pReqNo.Value = reqNo; insertReqCmd.Parameters.Add(pReqNo);
-                    var pContId = insertReqCmd.CreateParameter(); pContId.ParameterName = "@contId"; pContId.Value = primaryContainerId; insertReqCmd.Parameters.Add(pContId);
-                    var pBId = insertReqCmd.CreateParameter(); pBId.ParameterName = "@bId"; pBId.Value = entity.Id; insertReqCmd.Parameters.Add(pBId);
-                    var pBCode = insertReqCmd.CreateParameter(); pBCode.ParameterName = "@bCode"; pBCode.Value = entity.BookingCode; insertReqCmd.Parameters.Add(pBCode);
-                    var pTarget = insertReqCmd.CreateParameter(); pTarget.ParameterName = "@targetTemp"; pTarget.Value = entity.TargetTemperature.Value; insertReqCmd.Parameters.Add(pTarget);
-                    var pUnit = insertReqCmd.CreateParameter(); pUnit.ParameterName = "@tempUnit"; pUnit.Value = entity.TemperatureUnit; insertReqCmd.Parameters.Add(pUnit);
-                    var pTol = insertReqCmd.CreateParameter(); pTol.ParameterName = "@tolerance"; pTol.Value = entity.TempTolerance.Value; insertReqCmd.Parameters.Add(pTol);
-                    var pPower = insertReqCmd.CreateParameter(); pPower.ParameterName = "@powerKw"; pPower.Value = entity.RequiredPowerKw ?? 15.0m; insertReqCmd.Parameters.Add(pPower);
-                    var pDesc = insertReqCmd.CreateParameter(); pDesc.ParameterName = "@cargoDesc"; pDesc.Value = (object?)entity.Description ?? "Hàng đông lạnh theo Booking " + entity.BookingCode; insertReqCmd.Parameters.Add(pDesc);
-                    var pInst = insertReqCmd.CreateParameter(); pInst.ParameterName = "@instructions"; pInst.Value = (object?)dto.SpecialColdInstructions ?? DBNull.Value; insertReqCmd.Parameters.Add(pInst);
-                    var pStatus = insertReqCmd.CreateParameter(); pStatus.ParameterName = "@status"; pStatus.Value = assignedPlugId.HasValue ? "ASSIGNED" : "PENDING_ASSIGNMENT"; insertReqCmd.Parameters.Add(pStatus);
-                    
-                    await insertReqCmd.ExecuteNonQueryAsync(cancellationToken);
-
-                    if (assignedPlugId.HasValue)
-                    {
-                        // Cập nhật trạng thái máy/ổ cấp điện thành RESERVED
-                        using var updatePlugCmd = conn.CreateCommand();
-                        updatePlugCmd.Transaction = bookingTransaction.GetDbTransaction();
-                        updatePlugCmd.CommandText = "UPDATE public.reefer_plugs SET usage_status = 'RESERVED'::socket_usage_status, updated_at = NOW() WHERE id = @plugId;";
-                        var pPlugId = updatePlugCmd.CreateParameter(); pPlugId.ParameterName = "@plugId"; pPlugId.Value = assignedPlugId.Value; updatePlugCmd.Parameters.Add(pPlugId);
-                        await updatePlugCmd.ExecuteNonQueryAsync(cancellationToken);
-
-                        // Tạo session cấp điện trạng thái AWAITING_POWER (Chờ cắm điện khi xe vào bãi kho lạnh)
-                        using var insertSessCmd = conn.CreateCommand();
-                        insertSessCmd.Transaction = bookingTransaction.GetDbTransaction();
-                        insertSessCmd.CommandText = @"
-                            INSERT INTO public.reefer_power_sessions 
-                            (id, container_id, plug_id, request_id, booking_id, booking_code, required_power_kw, session_status, actual_power_status, assigned_at, is_active, created_at, updated_at)
-                            VALUES 
-                            (@sessId, @contId, @plugId, @reqId, @bId, @bCode, @powerKw, 'AWAITING_POWER'::power_session_status, 'UNKNOWN'::actual_power_status, NOW(), false, NOW(), NOW());";
-                        
-                        var pSessId = insertSessCmd.CreateParameter(); pSessId.ParameterName = "@sessId"; pSessId.Value = Guid.NewGuid(); insertSessCmd.Parameters.Add(pSessId);
-                        var pSessCont = insertSessCmd.CreateParameter(); pSessCont.ParameterName = "@contId"; pSessCont.Value = primaryContainerId; insertSessCmd.Parameters.Add(pSessCont);
-                        var pSessPlug = insertSessCmd.CreateParameter(); pSessPlug.ParameterName = "@plugId"; pSessPlug.Value = assignedPlugId.Value; insertSessCmd.Parameters.Add(pSessPlug);
-                        var pSessReq = insertSessCmd.CreateParameter(); pSessReq.ParameterName = "@reqId"; pSessReq.Value = requestId; insertSessCmd.Parameters.Add(pSessReq);
-                        var pSessBId = insertSessCmd.CreateParameter(); pSessBId.ParameterName = "@bId"; pSessBId.Value = entity.Id; insertSessCmd.Parameters.Add(pSessBId);
-                        var pSessBCode = insertSessCmd.CreateParameter(); pSessBCode.ParameterName = "@bCode"; pSessBCode.Value = entity.BookingCode; insertSessCmd.Parameters.Add(pSessBCode);
-                        var pSessPower = insertSessCmd.CreateParameter(); pSessPower.ParameterName = "@powerKw"; pSessPower.Value = entity.RequiredPowerKw ?? 15.0m; insertSessCmd.Parameters.Add(pSessPower);
-
-                        await insertSessCmd.ExecuteNonQueryAsync(cancellationToken);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[BookingService] Lỗi tự động gán máy cấp điện kho lạnh cho Booking {BookingCode}", entity.BookingCode);
-            }
+            entity.TargetTemperature = dto.TargetTemperature;
+            entity.TemperatureUnit = dto.TemperatureUnit ?? "C";
+            entity.TempTolerance = dto.TempTolerance;
+            entity.RequiredPowerKw = dto.RequiredPowerKw;
+            entity.ReeferPowerStatus = "PendingAssignment";
         }
 
         // Theo yêu cầu: Luôn đặt trạng thái là Pending để chờ Dispatcher duyệt
         entity.Status = BookingStatus.Pending;
 
         await _repository.AddAsync(entity, cancellationToken);
+        if (entity.IsReeferPowerRequired)
+        {
+            var requestId = Guid.NewGuid();
+            var requestNo = "REQ-RFR-" + requestId.ToString("N").ToUpperInvariant();
+            var containerId = dto.ContainerSelections.Single().ContainerId;
+            await _context.Database.ExecuteSqlInterpolatedAsync($@"
+                INSERT INTO public.reefer_power_requests
+                  (id,request_no,container_id,booking_id,booking_code,target_temperature,temperature_unit,
+                   temp_tolerance,required_power_kw,cargo_description,special_instructions,status,created_at,updated_at)
+                VALUES ({requestId},{requestNo},{containerId},{entity.Id},{entity.BookingCode},{entity.TargetTemperature},
+                  {entity.TemperatureUnit},{entity.TempTolerance},{entity.RequiredPowerKw},{entity.Description},
+                  {dto.SpecialColdInstructions},'PENDING_ASSIGNMENT'::reefer_request_status,NOW(),NOW())", cancellationToken);
+        }
         await bookingTransaction.CommitAsync(cancellationToken);
 
         // Emit real business notification to Database (NXP-044)
@@ -413,6 +349,8 @@ public class BookingService : IBookingService
 
     public async Task<BookingDto> UpdateAsync(Guid id, UpdateBookingDto dto, Guid? userCarrierId = null, CancellationToken cancellationToken = default)
     {
+        await using var fleetTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        await _context.Database.SqlQueryRaw<Guid>("SELECT id AS \"Value\" FROM bookings WHERE id={0} FOR UPDATE", id).ToListAsync(cancellationToken);
         var entity = await _repository.GetByIdWithContainersAsync(id, cancellationToken);
         if (entity == null)
         {
@@ -445,6 +383,9 @@ public class BookingService : IBookingService
             ExcludeBookingId = entity.Id
         };
 
+        await LockBookingFleetAsync(validationDto.TruckId, validationDto.DriverId, cancellationToken);
+        await EnsureBookingFleetAsync(entity.CarrierId, validationDto.TruckId, validationDto.DriverId,
+            dto.AppointmentStart, dto.AppointmentEnd, entity.Id, cancellationToken);
         await _validationService.ValidateBookingAsync(validationDto, cancellationToken);
 
         // Update properties
@@ -452,11 +393,14 @@ public class BookingService : IBookingService
         entity.TruckId = dto.TruckId ?? entity.TruckId;
         entity.AppointmentStart = dto.AppointmentStart;
         entity.AppointmentEnd = dto.AppointmentEnd;
+        if (dto.TrailerNumber != null) entity.TrailerNumber=dto.TrailerNumber.Trim().ToUpperInvariant();
+        await CaptureFleetDetailsAsync(entity,cancellationToken);
 
         if (dto.ContainerIds.Count > 0 && !dto.ContainerIds.OrderBy(x=>x).SequenceEqual(entity.BookingContainers.Select(x=>x.ContainerId).OrderBy(x=>x)))
             throw new ValidationException("ContainerIds", "Không thay container/bản khai trên booking đã lưu; hãy hủy và tạo lịch mới.");
 
         await _repository.UpdateAsync(entity, cancellationToken);
+        await fleetTransaction.CommitAsync(cancellationToken);
 
         // Emit real business notification to Database (NXP-044)
         await _notificationService.SendAsync(new SendNotificationDto
@@ -812,6 +756,8 @@ public class BookingService : IBookingService
 
     public async Task<BookingDto> AssignResourcesAsync(Guid id, AssignBookingResourcesDto dto, Guid? userCarrierId = null, CancellationToken cancellationToken = default)
     {
+        await using var fleetTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        await _context.Database.SqlQueryRaw<Guid>("SELECT id AS \"Value\" FROM bookings WHERE id={0} FOR UPDATE", id).ToListAsync(cancellationToken);
         var entity = await _repository.GetByIdWithContainersAsync(id, cancellationToken);
         if (entity == null)
         {
@@ -901,17 +847,23 @@ public class BookingService : IBookingService
         }
 
         entity.DriverId = dto.DriverId;
-        entity.DriverName = !string.IsNullOrWhiteSpace(dto.DriverName) ? dto.DriverName : driver.FullName;
+        entity.DriverName = driver.FullName;
         entity.TruckId = dto.TruckId;
         entity.VehicleId = dto.TruckId;
-        entity.VehiclePlate = !string.IsNullOrWhiteSpace(dto.VehiclePlate) ? dto.VehiclePlate : truck.PlateNumber;
+        entity.VehiclePlate = truck.PlateNumber;
 
         if (!containerIds.OrderBy(x=>x).SequenceEqual(entity.BookingContainers.Select(x=>x.ContainerId).OrderBy(x=>x)))
             throw new ValidationException("ContainerIds", "Container phải khớp bản khai đã gắn với booking.");
 
+        await LockBookingFleetAsync(dto.TruckId, dto.DriverId, cancellationToken);
+        await EnsureBookingFleetAsync(entity.CarrierId, dto.TruckId, dto.DriverId,
+            entity.AppointmentStart, entity.AppointmentEnd, entity.Id, cancellationToken);
+
+        await CaptureFleetDetailsAsync(entity,cancellationToken);
         entity.MarkReady();
 
         await _repository.UpdateAsync(entity, cancellationToken);
+        await fleetTransaction.CommitAsync(cancellationToken);
 
         // Send notification
         try
@@ -938,282 +890,67 @@ public class BookingService : IBookingService
 
     public async Task<AvailableFleetResourcesDto> GetAvailableResourcesAsync(Guid? carrierId = null, CancellationToken cancellationToken = default)
     {
-        var result = new AvailableFleetResourcesDto();
-
-        // Private declarations are selected through Node; never enumerate shared cargo here.
-        Guid? actualCarrierId = carrierId;
-        if (carrierId.HasValue && carrierId.Value != Guid.Empty)
-        {
-            try
-            {
-                var connection = _context.Database.GetDbConnection();
-                if (connection.State != System.Data.ConnectionState.Open)
-                    await connection.OpenAsync(cancellationToken);
-
-                using var cmd = connection.CreateCommand();
-                cmd.CommandText = "SELECT carrier_id FROM carrier_users WHERE user_id = @p0 LIMIT 1";
-                var p = cmd.CreateParameter();
-                p.ParameterName = "@p0";
-                p.Value = carrierId.Value;
-                cmd.Parameters.Add(p);
-
-                var resolved = await cmd.ExecuteScalarAsync(cancellationToken);
-                if (resolved != null && resolved != DBNull.Value && Guid.TryParse(resolved.ToString(), out var parsedId))
-                {
-                    actualCarrierId = parsedId;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Could not resolve carrierId from carrier_users");
-            }
-        }
-
-        // 2. Trucks trực tiếp từ DB
-        try
-        {
-            var trucksQuery = _context.Set<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>()
-                .AsNoTracking()
-                .Where(v => v.Status != NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.inactive && v.Status != NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus.maintenance);
-
-            List<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle> dbTrucks = new();
-            if (actualCarrierId.HasValue && actualCarrierId.Value != Guid.Empty)
-            {
-                dbTrucks = await trucksQuery.Where(v => v.CarrierId == actualCarrierId.Value).ToListAsync(cancellationToken);
-            }
-
-            foreach (var t in dbTrucks)
-            {
-                result.Trucks.Add(new AvailableTruckDto
-                {
-                    Id = t.Id,
-                    PlateNumber = t.PlateNumber,
-                    VehicleType = t.VehicleType ?? "Đầu kéo 24T",
-                    MaxPayloadTon = ExtractPayloadTon(t.VehicleType),
-                    Status = "active",
-                    DriverId = t.DriverId
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not fetch trucks from database");
-        }
-
-        // 3. Drivers trực tiếp từ DB
-        try
-        {
-            var driversQuery = _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
-                .AsNoTracking()
-                .Where(d => d.Status != NexusPort.Modules.Driver.Domain.Enums.DriverStatus.inactive && d.Status != NexusPort.Modules.Driver.Domain.Enums.DriverStatus.banned);
-
-            List<NexusPort.Modules.Driver.Domain.Entities.Driver> dbDrivers = new();
-            if (actualCarrierId.HasValue && actualCarrierId.Value != Guid.Empty)
-            {
-                dbDrivers = await driversQuery.Where(d => d.CarrierId == actualCarrierId.Value).ToListAsync(cancellationToken);
-            }
-
-            foreach (var d in dbDrivers)
-            {
-                result.Drivers.Add(new AvailableDriverDto
-                {
-                    Id = d.Id,
-                    FullName = d.FullName,
-                    LicenseClass = d.LicenseNumber?.Contains("FC") == true ? "FC" : "FC",
-                    Phone = d.Phone ?? string.Empty,
-                    Status = "active"
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not fetch drivers from database");
-        }
-
-        return result;
+        if (!carrierId.HasValue || carrierId == Guid.Empty) return new AvailableFleetResourcesDto();
+        var start = DateTime.UtcNow;
+        return await LoadBookingFleetAsync(carrierId.Value, start, start.AddHours(2), null, cancellationToken);
     }
 
-    public async Task<FleetRecommendationDto> RecommendFleetAsync(Guid? containerId = null, string? bookingType = null, Guid? carrierId = null, CancellationToken cancellationToken = default, Guid? declarationId = null, string? yardCode = null)
+    public async Task<FleetRecommendationDto> RecommendFleetAsync(Guid? containerId = null, string? bookingType = null, Guid? carrierId = null, CancellationToken cancellationToken = default, Guid? declarationId = null, string? yardCode = null, Guid? bookingId = null)
     {
-        var resources = await GetAvailableResourcesAsync(carrierId, cancellationToken);
-        
-        // Resolve only the exact private declaration or a valid transferable code.
-        // The original truck/driver matching algorithm below stays intact.
-        var rows = await _context.Database.SqlQueryRaw<RecommendationCargo>(
-            "SELECT c.id AS \"Id\",c.container_no AS \"ContainerNumber\",ct.code AS \"Size\",cargo.name_vi AS \"CargoType\",d.gross_weight_kg AS \"GrossWeightKg\" FROM container_declarations d JOIN containers c ON c.id=d.container_id JOIN container_types ct ON ct.id=c.container_type_id LEFT JOIN container_cargo_types cargo ON cargo.code::text=d.cargo_type::text WHERE c.id={0} AND (({1}='Dropoff' AND d.id={2} AND d.carrier_id={3}) OR ({1}='Pickup' AND EXISTS(SELECT 1 FROM container_visits v WHERE v.declaration_id=d.id AND v.container_id=c.id AND v.pickup_code={4} AND v.visit_status IN ('planned','active') AND EXISTS(SELECT 1 FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id WHERE bc.container_visit_id=v.id AND b.booking_type::text='dropoff' AND b.status::text NOT IN ('canceled','rejected','expired')))))",
-            containerId ?? Guid.Empty, bookingType ?? "Dropoff", declarationId ?? Guid.Empty, carrierId ?? Guid.Empty, NormalizeYardCode(yardCode)).ToListAsync(cancellationToken);
-        var cargoInfo = rows.SingleOrDefault();
-        if (cargoInfo == null) throw new ValidationException("Container", "Chọn đúng khai báo hoặc cung cấp mã lượt bãi hợp lệ để phân tích.");
-        if (!cargoInfo.GrossWeightKg.HasValue || cargoInfo.GrossWeightKg <= 0)
-            throw new ValidationException("GrossWeightKg", "Chưa có khối lượng thực tế để phân tích tải trọng. Bạn vẫn có thể chọn xe và tài xế thủ công.");
-        var container = new EligibleContainerDto { Id=cargoInfo.Id, ContainerNumber=cargoInfo.ContainerNumber,
-            Size=cargoInfo.Size, CargoType=cargoInfo.CargoType ?? "Chưa xác định", GrossWeightKg=cargoInfo.GrossWeightKg.Value };
-        var contWeight = container.GrossWeightTon;
-        if (!resources.Trucks.Any() || !resources.Drivers.Any())
-            throw new ValidationException("Resources", "Công ty chưa có đủ xe và tài xế khả dụng để đề xuất tự động.");
-
-        // 2. AI Match Truck: Optimal payload capacity without overload
-        AvailableTruckDto? bestTruck = null;
-        if (resources.Trucks.Any())
+        if (!carrierId.HasValue) throw new ValidationException("Carrier", "Chọn công ty vận tải trước khi lập phương án.");
+        // Legacy callers receive an explicitly provisional window, without invented congestion/discount claims.
+        var start = DateTime.UtcNow.AddHours(1);
+        var end = start.AddHours(2);
+        if (bookingId.HasValue)
         {
-            var sorted = resources.Trucks.OrderBy(t =>
-            {
-                var diff = t.MaxPayloadTon - contWeight;
-                // Favor trucks that have enough capacity (diff >= 0)
-                if (diff >= 0) return diff;
-                // Penalize under-capacity trucks heavily
-                return 1000m + Math.Abs(diff);
-            }).ToList();
-
-            bestTruck = sorted.FirstOrDefault();
+            var booking = await _repository.GetByIdAsync(bookingId.Value, cancellationToken);
+            if (booking == null || booking.CarrierId != carrierId) throw new UnauthorizedException("Booking không thuộc công ty.");
+            start = booking.AppointmentStart.ToUniversalTime();
+            end = booking.AppointmentEnd.ToUniversalTime();
         }
-
-        // 3. AI Match Driver: Active driver with FC license
-        var bestDriver = resources.Drivers.FirstOrDefault(d => d.Status == "active") ?? resources.Drivers.FirstOrDefault();
-
-        // 4. Calculate payload ratio & status
-        var truckPayload = bestTruck?.MaxPayloadTon ?? 24m;
-        var ratio = truckPayload > 0 ? Math.Round((contWeight / truckPayload) * 100m, 1) : 0m;
-
-        string status = "Optimal";
-        string severity = "optimal";
-        string msg;
-
-        if (ratio > 100m)
-        {
-            status = "Overloaded";
-            severity = "danger";
-            msg = $"CẢNH BÁO NGUY HIỂM: Trọng lượng container ({contWeight}T) vượt tải trọng tối đa của xe ({truckPayload}T) tới {Math.Round(ratio - 100m, 1)}%! Xe bị quá tải, vi phạm nghiêm trọng an toàn giao thông đường bộ và quy chuẩn cảng.";
-        }
-        else if (ratio < 45m)
-        {
-            status = "Underutilized";
-            severity = "warning";
-            msg = $"CẢNH BÁO LÃNG PHÍ TẢI TRỌNG: Xe có tải trọng quá lớn ({truckPayload}T) so với trọng lượng hàng ({contWeight}T), hiệu suất chỉ đạt {ratio}%. Đề xuất chuyển sang xe đầu kéo nhỏ hơn để tối ưu chi phí vận chuyển.";
-        }
-        else
-        {
-            status = "Optimal";
-            severity = "optimal";
-            msg = $"TỐI ƯU HOÀN HẢO: Hiệu suất tải trọng đạt {ratio}% - Tải trọng phù hợp tiêu chuẩn an toàn kỹ thuật, bảo vệ tuổi thọ phương tiện và tiết kiệm chi phí.";
-        }
-
-        var tomorrow = DateTime.UtcNow.AddDays(1);
-        if (tomorrow.DayOfWeek == DayOfWeek.Sunday) tomorrow = tomorrow.AddDays(1);
-
-        return new FleetRecommendationDto
-        {
-            ContainerId = container.Id,
-            ContainerNumber = container.ContainerNumber,
-            ContainerGrossWeightTon = contWeight,
-            ContainerSize = container.Size,
-            CargoType = container.CargoType,
-
-            RecommendedTruckId = bestTruck?.Id,
-            RecommendedTruckPlate = bestTruck?.PlateNumber,
-            TruckMaxPayloadTon = truckPayload,
-
-            RecommendedDriverId = bestDriver?.Id,
-            RecommendedDriverName = bestDriver?.FullName,
-            DriverLicense = bestDriver?.LicenseClass,
-            DriverPhone = bestDriver?.Phone,
-
-            PayloadRatio = ratio,
-            PayloadStatus = status,
-            PayloadSeverity = severity,
-            PayloadMessage = msg,
-
-            RecommendedDate = tomorrow.ToString("yyyy-MM-dd"),
-            RecommendedStartTime = "08:30",
-            RecommendedEndTime = "10:30",
-            SlotCongestionStatus = "Thấp điểm (Khuyến nghị AI)",
-            SlotAdvice = "Khung giờ vàng từ 08:30 - 10:30 giảm 40% thời gian chờ tại cổng bãi và tiết kiệm 15% phí dịch vụ nâng hạ."
+        var plan = await PlanBookingAsync(carrierId.Value, new BookingPlanningRequest {
+            BookingId=bookingId, ContainerId=containerId ?? Guid.Empty, DeclarationId=declarationId, YardCode=yardCode,
+            BookingType=bookingType ?? "Dropoff", AppointmentStart=start, AppointmentEnd=end
+        }, cancellationToken);
+        var truck = plan.Fleet.Trucks.FirstOrDefault(t=>t.Id==plan.Fleet.RecommendedTruckId);
+        var driver = plan.Fleet.Drivers.FirstOrDefault(d=>d.Id==plan.Fleet.RecommendedDriverId);
+        return new FleetRecommendationDto {
+            ContainerId=plan.Source.ContainerId, ContainerNumber=plan.Source.ContainerNumber,
+            ContainerGrossWeightTon=(plan.Source.GrossWeightKg ?? 0)/1000m,
+            ContainerSize=plan.Source.ContainerTypeCode, CargoType=plan.Source.CargoType ?? "",
+            RecommendedTruckId=truck?.Id, RecommendedTruckPlate=truck?.PlateNumber, TruckMaxPayloadTon=truck?.MaxPayloadTon ?? 0,
+            RecommendedDriverId=driver?.Id, RecommendedDriverName=driver?.FullName, DriverLicense=driver?.LicenseClass,
+            DriverPhone=driver?.Phone,
+            PayloadRatio=truck == null || truck.MaxPayloadTon <= 0 ? 0 : Math.Round((plan.Source.GrossWeightKg ?? 0)/(truck.MaxPayloadTon*10),1),
+            PayloadStatus="NotEvaluated", PayloadSeverity="info",
+            PayloadMessage=plan.Fleet.Message, RecommendedDate=start.ToLocalTime().ToString("yyyy-MM-dd"),
+            RecommendedStartTime=start.ToLocalTime().ToString("HH:mm"), RecommendedEndTime=end.ToLocalTime().ToString("HH:mm"),
+            SlotCongestionStatus="Chưa có dữ liệu năng lực khung giờ",
+            SlotAdvice="Phương án tham khảo; dùng khung giờ thực tế trên Booking để kiểm tra lại."
         };
     }
 
-    public async Task<PayloadEvaluationDto> EvaluatePayloadAsync(Guid? containerId = null, Guid? truckId = null, decimal? customGrossWeightTon = null, CancellationToken cancellationToken = default)
+    public Task<PayloadEvaluationDto> EvaluatePayloadAsync(Guid? containerId = null, Guid? truckId = null, decimal? customGrossWeightTon = null, CancellationToken cancellationToken = default)
     {
-
-        if (!customGrossWeightTon.HasValue || customGrossWeightTon <= 0)
-            throw new ValidationException("customGrossWeightTon", "Chọn bản khai có khối lượng thực tế; không suy đoán theo số container.");
-        decimal contWeight = customGrossWeightTon.Value;
-
-        decimal truckPayload = 24m;
-        if (truckId.HasValue && truckId.Value != Guid.Empty)
-        {
-            var truck = await _context.Set<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>()
-                .AsNoTracking()
-                .FirstOrDefaultAsync(v => v.Id == truckId.Value, cancellationToken);
-            if (truck != null)
-            {
-                truckPayload = ExtractPayloadTon(truck.VehicleType);
-            }
-        }
-
-        var ratio = truckPayload > 0 ? Math.Round((contWeight / truckPayload) * 100m, 1) : 0m;
-        string status = "Optimal";
-        string severity = "optimal";
-        string msg;
-        bool isSafe = true;
-
-        if (ratio > 100m)
-        {
-            status = "Overloaded";
-            severity = "danger";
-            isSafe = false;
-            msg = $"CẢNH BÁO NGUY HIỂM: Trọng lượng container ({contWeight}T) vượt tải trọng tối đa của xe ({truckPayload}T) tới {Math.Round(ratio - 100m, 1)}%! Xe bị quá tải, không đủ điều kiện an toàn vận tải.";
-        }
-        else if (ratio < 45m)
-        {
-            status = "Underutilized";
-            severity = "warning";
-            isSafe = true;
-            msg = $"CẢNH BÁO LÃNG PHÍ: Xe có tải trọng lớn ({truckPayload}T) so với trọng lượng hàng ({contWeight}T), hiệu suất chỉ đạt {ratio}%. Nên chọn xe nhỏ hơn để tiết kiệm chi phí.";
-        }
-        else
-        {
-            status = "Optimal";
-            severity = "optimal";
-            isSafe = true;
-            msg = $"TỐI ƯU: Tải trọng đạt {ratio}% - Xe vận hành an toàn, tiết kiệm nhiên liệu và tối ưu hiệu suất.";
-        }
-
-        return new PayloadEvaluationDto
+        return Task.FromResult(new PayloadEvaluationDto
         {
             ContainerId = containerId,
             TruckId = truckId,
-            ContainerGrossWeightTon = contWeight,
-            TruckMaxPayloadTon = truckPayload,
-            PayloadRatio = ratio,
-            Status = status,
-            Severity = severity,
-            WarningMessage = msg,
-            IsSafe = isSafe
-        };
+            ContainerGrossWeightTon = customGrossWeightTon ?? 0,
+            Status = "NotEvaluated",
+            Severity = "info",
+            WarningMessage = "Không đánh giá tải trọng phương tiện; Booking chọn xe theo lịch rảnh.",
+            IsSafe = false
+        });
     }
 
     private static string NormalizeYardCode(string? code) =>
         System.Text.RegularExpressions.Regex.Replace((code ?? "").Trim().ToUpperInvariant(), "^YARD-", "TC-");
 
-    private static decimal ExtractPayloadTon(string? vehicleType)
-    {
-        if (string.IsNullOrWhiteSpace(vehicleType)) return 24m;
-        if (vehicleType.Contains("35")) return 35m;
-        if (vehicleType.Contains("32")) return 32m;
-        if (vehicleType.Contains("30")) return 30m;
-        if (vehicleType.Contains("28")) return 28m;
-        if (vehicleType.Contains("26")) return 26m;
-        if (vehicleType.Contains("25")) return 25m;
-        if (vehicleType.Contains("24")) return 24m;
-        if (vehicleType.Contains("20")) return 20m;
-        if (vehicleType.Contains("18")) return 18m;
-        if (vehicleType.Contains("16") || vehicleType.Contains("15")) return 16m;
-        return 24m;
-    }
-
     private async Task EnrichBookingDtosAsync(List<BookingDto> dtos, CancellationToken cancellationToken)
     {
         if (!dtos.Any()) return;
+        foreach(var dto in dtos) SignFleetDocuments(dto.VehicleDetails,dto.DriverDetails);
 
         var driverIds = dtos.Where(d => d.DriverId.HasValue && d.DriverId.Value != Guid.Empty).Select(d => d.DriverId!.Value).Distinct().ToList();
         var truckIds = dtos.Where(d => d.TruckId.HasValue && d.TruckId.Value != Guid.Empty).Select(d => d.TruckId!.Value).Distinct().ToList();
@@ -1582,6 +1319,9 @@ public class BookingService : IBookingService
         return new BookingDto
         {
             Id = entity.Id,
+            VehicleDetails=ReadFleetDetails<BookingVehicleDetailsDto>(entity.VehicleSnapshot),
+            DriverDetails=ReadFleetDetails<BookingDriverDetailsDto>(entity.DriverSnapshot),
+            TrailerNumber=entity.TrailerNumber,
             CarrierId = entity.CarrierId,
             DriverId = entity.DriverId,
             TruckId = entity.TruckId,

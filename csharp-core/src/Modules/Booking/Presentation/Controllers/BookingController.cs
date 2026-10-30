@@ -171,6 +171,28 @@ public class BookingController : ControllerBase
         return Ok(result);
     }
 
+    [Authorize(Roles = "Carrier,Transport Company,Carrier Staff")]
+    [HttpGet("container-options")]
+    public async Task<IActionResult> ContainerOptions([FromQuery] string? search, [FromQuery] string? bookingType, CancellationToken token)
+        => Ok(await _service.GetBookingSourcesAsync(GetUserCarrierId()!.Value, search, token, bookingType ?? "Dropoff"));
+
+    [Authorize(Roles = "Administrator,Admin,Dispatcher,Carrier,Transport Company,Carrier Staff")]
+    [HttpPost("plan")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("booking-create")]
+    public async Task<IActionResult> Plan([FromBody] BookingPlanningRequest request, CancellationToken token)
+    {
+        var carrierId = IsCarrierRole() ? GetUserCarrierId() : null;
+        if (!carrierId.HasValue && request.BookingId.HasValue)
+        {
+            var booking = await _service.GetByIdAsync(request.BookingId.Value, null, token);
+            if (booking == null) return NotFound();
+            carrierId = booking.CarrierId;
+        }
+        if (!carrierId.HasValue) throw new UnauthorizedException("Chọn booking hoặc đăng nhập công ty vận tải để lập phương án.");
+        var plan = await _service.PlanBookingAsync(carrierId.Value, request, token);
+        return Ok(plan);
+    }
+
     /// <summary>
     /// NXP-048: Lấy danh sách tài nguyên sẵn sàng (Containers trong bãi, Xe đầu kéo kèm tải trọng, Tài xế active) phục vụ AI Auto-Match
     /// </summary>
@@ -200,7 +222,7 @@ public class BookingController : ControllerBase
             var link = booking?.ContainerSelections.SingleOrDefault(x => x.ContainerId == selection.ContainerId);
             if (link == null) throw new ValidationException("Container", "Container không thuộc booking đang điều phối.");
             // The booked private declaration is already scoped to this company.
-            return Ok(await _service.RecommendFleetAsync(selection.ContainerId, "Dropoff", carrierId, cancellationToken, link.DeclarationId));
+            return Ok(await _service.RecommendFleetAsync(selection.ContainerId, "Dropoff", carrierId, cancellationToken, link.DeclarationId, null, selection.BookingId));
         }
         return Ok(await _service.RecommendFleetAsync(selection.ContainerId, selection.BookingType, carrierId, cancellationToken, selection.DeclarationId, selection.YardCode));
     }
