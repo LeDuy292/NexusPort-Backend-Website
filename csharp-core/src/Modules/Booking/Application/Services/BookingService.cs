@@ -174,7 +174,7 @@ public partial class BookingService : IBookingService
                     op.ContainerId = contId.Value;
                     entity.AddContainer(contId.Value);
                     var selection = dto.ContainerSelections.Single(s => s.ContainerId == contId.Value);
-                    if (dto.BookingType == BookingType.Pickup)
+                    if (opDto.OperationType == "Import")
                     {
                         var prepared = await _context.Database.SqlQueryRaw<PickupCodeLink>(
                             "SELECT * FROM yard_prepare_pickup({0},{1},{2})", selection.ContainerId,
@@ -286,12 +286,21 @@ public partial class BookingService : IBookingService
         // Theo yêu cầu: Luôn đặt trạng thái là Pending để chờ Dispatcher duyệt
         entity.Status = BookingStatus.Pending;
 
+        // The yard binding trigger resolves each combined leg from its saved operation.
+        // Persist both phases in the same transaction; no partial journey can commit.
+        var combinedLinks = entity.IsCombined ? entity.BookingContainers.ToList() : null;
+        if (combinedLinks != null) entity.BookingContainers.Clear();
         await _repository.AddAsync(entity, cancellationToken);
+        if (combinedLinks != null)
+        {
+            foreach (var link in combinedLinks) entity.BookingContainers.Add(link);
+            await _context.SaveChangesAsync(cancellationToken);
+        }
         if (entity.IsReeferPowerRequired)
         {
             var requestId = Guid.NewGuid();
             var requestNo = "REQ-RFR-" + requestId.ToString("N").ToUpperInvariant();
-            var containerId = dto.ContainerSelections.Single().ContainerId;
+            var containerId = dto.Operations.Single(op => op.OperationType == "Export").ContainerId!.Value;
             await _context.Database.ExecuteSqlInterpolatedAsync($@"
                 INSERT INTO public.reefer_power_requests
                   (id,request_no,container_id,booking_id,booking_code,target_temperature,temperature_unit,
@@ -602,6 +611,7 @@ public partial class BookingService : IBookingService
         var bookings = await _context.Set<Domain.Entities.Booking>()
             .AsNoTracking()
             .Include(x => x.BookingContainers)
+            .Include(x => x.BookingOperations)
             .Where(x => x.DriverId == driverId && x.Status == BookingStatus.CheckedIn)
             .OrderBy(x => x.AppointmentStart)
             .ToListAsync(cancellationToken);
@@ -628,7 +638,7 @@ public partial class BookingService : IBookingService
                 {
                     BookingId = booking.Id,
                     BookingCode = booking.BookingCode,
-                    BookingType = booking.BookingType,
+                    BookingType = booking.IsCombined && booking.BookingOperations.Any(op => op.ContainerId == container.Id && op.OperationType == "Import") ? BookingType.Pickup : booking.BookingType,
                     BookingStatus = booking.Status,
                     ContainerId = container.Id,
                     ContainerNumber = container.ContainerNumber,
@@ -649,8 +659,12 @@ public partial class BookingService : IBookingService
             throw new UnauthorizedException("Only an active assigned driver can confirm a container.");
 
         if (dto.BookingId == Guid.Empty) throw new ValidationException("BookingId", "Cần xác định đúng booking để xác nhận giao nhận.");
+        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        // Serialize all handoffs for a shared trip before reading audit or trip state.
+        await _context.Database.SqlQueryRaw<Guid>("SELECT id AS \"Value\" FROM bookings WHERE id={0} AND driver_id={1} FOR UPDATE",dto.BookingId,driverId).ToListAsync(cancellationToken);
         var booking = await _context.Set<Domain.Entities.Booking>()
             .Include(x => x.BookingContainers)
+            .Include(x => x.BookingOperations)
             .Where(x => x.Id == dto.BookingId && x.DriverId == driverId)
             .Where(x => x.BookingContainers.Any(link => link.ContainerId == dto.ContainerId))
             .Where(x => x.Status != BookingStatus.Canceled)
@@ -658,6 +672,7 @@ public partial class BookingService : IBookingService
             .FirstOrDefaultAsync(cancellationToken);
         if (booking == null)
             throw new UnauthorizedException("The container is not assigned to the authenticated driver.");
+        await _context.Entry(booking).ReloadAsync(cancellationToken);
 
         var gateTimes = await _context.Database.SqlQueryRaw<DateTime>(
             "SELECT checked_at AS \"Value\" FROM gate_transactions WHERE booking_id={0} AND gate_type='gate_in' AND status='completed' ORDER BY checked_at DESC LIMIT 1",booking.Id).ToListAsync(cancellationToken);
@@ -696,12 +711,13 @@ public partial class BookingService : IBookingService
         if (normalizedCondition is not ("OK" or "DAMAGED" or "ISSUE"))
             throw new ValidationException("Condition", "Condition must be OK, DAMAGED, or ISSUE.");
 
-        await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
         try
         {
-            var readyForGateOut = booking.BookingType == BookingType.Dropoff ? "in_yard" : "moving";
+            var pickup = booking.IsCombined ? booking.BookingOperations.Any(op => op.ContainerId == container.Id && op.OperationType == "Import") : booking.BookingType == BookingType.Pickup;
+            var readyForGateOut = pickup ? "moving" : "in_yard";
             container.Status = readyForGateOut;
-            booking.Complete();
+            var confirmedIds = await _context.Set<ContainerConfirmationAudit>().Where(x => x.BookingId == booking.Id).Select(x => x.ContainerId).ToListAsync(cancellationToken);
+            if (booking.BookingContainers.All(link => link.ContainerId == container.Id || confirmedIds.Contains(link.ContainerId))) booking.Complete();
 
             var audit = new ContainerConfirmationAudit
             {
@@ -987,7 +1003,7 @@ public partial class BookingService : IBookingService
             {
                 var info = visitInfo.FirstOrDefault(v => v.Id == selection.ContainerVisitId);
                 if (info == null) continue;
-                selection.YardCode = booking.BookingType == BookingType.Dropoff ? info.YardCode : null;
+                selection.YardCode = booking.BookingType == BookingType.Dropoff && !booking.Operations.Any(op => op.ContainerId == selection.ContainerId && op.OperationType == "Import") ? info.YardCode : null;
                 selection.ContainerNumber = info.ContainerNumber;
                 selection.ContainerTypeCode = info.ContainerTypeCode;
                 selection.CargoTypeName = info.CargoTypeName;

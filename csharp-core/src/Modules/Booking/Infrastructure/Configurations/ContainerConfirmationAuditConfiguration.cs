@@ -18,6 +18,10 @@ public class ContainerConfirmationAuditConfiguration : IEntityTypeConfiguration<
         builder.Property(x => x.ContainerStatusAfter).HasColumnName("container_status_after").HasMaxLength(50).IsRequired();
         builder.Property(x => x.ConfirmedAt).HasColumnName("confirmed_at").IsRequired();
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
+        builder.Ignore(x => x.CreatedBy);
+        builder.Ignore(x => x.UpdatedAt);
+        builder.Ignore(x => x.UpdatedBy);
+        builder.Ignore(x => x.IsDeleted);
         builder.HasIndex(x => new { x.BookingId, x.ContainerId }).IsUnique();
     }
 }

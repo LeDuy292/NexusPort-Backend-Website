@@ -1,12 +1,15 @@
 using NexusPort.Modules.Booking.Application.DTOs;
 using NexusPort.Modules.Booking.Application.Services;
 
+if (args.FirstOrDefault() == "--postgres-legacy") AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 var count = 0;
 void Check(bool condition, string message) { if (!condition) throw new Exception(message); count++; }
 var vehicleDto = new NexusPort.Modules.Vehicle.Application.DTOs.CreateVehicleDto();
 var validation = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
 Check(System.ComponentModel.DataAnnotations.Validator.TryValidateObject(vehicleDto,new System.ComponentModel.DataAnnotations.ValidationContext(vehicleDto),validation,true),"vehicle DTO has no payload requirement");
 var end = new DateTime(2026, 10, 30, 10, 0, 0, DateTimeKind.Utc);
+var scheduleUtc=typeof(BookingService).GetMethod("ScheduleUtc",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Static)!;
+Check((DateTime)scheduleUtc.Invoke(null,new object[]{end.ToLocalTime()})! == end,"legacy local PostgreSQL instants normalize to UTC before comparing appointments");
 foreach (var status in new[] { "transporting", "waiting_confirmation", "booking_confirmed", "receiving_vehicle", "inactive", "banned" })
     Check(!BookingFleetPolicy.IsAvailableDriver(status, null, end), "busy/disabled driver excluded: " + status);
 Check(!BookingFleetPolicy.IsAvailableDriver("active", end.AddDays(-1), end), "expired license excluded");
@@ -38,4 +41,5 @@ imageTruck.RegistrationImageUrl="NexusPort/vehicles/raw-key.png";
 sign.Invoke(signingService,new object?[] {imageTruck,null});
 Check(imageTruck.PhotoUrl=="https://example.invalid/image.png?version=original"&&imageTruck.RegistrationImageUrl=="NexusPort/vehicles/raw-key.png","external links and raw S3 object keys retain their identity");
 Console.WriteLine($"PASS {count} Booking planning checks. In-memory data only; no database connection.");
-if (args.Length == 3 && args[0] == "--postgres") await PostgresPlanningChecks.RunAsync(args[1],args[2]);
+if (args.Length == 3 && args[0] is "--postgres" or "--postgres-legacy") await PostgresPlanningChecks.RunAsync(args[1],args[2]);
+if (args.Length == 2 && args[0] == "--journey") await CombinedJourneyChecks.RunAsync(args[1]);

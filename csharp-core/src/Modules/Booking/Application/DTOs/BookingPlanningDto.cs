@@ -1,18 +1,24 @@
 namespace NexusPort.Modules.Booking.Application.DTOs;
 
-public sealed class BookingPlanningRequest
+public sealed class BookingPlanningRequest : BookingPlanningLeg
 {
     public Guid? BookingId { get; set; }
+    public DateTime AppointmentStart { get; set; }
+    public DateTime AppointmentEnd { get; set; }
+    public List<BookingPlanningLeg> Legs { get; set; } = new();
+}
+
+public class BookingPlanningLeg
+{
     public Guid ContainerId { get; set; }
     public Guid? DeclarationId { get; set; }
     public string? YardCode { get; set; }
     public string BookingType { get; set; } = "Dropoff";
-    public DateTime AppointmentStart { get; set; }
-    public DateTime AppointmentEnd { get; set; }
 }
 
 public sealed class BookingCargoSource
 {
+    public string? YardCode { get; set; }
     public Guid ContainerId { get; set; }
     public Guid DeclarationId { get; set; }
     public Guid? ContainerVisitId { get; set; }
@@ -22,6 +28,7 @@ public sealed class BookingCargoSource
     public string? CargoType { get; set; }
     public string? SealNumber { get; set; }
     public string? CustomerName { get; set; }
+    public string? CarrierName { get; set; }
     public decimal? GrossWeightKg { get; set; }
     public decimal? RequiredPowerKw { get; set; }
 }
@@ -39,6 +46,7 @@ public sealed class BookingFleetOptions : AvailableFleetResourcesDto
 public sealed class BookingPlan
 {
     public BookingCargoSource Source { get; set; } = new();
+    public List<BookingCargoSource> Sources { get; set; } = new();
     public BookingFleetOptions Fleet { get; set; } = new();
     public BookingScheduleAssessment Schedule { get; set; } = new();
 }
@@ -46,6 +54,7 @@ public sealed class BookingPlan
 public sealed class BookingScheduleAssessment
 {
     public bool IsAvailable { get; set; }
+    public bool RequiresExistingBookingResolution { get; set; }
     public string Message { get; set; } = "";
     public Guid? ExistingBookingId { get; set; }
     public string? ExistingBookingCode { get; set; }

@@ -22,7 +22,7 @@ export interface DriverRouteRow {
 export const driverRouteQuery = `
  SELECT DISTINCT ON (b.id,c.id)
  c.id AS "containerId",c.container_no AS "containerNumber",b.id AS "bookingId",
- b.booking_code AS "bookingCode",b.booking_type::text AS "bookingType",b.status::text AS "bookingStatus",
+ b.booking_code AS "bookingCode",yard_booking_direction(b.id,bc.container_id) AS "bookingType",b.status::text AS "bookingStatus",
  gt.id AS "gateTransactionId",gt.status::text AS "gateStatus",g.code AS "gateCode",
  gt.checked_at AS "gateInAt",ex.checked_at AS "gateOutAt",
  gt.driver_id AS "driverId",d.full_name AS "driverName",COALESCE(t.plate_number,b.vehicle_plate) AS "truckPlate",
@@ -73,7 +73,7 @@ export const driverRouteQuery = `
    SELECT ys.id AS slot_id,yb.id AS block_id,yb.zone,yb.code AS block_code,ys.bay,ys.row_no,ys.tier,ys.status::text AS slot_status,false AS reserved
    FROM container_positions cp JOIN yard_slots ys ON ys.id=cp.slot_id JOIN yard_blocks yb ON yb.id=ys.block_id
    JOIN container_visits v ON v.id=bc.container_visit_id AND v.container_id=c.id AND v.visit_status='active'
-   WHERE cp.container_id=c.id AND cp.is_current=true AND b.booking_type::text='pickup'
+   WHERE cp.container_id=c.id AND cp.is_current=true AND yard_booking_direction(b.id,bc.container_id)='pickup'
    ORDER BY cp.placed_at DESC,cp.id DESC LIMIT 1
  ) placed ON true
  LEFT JOIN LATERAL (

@@ -39,13 +39,23 @@ public class YardGateOutController : ControllerBase
             .FirstOrDefault(o => string.Equals(o.ExpectedGateDirection, "GateOut", StringComparison.OrdinalIgnoreCase));
 
         var isLegacyPickup = booking.Type == "pickup";
-        if (gateOutOp == null && !isLegacyPickup)
+        if (gateOutOp == null && !isLegacyPickup && booking.Type != "dropoff")
         {
             throw new ValidationException("Booking", "Lịch hẹn không có tác nghiệp ra cổng (Gate Out) hợp lệ.");
         }
 
         var validGate = await _context.Database.SqlQueryRaw<Guid>("SELECT id AS \"Value\" FROM gates WHERE id={0} AND is_active", request.GateId).ToListAsync(cancellationToken);
         if (validGate.Count != 1) throw new ValidationException("Gate", "Cổng không hợp lệ hoặc đã ngừng hoạt động.");
+        var ready = await _context.Database.SqlQueryRaw<int>("""
+            SELECT count(*)::int AS "Value" FROM bookings b WHERE b.id={0} AND b.status::text='completed'
+              AND EXISTS(SELECT 1 FROM gate_transactions g WHERE g.booking_id=b.id AND g.gate_type='gate_in' AND g.status='completed')
+              AND EXISTS(SELECT 1 FROM booking_containers bc WHERE bc.booking_id=b.id)
+              AND NOT EXISTS(SELECT 1 FROM booking_containers bc LEFT JOIN container_confirmation_audits a
+                ON a.booking_id=bc.booking_id AND a.container_id=bc.container_id
+                LEFT JOIN container_visits v ON v.id=bc.container_visit_id
+                WHERE bc.booking_id=b.id AND (a.id IS NULL OR (yard_booking_direction(b.id,bc.container_id)='pickup' AND v.visit_status IS DISTINCT FROM 'active')))
+            """,request.BookingId).SingleAsync(cancellationToken);
+        if (ready != 1) throw new ValidationException("Booking", "Cần hoàn tất và xác nhận đủ container giao/nhận trước khi ra cổng.");
 
         var id = Guid.NewGuid();
         var opId = gateOutOp?.Id;
@@ -69,16 +79,27 @@ public class YardGateOutController : ControllerBase
         bookingEntity.TripStatus = "Completed";
 
         // Release yard slot if container was assigned in yard
-        await _context.Database.ExecuteSqlInterpolatedAsync($@"WITH released AS (
-          DELETE FROM container_positions p USING booking_containers bc
-          WHERE p.container_id=bc.container_id AND bc.booking_id={request.BookingId} RETURNING p.slot_id)
-          UPDATE yard_slots SET status='empty'::yard_slot_status WHERE id IN (SELECT slot_id FROM released)", cancellationToken);
+        await _context.Database.ExecuteSqlInterpolatedAsync($@"
+          UPDATE container_positions p SET is_current=false,removed_at=now() FROM booking_containers bc
+          WHERE p.container_id=bc.container_id AND p.is_current AND bc.booking_id={request.BookingId}
+            AND yard_booking_direction(bc.booking_id,bc.container_id)='pickup';
+          UPDATE yard_slot_reservations r SET reserved_to=now() FROM booking_containers bc
+          WHERE r.container_id=bc.container_id AND bc.booking_id={request.BookingId} AND r.reserved_to IS NULL
+            AND yard_booking_direction(bc.booking_id,bc.container_id)='pickup';
+          UPDATE yard_slots s SET status='empty'::yard_slot_status WHERE s.status IN ('occupied','reserved') AND s.id IN (
+            SELECT p.slot_id FROM container_positions p JOIN booking_containers bc ON bc.container_id=p.container_id
+              WHERE bc.booking_id={request.BookingId} AND yard_booking_direction(bc.booking_id,bc.container_id)='pickup'
+            UNION SELECT r.slot_id FROM yard_slot_reservations r JOIN booking_containers bc ON bc.container_id=r.container_id
+              WHERE bc.booking_id={request.BookingId} AND yard_booking_direction(bc.booking_id,bc.container_id)='pickup')
+            AND NOT EXISTS(SELECT 1 FROM container_positions p WHERE p.slot_id=s.id AND p.is_current)
+            AND NOT EXISTS(SELECT 1 FROM yard_slot_reservations r WHERE r.slot_id=s.id AND r.reserved_to IS NULL)", cancellationToken);
 
         // Update container status to gate_out
         await _context.Database.ExecuteSqlInterpolatedAsync($@"UPDATE containers c
           SET status = 'gate_out'::container_status, left_at = now(), updated_at = now()
           FROM booking_containers bc
-          WHERE c.id = bc.container_id AND bc.booking_id = {request.BookingId}", cancellationToken);
+          WHERE c.id = bc.container_id AND bc.booking_id = {request.BookingId}
+            AND yard_booking_direction(bc.booking_id,bc.container_id)='pickup'", cancellationToken);
 
         await _context.SaveChangesAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);

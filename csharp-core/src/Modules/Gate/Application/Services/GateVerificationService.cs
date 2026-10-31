@@ -383,6 +383,9 @@ public class GateVerificationService : IGateVerificationService
         if (container != null && !await _context.Set<Booking.Domain.Entities.BookingContainer>()
             .AnyAsync(x => x.BookingId == booking.Id && x.ContainerId == container.Id && x.ContainerVisitId != null, cancellationToken))
             throw new NexusPort.Shared.Exceptions.ValidationException("Container", "Container không thuộc lượt bãi của booking này.");
+        if (booking.IsCombined && (container == null || !await _context.Set<Booking.Domain.Entities.BookingOperation>()
+            .AnyAsync(op => op.BookingId == booking.Id && op.ContainerId == container.Id && op.OperationType == "Export" && op.ExpectedGateDirection == "GateIn", cancellationToken)))
+            throw new NexusPort.Shared.Exceptions.ValidationException("Container", "Chuyến hai chiều phải vào cổng cùng container Giao đã đăng ký.");
 
         await using var gateTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
         await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM bookings WHERE id={booking.Id} FOR UPDATE", cancellationToken);
