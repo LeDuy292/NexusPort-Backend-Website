@@ -72,8 +72,9 @@ public partial class BookingService
         JOIN container_types ct ON ct.id=c.container_type_id
         """;
 
-    public async Task<IReadOnlyList<BookingCargoSource>> GetBookingSourcesAsync(Guid carrierId, string? search, CancellationToken token, string bookingType = "Dropoff")
+    public async Task<IReadOnlyList<BookingCargoSource>> GetBookingSourcesAsync(Guid carrierId, string? search, CancellationToken token, string bookingType = "Dropoff",int limit=30)
     {
+        if(limit is <1 or >100)throw new ValidationException("Limit","Danh sách container tối đa 100 dòng mỗi lần tải.");
         var number = (search ?? "").Trim().ToUpperInvariant();
         if (number.Length is > 0 and < 3) return Array.Empty<BookingCargoSource>();
         if (number.Length > 0 && !System.Text.RegularExpressions.Regex.IsMatch(number, "^[A-Z0-9]{3,20}$"))
@@ -99,8 +100,8 @@ public partial class BookingService
                       AND (o.container_id=c.id OR upper(trim(o.container_number))=upper(c.container_no))
                       AND NOT EXISTS(SELECT 1 FROM booking_containers bc WHERE bc.booking_id=b.id
                         AND bc.container_id=c.id AND bc.container_visit_id IS NOT NULL))))
-                ORDER BY c.container_no,c.id,v.id LIMIT 30
-                """, carrierId, "%" + number + "%").ToListAsync(token);
+                ORDER BY c.container_no,c.id,v.id LIMIT {2}
+                """, carrierId, "%" + number + "%",limit).ToListAsync(token);
         if (bookingType != "Dropoff") throw new ValidationException("BookingType", "Chọn loại lịch Giao hoặc Nhận.");
         return await _context.Database.SqlQueryRaw<BookingCargoSource>(CargoSelect + """
 
@@ -113,8 +114,8 @@ public partial class BookingService
             AND NOT EXISTS(SELECT 1 FROM container_visits v WHERE v.container_id=c.id AND v.visit_status IN ('planned','active')
               AND (v.started_at IS NOT NULL OR EXISTS(SELECT 1 FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id
                 WHERE bc.container_visit_id=v.id AND b.status::text NOT IN ('canceled','rejected','expired'))))
-            ORDER BY d.created_at DESC,d.id LIMIT 30
-            """, carrierId, "%" + number + "%").ToListAsync(token);
+            ORDER BY d.created_at DESC,d.id LIMIT {2}
+            """, carrierId, "%" + number + "%",limit).ToListAsync(token);
     }
 
     public async Task<BookingPlan> PlanBookingAsync(Guid carrierId, BookingPlanningRequest request, CancellationToken token)

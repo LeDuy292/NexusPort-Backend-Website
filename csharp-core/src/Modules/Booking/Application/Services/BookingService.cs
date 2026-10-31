@@ -80,10 +80,14 @@ public partial class BookingService : IBookingService
         return dto;
     }
 
-    public async Task<BookingDto> CreateAsync(CreateBookingDto dto, CancellationToken cancellationToken = default)
+    public Task<BookingDto> CreateAsync(CreateBookingDto dto, CancellationToken cancellationToken = default)
+        => CreateJourneyAsync(dto,false,cancellationToken);
+
+    private async Task<BookingDto> CreateJourneyAsync(CreateBookingDto dto,bool partOfBatch,CancellationToken cancellationToken)
     {
         BookingFleetPolicy.ValidateWindow(dto.AppointmentStart, dto.AppointmentEnd);
-        await using var bookingTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+        if(partOfBatch&&_context.Database.CurrentTransaction==null)throw new InvalidOperationException("Batch journeys require an enclosing transaction.");
+        await using var bookingTransaction = partOfBatch?null:await _context.Database.BeginTransactionAsync(cancellationToken);
         await LockBookingFleetAsync(dto.TruckId, dto.DriverId, cancellationToken);
         await PrepareBookingCargoAsync(dto, cancellationToken);
         await EnsureBookingFleetAsync(dto.CarrierId, dto.TruckId, dto.DriverId, dto.AppointmentStart,
@@ -309,10 +313,10 @@ public partial class BookingService : IBookingService
                   {entity.TemperatureUnit},{entity.TempTolerance},{entity.RequiredPowerKw},{entity.Description},
                   {dto.SpecialColdInstructions},'PENDING_ASSIGNMENT'::reefer_request_status,NOW(),NOW())", cancellationToken);
         }
-        await bookingTransaction.CommitAsync(cancellationToken);
+        if(bookingTransaction!=null)await bookingTransaction.CommitAsync(cancellationToken);
 
         // Emit real business notification to Database (NXP-044)
-        try
+        if(!partOfBatch) try
         {
             Guid recipientUserId = Guid.Empty;
             try
@@ -520,6 +524,7 @@ public partial class BookingService : IBookingService
             throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể duyệt.");
         }
 
+        await EnsureBatchDocumentsVerifiedAsync(id,cancellationToken);
         entity.Approve(approvedBy);
 
         await _repository.UpdateAsync(entity, cancellationToken);
@@ -873,7 +878,7 @@ public partial class BookingService : IBookingService
 
         await LockBookingFleetAsync(dto.TruckId, dto.DriverId, cancellationToken);
         await EnsureBookingFleetAsync(entity.CarrierId, dto.TruckId, dto.DriverId,
-            entity.AppointmentStart, entity.AppointmentEnd, entity.Id, cancellationToken);
+            entity.AppointmentStart.ToUniversalTime(), entity.AppointmentEnd.ToUniversalTime(), entity.Id, cancellationToken);
 
         await CaptureFleetDetailsAsync(entity,cancellationToken);
         entity.MarkReady();
