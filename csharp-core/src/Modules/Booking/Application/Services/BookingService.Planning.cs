@@ -7,10 +7,10 @@ namespace NexusPort.Modules.Booking.Application.Services;
 
 public partial class BookingService
 {
-    private async Task<decimal> PrepareBookingCargoAsync(CreateBookingDto dto, CancellationToken token)
+    private async Task<decimal> PrepareSingleBookingCargoAsync(CreateBookingDto dto, CancellationToken token)
     {
         if (dto.IsCombined || dto.Operations.Count > 1)
-            throw new ValidationException("Operations", "Chuyến kết hợp cần hợp đồng lượt bãi hai chiều; hiện hãy đặt riêng lịch Giao và Nhận để giữ đúng dữ liệu.");
+            throw new ValidationException("Operations", "Chuyến kết hợp hai chiều chưa được hỗ trợ. Vui lòng đặt riêng lịch Giao và lịch Nhận.");
         if (dto.ContainerSelections.Count != 1)
             throw new ValidationException("ContainerSelections", "Chọn đúng một bản khai hoặc lượt bãi cho chuyến xe.");
         var selection = dto.ContainerSelections[0];
@@ -39,7 +39,9 @@ public partial class BookingService
         selection.ContainerNumber=source.ContainerNumber; selection.ContainerTypeCode=source.ContainerTypeCode;
         selection.CargoTypeName=op.CargoType; dto.ContainerIds=new() {source.ContainerId};
         if (dto.BookingType == BookingType.Dropoff) selection.DeclarationId=source.DeclarationId;
-        dto.IsReeferPowerRequired=dto.BookingType == BookingType.Dropoff && source.CargoType == "reefer" && source.RequiredPowerKw > 0;
+        dto.IsReeferPowerRequired=dto.IsReeferPowerRequired && dto.BookingType == BookingType.Dropoff && source.CargoType == "reefer";
+        if(dto.IsReeferPowerRequired && !(source.RequiredPowerKw > 0))
+            throw new ValidationException("RequiredPowerKw", "Bổ sung công suất cấp điện hợp lệ trong khai báo container trước khi đăng ký cấp điện tại bãi.");
         dto.RequiredPowerKw=source.RequiredPowerKw;
         if (op.CargoType == "Reefer")
         {
@@ -51,7 +53,7 @@ public partial class BookingService
         if (dto.IsReeferPowerRequired && !dto.TargetTemperature.HasValue)
             throw new ValidationException("TargetTemperature", "Nhập nhiệt độ theo chỉ dẫn hàng lạnh.");
         if (op.CargoType == "Reefer" && !op.TemperatureSetpoint.HasValue)
-            throw new ValidationException("TemperatureSetpoint", "Bổ sung nhiệt độ theo chỉ dẫn hàng lạnh.");
+            throw new ValidationException("TemperatureSetpoint", "Nhập nhiệt độ bảo quản hàng lạnh. Thông tin này vẫn cần cho Booking Nhận container và khi không yêu cầu cấp điện tại bãi.");
         if (op.CargoType == "DangerousGoods" && (string.IsNullOrWhiteSpace(op.UnNumber) || string.IsNullOrWhiteSpace(op.DgClass)))
             throw new ValidationException("DangerousGoods", "Bổ sung mã UN và phân lớp hàng nguy hiểm; không dùng giá trị mặc định.");
         if (string.IsNullOrWhiteSpace(dto.BookingCode)) dto.BookingCode="BK-"+Guid.NewGuid().ToString("N").ToUpperInvariant();
@@ -61,9 +63,10 @@ public partial class BookingService
     }
 
     private const string CargoSelect = """
-        SELECT c.id AS "ContainerId",d.id AS "DeclarationId",NULL::uuid AS "ContainerVisitId",
+        SELECT c.id AS "ContainerId",d.id AS "DeclarationId",NULL::uuid AS "ContainerVisitId",NULL::text AS "YardCode",
           c.container_no AS "ContainerNumber",ct.code AS "ContainerTypeCode",d.load_status AS "LoadStatus",
           d.cargo_type::text AS "CargoType",d.seal_number AS "SealNumber",d.customer_name AS "CustomerName",
+          (SELECT company_name FROM carriers WHERE id=d.carrier_id) AS "CarrierName",
           d.gross_weight_kg AS "GrossWeightKg",d.required_power_kw AS "RequiredPowerKw"
         FROM container_declarations d JOIN containers c ON c.id=d.container_id
         JOIN container_types ct ON ct.id=c.container_type_id
@@ -78,25 +81,38 @@ public partial class BookingService
         if (bookingType == "Pickup")
             return await _context.Database.SqlQueryRaw<BookingCargoSource>("""
                 SELECT c.id AS "ContainerId",'00000000-0000-0000-0000-000000000000'::uuid AS "DeclarationId",
-                  NULL::uuid AS "ContainerVisitId",c.container_no AS "ContainerNumber",ct.code AS "ContainerTypeCode",
+                  v.id AS "ContainerVisitId",v.pickup_code AS "YardCode",c.container_no AS "ContainerNumber",ct.code AS "ContainerTypeCode",
                   'unknown'::text AS "LoadStatus",NULL::text AS "CargoType",NULL::text AS "SealNumber",
-                  NULL::text AS "CustomerName",NULL::numeric AS "GrossWeightKg",NULL::numeric AS "RequiredPowerKw"
+                  NULL::text AS "CustomerName",NULL::text AS "CarrierName",NULL::numeric AS "GrossWeightKg",NULL::numeric AS "RequiredPowerKw"
                 FROM containers c JOIN container_types ct ON ct.id=c.container_type_id
-                WHERE c.container_no ILIKE {1} AND EXISTS(
-                  SELECT 1 FROM container_visits v JOIN container_declarations d ON d.id=v.declaration_id
-                  WHERE v.container_id=c.id AND v.visit_status IN ('planned','active')
+                JOIN container_visits v ON v.container_id=c.id JOIN container_declarations d ON d.id=v.declaration_id
+                WHERE c.container_no ILIKE {1} AND v.visit_status IN ('planned','active')
                   AND (d.carrier_id={0} OR EXISTS(SELECT 1 FROM container_visit_access a WHERE a.container_visit_id=v.id AND a.carrier_id={0}))
                   AND EXISTS(SELECT 1 FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id
-                    WHERE bc.container_visit_id=v.id AND b.booking_type::text='dropoff' AND b.status::text NOT IN ('canceled','rejected','expired'))
+                    WHERE bc.container_visit_id=v.id AND yard_booking_direction(b.id,bc.container_id)='dropoff' AND b.status::text NOT IN ('canceled','rejected','expired'))
                   AND NOT EXISTS(SELECT 1 FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id
-                    WHERE bc.container_visit_id=v.id AND b.booking_type::text='pickup' AND b.status::text NOT IN ('canceled','rejected','expired')))
-                ORDER BY c.container_no,c.id LIMIT 30
+                    WHERE bc.container_visit_id=v.id AND yard_booking_direction(b.id,bc.container_id)='pickup' AND b.status::text NOT IN ('canceled','rejected','expired'))
+                  AND NOT EXISTS(SELECT 1 FROM bookings b WHERE b.status::text NOT IN ('canceled','rejected','expired','completed') AND (
+                    EXISTS(SELECT 1 FROM booking_containers bc WHERE bc.booking_id=b.id AND bc.container_id=c.id
+                      AND bc.container_visit_id IS NULL AND yard_booking_direction(b.id,c.id)='pickup')
+                    OR EXISTS(SELECT 1 FROM booking_operations o WHERE o.booking_id=b.id AND o.operation_type='Import'
+                      AND (o.container_id=c.id OR upper(trim(o.container_number))=upper(c.container_no))
+                      AND NOT EXISTS(SELECT 1 FROM booking_containers bc WHERE bc.booking_id=b.id
+                        AND bc.container_id=c.id AND bc.container_visit_id IS NOT NULL))))
+                ORDER BY c.container_no,c.id,v.id LIMIT 30
                 """, carrierId, "%" + number + "%").ToListAsync(token);
         if (bookingType != "Dropoff") throw new ValidationException("BookingType", "Chọn loại lịch Giao hoặc Nhận.");
         return await _context.Database.SqlQueryRaw<BookingCargoSource>(CargoSelect + """
 
             WHERE d.carrier_id={0} AND c.container_no ILIKE {1} AND d.load_status='full'
             AND NOT EXISTS(SELECT 1 FROM booking_containers bc WHERE bc.declaration_id=d.id)
+            AND NOT EXISTS(SELECT 1 FROM bookings b WHERE b.status::text NOT IN ('canceled','rejected','expired','completed') AND (
+              EXISTS(SELECT 1 FROM booking_containers bc WHERE bc.booking_id=b.id AND bc.container_id=c.id)
+              OR EXISTS(SELECT 1 FROM booking_operations o WHERE o.booking_id=b.id
+                AND (o.container_id=c.id OR upper(trim(o.container_number))=upper(c.container_no)))))
+            AND NOT EXISTS(SELECT 1 FROM container_visits v WHERE v.container_id=c.id AND v.visit_status IN ('planned','active')
+              AND (v.started_at IS NOT NULL OR EXISTS(SELECT 1 FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id
+                WHERE bc.container_visit_id=v.id AND b.status::text NOT IN ('canceled','rejected','expired'))))
             ORDER BY d.created_at DESC,d.id LIMIT 30
             """, carrierId, "%" + number + "%").ToListAsync(token);
     }
@@ -104,11 +120,31 @@ public partial class BookingService
     public async Task<BookingPlan> PlanBookingAsync(Guid carrierId, BookingPlanningRequest request, CancellationToken token)
     {
         BookingFleetPolicy.ValidateWindow(request.AppointmentStart, request.AppointmentEnd);
-        var source = await ResolveBookingSourceAsync(carrierId, request, token, forPlanning: true);
+        var legs=request.Legs is not {Count:>0}?new List<BookingPlanningLeg>{request}:request.Legs.OrderBy(leg=>leg.BookingType=="Dropoff"?0:1).ToList();
+        if(request.BookingId.HasValue)
+        {
+            var storedLegs=await _context.Database.SqlQueryRaw<BookingPlanningLeg>("""
+                SELECT bc.container_id AS "ContainerId",bc.declaration_id AS "DeclarationId",NULL::text AS "YardCode",
+                  CASE yard_booking_direction(b.id,bc.container_id) WHEN 'pickup' THEN 'Pickup' ELSE 'Dropoff' END AS "BookingType"
+                FROM bookings b JOIN booking_containers bc ON bc.booking_id=b.id
+                WHERE b.id={0} AND b.carrier_id={1} AND b.is_combined
+                ORDER BY CASE yard_booking_direction(b.id,bc.container_id) WHEN 'dropoff' THEN 0 ELSE 1 END
+                """,request.BookingId.Value,carrierId).ToListAsync(token);
+            if(storedLegs.Count>0)legs=storedLegs;
+        }
+        if(legs.Count>1&&(legs.Count!=2||legs.Count(leg=>leg.BookingType=="Dropoff")!=1||legs.Count(leg=>leg.BookingType=="Pickup")!=1||legs.Select(leg=>leg.ContainerId).Distinct().Count()!=2))
+            throw new ValidationException("Operations","Chuyến hai chiều cần một lượt Giao và một lượt Nhận của hai container khác nhau.");
+        var resolved=new List<(BookingPlanningRequest Request,BookingCargoSource Source)>();
+        foreach(var leg in legs)
+        {
+            var legRequest=new BookingPlanningRequest {BookingId=request.BookingId,ContainerId=leg.ContainerId,DeclarationId=leg.DeclarationId,YardCode=leg.YardCode,
+                BookingType=leg.BookingType,AppointmentStart=request.AppointmentStart,AppointmentEnd=request.AppointmentEnd};
+            resolved.Add((legRequest,await ResolveBookingSourceAsync(carrierId,legRequest,token,forPlanning:true)));
+        }
         var fleet = await LoadBookingFleetAsync(carrierId, request.AppointmentStart, request.AppointmentEnd,
             request.BookingId, token);
-        var schedule=await AssessScheduleAsync(carrierId,request,source,fleet,token);
-        return new BookingPlan { Source = source, Fleet = fleet, Schedule = schedule };
+        var schedule=await AssessSchedulesAsync(carrierId,resolved,fleet,token);
+        return new BookingPlan { Source = resolved[0].Source, Sources=resolved.Select(leg=>leg.Source).ToList(),Fleet = fleet, Schedule = schedule };
     }
 
     private async Task<BookingCargoSource> ResolveBookingSourceAsync(Guid carrierId, BookingPlanningRequest request, CancellationToken token, bool forPlanning = false)
@@ -116,7 +152,7 @@ public partial class BookingService
         List<BookingCargoSource> rows;
         if (request.BookingId.HasValue)
         {
-            rows = await _context.Database.SqlQueryRaw<BookingCargoSource>(CargoSelect + """
+            rows = await _context.Database.SqlQueryRaw<BookingCargoSource>(CargoSelect.Replace("NULL::uuid", "bc.container_visit_id") + """
 
                 JOIN booking_containers bc ON bc.declaration_id=d.id AND bc.container_id=c.id
                 JOIN bookings b ON b.id=bc.booking_id
@@ -136,15 +172,16 @@ public partial class BookingService
             var code = NormalizeYardCode(request.YardCode);
             if (!System.Text.RegularExpressions.Regex.IsMatch(code, "^TC-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$"))
                 throw new ValidationException("YardCode", "Nhập đúng mã nhận container của lượt bãi.");
-            rows = await _context.Database.SqlQueryRaw<BookingCargoSource>(CargoSelect.Replace("NULL::uuid", "v.id") + """
+            rows = await _context.Database.SqlQueryRaw<BookingCargoSource>(CargoSelect.Replace("NULL::uuid", "v.id")
+                .Replace("NULL::text AS \"YardCode\"", "v.pickup_code AS \"YardCode\"") + """
 
                 JOIN container_visits v ON v.declaration_id=d.id AND v.container_id=c.id
                 WHERE c.id={0} AND v.pickup_code={1} AND v.visit_status IN ('planned','active')
                 AND EXISTS(SELECT 1 FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id
-                  WHERE bc.container_visit_id=v.id AND b.booking_type::text='dropoff'
+                  WHERE bc.container_visit_id=v.id AND yard_booking_direction(b.id,bc.container_id)='dropoff'
                   AND b.status::text NOT IN ('canceled','rejected','expired') AND b.appointment_end<={2})
                 AND NOT EXISTS(SELECT 1 FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id
-                  WHERE bc.container_visit_id=v.id AND b.booking_type::text='pickup'
+                  WHERE bc.container_visit_id=v.id AND yard_booking_direction(b.id,bc.container_id)='pickup'
                   AND b.status::text NOT IN ('canceled','rejected','expired'))
                 """, request.ContainerId, code, forPlanning ? DateTime.MaxValue : request.AppointmentStart).ToListAsync(token);
         }

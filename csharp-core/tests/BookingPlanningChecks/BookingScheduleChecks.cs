@@ -26,7 +26,7 @@ internal static class BookingScheduleChecks
             Check(plan.Schedule.IsAvailable&&plan.Fleet.RecommendedTruckId==extraTruck&&plan.Fleet.RecommendedDriverId==extraDriver,"another truck/container may book exactly the same time window");
             await context.Database.ExecuteSqlRawAsync("UPDATE trucks SET status='maintenance' WHERE id={0}",extraTruck);
             plan=await service.PlanBookingAsync(carrier,request,default);
-            Check(!plan.Schedule.IsAvailable&&plan.Schedule.Alternatives.First().AppointmentStart==end,"when all trucks are busy, a free window starts at the preceding appointment end");
+            Check(!plan.Schedule.IsAvailable&&plan.Schedule.Alternatives.First().AppointmentStart==end,$"when all trucks are busy, a free window starts at the preceding appointment end (expected {end:O}; actual {string.Join(",",plan.Schedule.Alternatives.Select(option=>option.AppointmentStart.ToString("O")))})");
             await context.Database.ExecuteSqlRawAsync("UPDATE trucks SET status='active' WHERE id={0}",extraTruck);
             await context.Database.ExecuteSqlRawAsync("UPDATE container_declarations SET container_id={0} WHERE id={1}; UPDATE booking_containers SET container_id={0} WHERE booking_id={2}",container,otherDeclaration,booking);
             plan=await service.PlanBookingAsync(carrier,request,default);
@@ -58,6 +58,32 @@ internal static class BookingScheduleChecks
             await context.SaveChangesAsync();
             plan=await service.PlanBookingAsync(carrier,request,default);
             Check(!plan.Schedule.IsAvailable&&plan.Schedule.ExistingBookingId==legacyBooking,"legacy operation without container ID is matched by the canonical container number");
+            await context.Database.ExecuteSqlRawAsync("UPDATE bookings SET status='canceled' WHERE id={0}; UPDATE bookings SET carrier_id={1},status='pending' WHERE id={2}",legacyBooking,carrier,booking);
+            var outgoingDeclaration=Guid.NewGuid();var outgoingVisit=Guid.NewGuid();var outgoingInbound=Guid.NewGuid();
+            await context.Database.ExecuteSqlRawAsync("""
+                INSERT INTO container_declarations(id,container_id,carrier_id,load_status,cargo_type,gross_weight_kg)
+                  VALUES({0},{1},{2},'full','general',23000);
+                INSERT INTO container_visits(id,container_id,declaration_id,pickup_code,visit_status)
+                  VALUES({3},{1},{0},'TC-1111-2222-3333','planned');
+                INSERT INTO bookings(id,carrier_id,booking_type,status,trip_status,appointment_start,appointment_end,booking_code)
+                  VALUES({4},{2},'dropoff','pending','Scheduled',{5},{6},'TEST-OUTGOING-INBOUND');
+                INSERT INTO booking_containers(booking_id,container_id,declaration_id,container_visit_id) VALUES({4},{1},{0},{3});
+                """,outgoingDeclaration,otherContainer,carrier,outgoingVisit,outgoingInbound,start,end);
+            var combined=new BookingPlanningRequest {AppointmentStart=start,AppointmentEnd=end,Legs=new(){
+                new(){ContainerId=container,DeclarationId=declaration,BookingType="Dropoff"},
+                new(){ContainerId=otherContainer,YardCode="TC-1111-2222-3333",BookingType="Pickup"}}};
+            var combinedPlan=await service.PlanBookingAsync(carrier,combined,default);
+            Check(!combinedPlan.Schedule.IsAvailable&&combinedPlan.Schedule.RequiresExistingBookingResolution&&combinedPlan.Schedule.ExistingBookingId==booking&&combinedPlan.Schedule.Alternatives.Count==0,
+                "combined trip exposes incoming container's indefinite stay rather than hiding it behind outgoing timing");
+            Check(combinedPlan.Schedule.Message.Contains(number)&&combinedPlan.Schedule.Message.Contains("TEST-OTHER"),
+                "both container constraints remain visible, including the pickup ready time");
+            await context.Database.ExecuteSqlRawAsync("UPDATE bookings SET status='canceled' WHERE id={0}",booking);
+            combinedPlan=await service.PlanBookingAsync(carrier,combined,default);
+            Check(combinedPlan.Schedule.Alternatives.First().AppointmentStart==end&&combinedPlan.Schedule.Alternatives.First().AppointmentStart.Kind==DateTimeKind.Utc,
+                "valid combined pair receives the earliest shared UTC window after outgoing inbound ends");
+            combined.AppointmentStart=end;combined.AppointmentEnd=end.AddHours(2);
+            Check((await service.PlanBookingAsync(carrier,combined,default)).Schedule.IsAvailable,
+                "applying suggested shared window makes the eligible combined pair available");
             await transaction.RollbackAsync();
             Console.WriteLine($"PASS {count} simultaneous-booking and alternate-window PostgreSQL checks.");
             return count;
