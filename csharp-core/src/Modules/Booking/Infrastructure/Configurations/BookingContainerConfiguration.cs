@@ -1,0 +1,32 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using NexusPort.Modules.Booking.Domain.Entities;
+
+namespace NexusPort.Modules.Booking.Infrastructure.Configurations;
+
+public class BookingContainerConfiguration : IEntityTypeConfiguration<BookingContainer>
+{
+    public void Configure(EntityTypeBuilder<BookingContainer> builder)
+    {
+        builder.ToTable("booking_containers");
+
+        builder.HasKey(x => new { x.BookingId, x.ContainerId });
+
+        builder.Property(x => x.BookingId)
+            .HasColumnName("booking_id")
+            .IsRequired();
+
+        builder.Property(x => x.ContainerId)
+            .HasColumnName("container_id")
+            .IsRequired();
+
+        builder.Property(x => x.DeclarationId).HasColumnName("declaration_id");
+        builder.Property(x => x.ContainerVisitId).HasColumnName("container_visit_id").ValueGeneratedOnAdd();
+        builder.Ignore(x => x.Note);
+
+        builder.HasOne(x => x.Booking)
+            .WithMany(x => x.BookingContainers)
+            .HasForeignKey(x => x.BookingId)
+            .OnDelete(DeleteBehavior.Cascade);
+    }
+}
