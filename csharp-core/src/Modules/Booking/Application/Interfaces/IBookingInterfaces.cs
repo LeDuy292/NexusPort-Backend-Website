@@ -16,7 +16,12 @@ public interface IBookingRepository
 
 public interface IBookingService
 {
-    Task<IReadOnlyList<BookingCargoSource>> GetBookingSourcesAsync(Guid carrierId, string? search, CancellationToken token, string bookingType = "Dropoff");
+    Task<IReadOnlyList<BookingCargoSource>> GetBatchContainerOptionsAsync(Guid carrierId, string bookingType, BookingPlanningLeg? anchor, CancellationToken token);
+    Task<BookingBatchPlan> PlanBatchAsync(BookingBatchRequest request,CancellationToken token);
+    Task<BookingBatchDto> CreateBatchAsync(BookingBatchRequest request,CancellationToken token);
+    Task<IReadOnlyList<BookingBatchDto>> GetBatchesAsync(Guid? carrierId,int page,CancellationToken token);
+    Task<BookingBatchDto> GetBatchAsync(Guid id,Guid? carrierId,CancellationToken token);
+    Task<IReadOnlyList<BookingCargoSource>> GetBookingSourcesAsync(Guid carrierId, string? search, CancellationToken token, string bookingType = "Dropoff",int limit=30);
     Task<BookingPlan> PlanBookingAsync(Guid carrierId, BookingPlanningRequest request, CancellationToken token);
     Task<IReadOnlyList<BookingDto>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<PagedResult<BookingDto>> GetPagedAsync(BookingFilterParams filter, CancellationToken cancellationToken = default);

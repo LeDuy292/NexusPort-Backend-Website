@@ -125,7 +125,9 @@ internal static class PostgresPlanningChecks
         Check((await service.PlanBookingAsync(carrier,request,default)).Fleet.Trucks.Count==1,"changed registration does not block fleet selection");
         await Write("UPDATE trucks SET registration_image_url=@p0; UPDATE drivers SET status='transporting'",document);
         Check((await service.PlanBookingAsync(carrier,request,default)).Fleet.Drivers.Count==0,"busy driver status excluded without a booking row");
-        await Write("UPDATE drivers SET status='active',license_expiry_date=@p0",start.AddDays(-1));
+        // Leave a whole calendar day between expiry and appointment even when legacy
+        // Npgsql materializes timestamptz at UTC+7 near midnight.
+        await Write("UPDATE drivers SET status='active',license_expiry_date=@p0",start.Date.AddDays(-2));
         Check((await service.PlanBookingAsync(carrier,request,default)).Fleet.Drivers.Count==0,"expired license excluded by database-backed planner");
         var visit=Guid.NewGuid(); var inbound=Guid.NewGuid();
         await Write("INSERT INTO container_visits(id,container_id,declaration_id,pickup_code,visit_status) VALUES(@p0,@p1,@p2,'TC-AAAA-BBBB-CCCC','active'); INSERT INTO bookings(id,carrier_id,driver_id,truck_id,vehicle_id,vehicle_plate,booking_type,status,trip_status,appointment_start,appointment_end) VALUES(@p3,@p4,NULL,NULL,NULL,NULL,'dropoff','completed','Completed',@p5,@p6); INSERT INTO booking_containers VALUES(@p3,@p1,@p2,@p0)",visit,container,declaration,inbound,carrier,start.AddDays(-2),start.AddDays(-1));

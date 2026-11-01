@@ -129,5 +129,6 @@ internal static class CombinedJourneyChecks
             Check(await Scalar<int>("SELECT count(*)::int AS \"Value\" FROM reefer_power_requests WHERE booking_id={0}",coldBooking.Id)==(power?1:0),"Power request created only when explicitly requested.");
         }
         Console.WriteLine($"PASS {checks} combined Booking persistence and yard lifecycle checks on isolated PostgreSQL.");
+        await BookingBatchChecks.RunAsync(context,service,carrier,type,start.AddDays(7));
     }
 }
