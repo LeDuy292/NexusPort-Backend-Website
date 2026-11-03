@@ -15,6 +15,7 @@ const VALID_ROLES = [
   'Gate Officer',
   'Yard Operator',
   'Berth Staff',
+  'Shipping Line',
 ];
 
 class User extends Model {
