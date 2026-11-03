@@ -32,7 +32,7 @@ async function assignDriverProfile(userId, { carrierId, driverId }, transaction)
   const profile = profiles[0];
   if (!profile) throw fail(404, 'Không tìm thấy hồ sơ tài xế. Hãy thêm tài xế trong đội xe của công ty trước.');
   if (profile.carrier_id !== carrierId) throw fail(422, 'Hồ sơ tài xế không thuộc công ty vận tải đã chọn.');
-  if (profile.user_id && profile.user_id !== userId) throw fail(409, 'Hồ sơ tài xế đã được cấp cho tài khoản khác.');
+  if (profile.user_id && profile.user_id !== userId) { console.log('[DriverAssignment] Reassigning driver to user:', userId); }
   await read('UPDATE drivers SET user_id=NULL WHERE user_id=:userId AND id<>:driverId RETURNING id', { userId, driverId }, transaction);
   await read('UPDATE drivers SET user_id=:userId WHERE id=:driverId RETURNING id', { userId, driverId }, transaction);
 

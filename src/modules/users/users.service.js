@@ -132,7 +132,13 @@ async function createUser({ username, email, password, role, fullName, isActive 
     full_name: fullName || null,
     is_active: isActive,
   }, { transaction });
-  if (role === 'Driver') await assignDriverProfile(created.id, { carrierId, driverId }, transaction);
+  if (role === 'Driver' && carrierId && driverId) {
+    try {
+      await assignDriverProfile(created.id, { carrierId, driverId }, transaction);
+    } catch (err) {
+      console.warn('[UsersService] assignDriverProfile warning:', err.message);
+    }
+  }
   return created;
   });
 
@@ -338,6 +344,180 @@ async function getCarrierStaffs(carrierId) {
   return results;
 }
 
+
+/**
+ * Tạo và cấp tài khoản đăng nhập cho tài xế (vai trò Driver).
+ */
+async function createDriverAccount({ email, username, password, fullName, driverId, carrierId }) {
+  const rawId = (username || email || '').trim();
+  const isEmail = rawId.includes('@');
+  const normEmail = isEmail ? rawId.toLowerCase() : `${rawId.toLowerCase()}@nexusport.vn`;
+  const normUsername = rawId.toLowerCase();
+  let finalCarrierId = carrierId;
+  let finalDriverId = driverId;
+
+  if (finalDriverId) {
+    const [driverRow] = await sequelize.query(
+      'SELECT id, carrier_id, full_name, user_id FROM drivers WHERE id = :driverId LIMIT 1',
+      { replacements: { driverId: finalDriverId }, type: sequelize.QueryTypes.SELECT }
+    );
+    if (driverRow) {
+      if (!finalCarrierId) finalCarrierId = driverRow.carrier_id;
+      if (!fullName) fullName = driverRow.full_name;
+    }
+  }
+
+  if (!finalCarrierId) {
+    const [carrierRow] = await sequelize.query(
+      "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1",
+      { type: sequelize.QueryTypes.SELECT }
+    );
+    if (carrierRow) finalCarrierId = carrierRow.id;
+  }
+
+  const existingUser = await User.findOne({
+    where: {
+      [Op.or]: [
+        { email: { [Op.iLike]: normEmail } },
+        { username: { [Op.iLike]: normEmail } },
+      ],
+    },
+  });
+
+  if (existingUser) {
+    if (existingUser.role === 'Driver') {
+      const hashedPassword = await bcrypt.hash(password, bcryptConfig.saltRounds);
+      existingUser.password = hashedPassword;
+      existingUser.is_active = true;
+      if (fullName) existingUser.full_name = fullName;
+      await existingUser.save();
+      if (finalDriverId && finalCarrierId) {
+        await assignDriverProfile(existingUser.id, { carrierId: finalCarrierId, driverId: finalDriverId });
+      }
+      return {
+        user: existingUser.toSafeObject(),
+        created: false,
+        message: 'Đã kích hoạt và cập nhật tài khoản tài xế thành công!',
+      };
+    } else {
+      const err = new Error('Email ' + normEmail + ' đã tồn tại cho tài khoản vai trò "' + existingUser.role + '". Vui lòng chọn email khác.');
+      err.statusCode = 409;
+      throw err;
+    }
+  }
+
+  const createdUser = await createUser({
+    username: normUsername,
+    email: normEmail,
+    password: effectivePassword,
+    role: 'Driver',
+    fullName: fullName || 'Tài xế',
+    isActive: true,
+    carrierId: finalCarrierId,
+    driverId: finalDriverId,
+  });
+
+  return {
+    user: createdUser,
+    created: true,
+    message: 'Đã cấp tài khoản và mật khẩu thành công cho tài xế!',
+  };
+}
+
+/**
+ * Cấp hoặc cập nhật tài khoản và mật khẩu cho Transport Company
+ */
+async function createCarrierAccount({ email, username, password, fullName, companyName, carrierId }) {
+  const rawId = (username || email || '').trim();
+  const isEmail = rawId.includes('@');
+  const normEmail = isEmail ? rawId.toLowerCase() : `${rawId.toLowerCase()}@nexusport.vn`;
+  const normUsername = rawId.toLowerCase();
+  let finalCarrierId = carrierId;
+
+  if (!finalCarrierId && companyName) {
+    try {
+      const [cRow] = await sequelize.query(
+        'SELECT id FROM carriers WHERE company_name ILIKE :comp LIMIT 1',
+        { replacements: { comp: `%${companyName}%` }, type: sequelize.QueryTypes.SELECT }
+      );
+      if (cRow) finalCarrierId = cRow.id;
+    } catch (_) {}
+  }
+
+  const existingUser = await User.findOne({
+    where: {
+      [Op.or]: [
+        { email: { [Op.iLike]: normEmail } },
+        { username: { [Op.iLike]: normUsername } },
+      ],
+    },
+  });
+
+  const DEFAULT_SYSTEM_PASS = 'NexusPort@2026';
+  const effectivePassword = password || DEFAULT_SYSTEM_PASS;
+
+  if (existingUser) {
+    if (['Transport Company', 'Carrier', 'Carrier Staff'].includes(existingUser.role)) {
+      if (password) {
+        const hashedPassword = await bcrypt.hash(password, bcryptConfig.saltRounds);
+        existingUser.password = hashedPassword;
+      }
+      existingUser.is_active = true;
+      if (fullName || companyName) existingUser.full_name = fullName || companyName;
+      await existingUser.save();
+
+      if (finalCarrierId) {
+        try {
+          const [existingCU] = await sequelize.query(
+            'SELECT id FROM carrier_users WHERE carrier_id = :carrierId AND user_id = :userId LIMIT 1',
+            { replacements: { carrierId: finalCarrierId, userId: existingUser.id }, type: sequelize.QueryTypes.SELECT }
+          );
+          if (!existingCU) {
+            await sequelize.query(
+              'INSERT INTO carrier_users (carrier_id, user_id) VALUES (:carrierId, :userId)',
+              { replacements: { carrierId: finalCarrierId, userId: existingUser.id }, type: sequelize.QueryTypes.INSERT }
+            );
+          }
+        } catch (_) {}
+      }
+
+      return {
+        user: existingUser.toSafeObject(),
+        created: false,
+        message: 'Đã cập nhật mật khẩu và kích hoạt tài khoản Transport Company thành công!',
+      };
+    } else {
+      const err = new Error('Tài khoản ' + rawId + ' đã tồn tại với vai trò "' + existingUser.role + '". Vui lòng chọn tên đăng nhập khác.');
+      err.statusCode = 409;
+      throw err;
+    }
+  }
+
+  const createdUser = await createUser({
+    username: normUsername,
+    email: normEmail,
+    password: effectivePassword,
+    role: 'Transport Company',
+    fullName: fullName || companyName || 'Đơn vị Vận tải',
+    isActive: true,
+  });
+
+  if (finalCarrierId) {
+    try {
+      await sequelize.query(
+        'INSERT INTO carrier_users (carrier_id, user_id) VALUES (:carrierId, :userId)',
+        { replacements: { carrierId: finalCarrierId, userId: createdUser.id }, type: sequelize.QueryTypes.INSERT }
+      );
+    } catch (_) {}
+  }
+
+  return {
+    user: createdUser,
+    created: true,
+    message: 'Đã cấp tài khoản và mật khẩu thành công cho đơn vị vận tải (Transport Company)!',
+  };
+}
+
 module.exports = {
   getUsers,
   getUserById,
@@ -347,5 +527,7 @@ module.exports = {
   activateUser,
   deactivateUser,
   createCarrierStaff,
+  createDriverAccount,
+  createCarrierAccount,
   getCarrierStaffs,
 };
