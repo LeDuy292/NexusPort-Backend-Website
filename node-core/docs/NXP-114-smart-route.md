@@ -23,7 +23,7 @@ npm --prefix node-core test -- --runInBand
 - Đích Operation `ToLocation` được đối chiếu Slot hoặc area trên map. Một Slot không tồn tại không được biến thành một area giả.
 - Driver xem đường, báo đã đến điểm giao nhận. Progress gắn transaction Gate In + container + destination key. Đổi điểm đến sẽ bỏ trạng thái đã đến cũ và tính đường từ vị trí cuối Driver đã báo.
 - Sau yard event `Completed` của operation đúng Driver/container, xảy ra sau Gate In, Driver mới được xác nhận container (`OK`, `DAMAGED`, `ISSUE`). Node ghi cùng `container_confirmation_audits` với luồng hiện có, không tạo một hệ trạng thái riêng. Booking chỉ completed khi mọi container đã xác nhận.
-- Sau khi booking hoàn tất, route chuyển tới GATE-03. Driver chỉ thấy chờ xác nhận cổng. Gate Officer xác nhận Node `POST /api/v1/gate/complete-out`; giao dịch thực tế đổi journey thành `exited`, trigger DB đóng đúng Pickup visit/phát hành EIR. Xe Dropoff rỗng ra cổng giữ nguyên lượt lưu bãi của container.
+- Sau khi booking hoàn tất, route chuyển tới `exitGateCode` được phân công (GATE-02 với cấu hình hiện tại; giữ mã đã ghi cho lượt legacy). Driver chỉ thấy chờ xác nhận cổng. Gate Officer xác nhận Node `POST /api/v1/gate/complete-out`; giao dịch thực tế đổi journey thành `exited`, trigger DB đóng đúng Pickup visit/phát hành EIR. Xe Dropoff rỗng ra cổng giữ nguyên lượt lưu bãi của container.
 - Dispatcher xem mọi xe đang trong bãi và xe đã ra trong 24 giờ, gồm booking, biển số, Driver, operation, điểm đến, thời điểm các bước và lý do không có tuyến.
 
 ## API Node Core (port 4000)
@@ -49,6 +49,12 @@ Thiếu Gate In hoặc ngoài phạm vi Driver: 404. Token/role sai: 401/403. Pa
 API điều hướng đặt `Cache-Control: no-store`.
 
 ## Bản đồ và điều kiện đường
+
+Thiết kế Tiên Sa mới dùng graph sinh từ cùng hình học với web/app, tuyến cơ bản
+theo làn, khoảng cách/ETA để null. Migration 030 và publisher đã chuyển tồn kho/
+điểm đến booking sang 32 block theo yêu cầu: container thường ở C, reefer ở D.
+Xem [trạng thái thiết kế và audit DB](../../docs/yard-layout-map.md). Các quy tắc
+provider và migration bên dưới tiếp tục áp dụng cho các điểm đến legacy.
 
 Migration 017 tạo map sơ đồ theo reference: Gate01/02 ở bắc, đường vòng một chiều, điểm giao nhận A-S1/A-S2 phía đông, Gate03 phía nam. Block/Slot/occupancy lấy từ Yard Location thật. Đây là sơ đồ nội bộ; tọa độ không phải GPS và thời gian/khoảng cách là ước tính theo cấu hình. Slot map biểu diễn điểm tiếp cận giao nhận, không dẫn xe chạy xuyên qua chồng container.
 
