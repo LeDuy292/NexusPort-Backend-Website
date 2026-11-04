@@ -276,6 +276,62 @@ async function getCarrierStaffs(req, res, next) {
   }
 }
 
+
+/**
+ * POST /api/users/driver-account
+ * Tạo tài khoản và cấp mật khẩu cho tài xế.
+ */
+async function createDriverAccount(req, res, next) {
+  try {
+    if (!checkValidation(req, res)) return;
+    const { email, password, fullName, driverId, carrierId } = req.body;
+    const userCarrierId = req.user?.CarrierId;
+
+    const result = await usersService.createDriverAccount({
+      email,
+      password,
+      fullName,
+      driverId,
+      carrierId: carrierId || userCarrierId,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error) { 
+    handleServiceError(error, res, next);
+  }
+}
+
+/**
+ * POST /api/users/carrier-account
+ */
+async function createCarrierAccount(req, res, next) {
+  try {
+    if (!checkValidation(req, res)) return;
+    const { email, username, password, fullName, companyName, carrierId } = req.body;
+
+    const result = await usersService.createCarrierAccount({
+      email,
+      username,
+      password,
+      fullName,
+      companyName,
+      carrierId,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: result.message,
+      data: result,
+    });
+  } catch (error) {
+    handleServiceError(error, res, next);
+  }
+}
+
 module.exports = {
   listUsers,
   getUserById,
@@ -285,5 +341,7 @@ module.exports = {
   activateUser,
   deactivateUser,
   createCarrierStaff,
+  createDriverAccount,
+  createCarrierAccount,
   getCarrierStaffs,
 };

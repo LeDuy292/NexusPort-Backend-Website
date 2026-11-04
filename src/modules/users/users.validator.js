@@ -136,10 +136,54 @@ const createCarrierStaffValidator = [
     .isLength({ max: 255 }).withMessage('Họ và tên không quá 255 ký tự.'),
 ];
 
+/**
+ * Validate body cho POST /api/users/driver-account
+ */
+const createDriverAccountValidator = [
+  ...driverAssignmentValidator,
+  body('email')
+    .trim()
+    .notEmpty().withMessage('Tên đăng nhập hoặc Email không được để trống.')
+    .isLength({ min: 3 }).withMessage('Tên đăng nhập hoặc Email phải có ít nhất 3 ký tự.'),
+
+  body('password')
+    .optional({ nullable: true })
+    .isLength({ min: 6 }).withMessage('Mật khẩu phải có ít nhất 6 ký tự.'),
+
+  body('fullName')
+    .optional({ nullable: true })
+    .trim()
+    .isLength({ max: 255 }).withMessage('Họ và tên không quá 255 ký tự.'),
+];
+
+/**
+ * Validate body cho POST /api/users/carrier-account
+ */
+const createCarrierAccountValidator = [
+  body('email')
+    .trim()
+    .notEmpty().withMessage('Tên đăng nhập hoặc Email không được để trống.')
+    .isLength({ min: 3 }).withMessage('Tên đăng nhập hoặc Email phải có ít nhất 3 ký tự.'),
+
+  body('password')
+    .optional({ nullable: true })
+    .isLength({ min: 6 }).withMessage('Mật khẩu phải có ít nhất 6 ký tự.'),
+
+  body('companyName')
+    .optional({ nullable: true })
+    .trim(),
+
+  body('carrierId')
+    .optional({ nullable: true })
+    .trim(),
+];
+
 module.exports = {
   queryValidator,
   createUserValidator,
   updateUserValidator,
   assignRoleValidator,
   createCarrierStaffValidator,
+  createDriverAccountValidator,
+  createCarrierAccountValidator,
 };

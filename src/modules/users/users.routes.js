@@ -13,6 +13,8 @@ const {
   activateUser,
   deactivateUser,
   createCarrierStaff,
+  createDriverAccount,
+  createCarrierAccount,
   getCarrierStaffs,
 } = require('./users.controller');
 const {
@@ -21,6 +23,8 @@ const {
   updateUserValidator,
   assignRoleValidator,
   createCarrierStaffValidator,
+  createDriverAccountValidator,
+  createCarrierAccountValidator,
 } = require('./users.validator');
 
 const router = Router();
@@ -64,6 +68,14 @@ const carrierGuard = [authenticate, authorize(['Transport Company', 'Carrier'])]
  *       403:
  *         description: Không đủ quyền
  */
+
+// Cấp quyền tạo tài khoản tài xế
+const driverAccountGuard = [authenticate, authorize(['Administrator', 'admin', 'Transport Company', 'Carrier', 'Dispatcher', 'dispatcher', 'Carrier Staff'])];
+router.post('/driver-account', driverAccountGuard, createDriverAccountValidator, createDriverAccount);
+
+// Cấp quyền tạo/cập nhật tài khoản Đơn vị vận tải (Transport Company)
+const carrierAccountGuard = [authenticate, authorize(['Administrator', 'admin', 'Transport Company', 'Carrier'])];
+router.post('/carrier-account', carrierAccountGuard, createCarrierAccountValidator, createCarrierAccount);
 router.post('/carrier-staff', carrierGuard, createCarrierStaffValidator, createCarrierStaff);
 
 /**
