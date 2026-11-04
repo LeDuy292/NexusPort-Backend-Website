@@ -1,98 +1,97 @@
-# Container yard map
+# Yard map: shared Tiên Sa design and existing inventory
 
-The website routes `/yard`, `/yard/map` and `/yard-staff/map` open the same yard
-map. `/yard-ops` retains the movement workflow. Dispatch (`/dispatch`) and the
-React Native driver journey use the shared drawing through their route snapshots.
-Yard layout, directory, creation and maintenance are JavaScript Express endpoints.
-Booking orchestration and its slot-reservation transaction remain in C#.
+The web routes `/yard`, `/yard/map`, and `/yard-staff/map` use the Tiên Sa design.
+Dispatcher monitoring and the driver web/app views use the same geometry.
+The DEV-only `/preview/yard` page does not create inventory or operational records.
 
-`node-core/src/shared/yard/reference-layout.json` records the reference drawing:
-66 areas (A1–A21, B1–B17, C1–C12, S1–S5, D1–D11), 376 numbered ground
-positions, Vietnamese labels and notes, GATE-01 entry and GATE-02 exit. Original irregular row
-numbers, reversed C/S order and the four red source highlights are preserved.
-Red source highlights do not set maintenance, restriction or occupancy.
-The frontend has an identical bundled copy so the drawing remains available when
-the inventory service is offline. Keep both copies identical when editing it.
+## Source and generated files
 
-## Inventory and route coordinates
+The source is in the sibling frontend checkout:
 
-`GET /api/yard/layout` returns the drawing, current slots, physical container
-positions and the count outside the drawing. It is staff-only, authenticated,
-uncached and read-only. Ground positions match the exact `(block, bay, row)`;
-tiers come from the database. Missing positions remain unconfigured. Existing
-extra rows and block R remain accessible in the inventory panel.
+- `src/features/yard-design/tienSaLayout.json`: investment-plan reference and block planning.
+- `src/features/yard-design/geometry.js`: shared presentation geometry and access policies.
+- `scripts/export-tien-sa-plan.mjs`: generates the backend graph, native SVG, and web version manifest.
 
-`GET /api/yard/blocks` supplies the same directory to Booking's yard selector.
-`POST /api/yard/blocks` creates a block and its slots in a single transaction.
-`POST /api/yard/slots/:id/maintenance` sets an explicit maintenance state and
-rejects reserved/occupied slots and current physical placements. Both writes
-require Yard Operator or Administrator.
+Run the exporter from the frontend checkout after changing the design. Ship all
+three repositories with matching versions. The backend consumes
+`node-core/src/shared/yard/tien-sa-plan.json` through `tien-sa-map.ts`. Clients only
+draw an assigned route when its `terminalPlan.version` matches their local design.
 
-The drawing is proposed until the active road graph declares the matching
-`layout.drawingVersion`. Website and mobile clients overlay an assigned route
-only when the drawing version matches. The old route-map view and view-switching
-controls have been removed from both clients; only the new yard drawing is shown.
-Coordinates from different versions are never mixed.
+The design has 32 blocks in seven sectors; D01/D02 are the proposed reefer area.
+This is an application design choice, not a confirmed official Tiên Sa reefer location.
+Bay module counts for A–D follow the
+user's counts; E–G and six rows/four tiers remain design assumptions. It creates
+no database blocks, slots, reservations, or container placements. Coordinates are
+schematic drawing units. Relative lengths select a basic corridor; distance and
+ETA are null rather than presented as measured metres or seconds.
 
-## DB configuration update
+B/C use through aisles and continue to the rear cross road. A/E/F return to the
+same access road; E/F have no mountain-side rear connector. Turning follows yard
+staff instructions, with no certified turning radius implied by the drawing.
+The outer A01/A04 aisles and B04/E01 connection belong to the shared geometry.
 
-Migration `20261025_022_exit_gate_02.sql` renames the existing exit GATE-03 to
-GATE-02 while preserving its UUID. The retired, inactive former entrance GATE-02
-is retained as GATE-02-LEGACY, preserving its UUID and historical transactions.
-The migration clones the old active map with the new gate code and retains its
-opaque node IDs and all conditions. It aborts if the old GATE-02 is active or the
-legacy code is already occupied. No slot/container inventory is added or moved.
+Existing booking, yard completion, driver confirmation, and physical gate passage
+remain the journey state machine. New-plan destinations use the shared graph;
+legacy destinations retain the configured map provider. Expired maps, invalid
+coordinates, maintenance, and restrictions that cannot be translated between map
+versions do not receive fabricated directions.
 
-The prepared publisher applies this migration when missing, then creates the
-`smart_yard_maps` revision,
-`NXP-yard-excel-v3`, and deactivates the previous revision atomically. It preserves
-all slots, capacity, container positions, bookings, gate transactions and old map
-revisions. Approaches stay in aisles beside stacks. Existing A-S1/A-S2 handover
-locations and known slot node identifiers remain valid. Block R has no location
-in the reference and remains explicitly unmapped for navigation.
+## Database publication — 2026-11-04
 
-Build Node Core, then review a read-only candidate:
+The user requested migration of both the existing inventory and open bookings,
+then selected D for reefers and C for ordinary containers. Publication applied
+additive schema migration `20261104_030` and the matching Tiên Sa map revision:
 
-```powershell
-node node-core/node_modules/typescript/bin/tsc -p node-core
-node --env-file=node-core/.env database/scripts/prepare-excel-yard-map.cjs --out=yard-map-candidate.json
-```
+- 32 active blocks and 8,786 configured, non-overlapping physical storage envelopes.
+- Five current placements: three ordinary containers in C and two reefers in D.
+- Twelve container links from eleven open bookings receive destinations in C/D. A shared exact visit uses one envelope; a future visit of the same container gets its own envelope.
+- Twelve existing plugs now point to D. All five running power sessions retain their identities, status, plug linkage and history. No power session is started/stopped by this migration.
+- Pending inbound cargo is reserved, not marked as physically in the yard. Five current placements remain five; gate events and booking approval/completion timestamps are untouched.
+- The legacy A/R blocks and 252 slot IDs remain inactive for EIR/history references. Four previous map revisions are retained. Unlinked unfinished sample tasks are soft-archived.
+- Reefer migration `20261012_005_reefer_power_management.sql` was already applied under legacy version `005`; it was not missing.
 
-Publish only after the user has approved the configured DB update, using the
-exact current version returned by the dry run:
+Ordinary empty envelopes generally hold 40ft, with 20ft envelopes at remaining
+module positions. Assigned 20ft cargo has explicit one-module envelopes; the one
+45ft container has four modules reserved around its even-bay anchor as conservative
+end clearance. This reserves space, not a claim that a 45ft container is 80ft long.
+The database trigger rejects overlapping/out-of-bounds configured footprints.
+Changing a 40ft envelope to two 20ft envelopes is a future explicit layout operation.
 
-```powershell
-node --env-file=node-core/.env database/scripts/prepare-excel-yard-map.cjs --apply --expected-version=NXP114-single-entry-exit-v2
-```
+`database/scripts/prepare-tien-sa-map.cjs` performs a read-only dry run by default.
+`--apply --expected=<fingerprint>` checks an exact reviewed snapshot, acquires locks
+without waiting on a partial lock set, writes a local backup under sibling
+`db-backups/`, and commits schema/data/map changes together. Monitoring heartbeat
+timestamps are excluded from the fingerprint; session identity/state/plug/readings
+are still checked and never overwritten. Re-running an already-published revision
+is a no-op. This is a one-time bootstrap, not a background allocator for future
+bookings. Do not delete historical revisions or applied migrations.
 
-The gate migration and new drawing are published in the same transaction.
-Until approval, backend gate and booking checks support the active old exit code
-as well as the new code, without changing data. New clients display GATE-02.
+Verify using `database/verify/20261104_verify_tien_sa_layout.sql`. The pre-publication
+backup is `db-backups/tien-sa-2026-11-04T14-30-24-998Z.json` in the workspace parent.
 
-The publisher checks for concurrent map changes, unmapped recorded driver
-positions, and road restrictions that cannot be carried forward. It rolls back
-instead of discarding them. A second run against an already-active version is a
-no-op. The previous revision is retained for a reviewed rollback. Gate migration
-20261025_022 is recorded in `nexusport_schema_versions`; the map revision remains
-separately versioned in `smart_yard_maps`.
+## Legacy compatibility still in use
 
-Applied to the configured shared cloud database on 2026-10-25 with user approval:
-gate migration `20261025_022` and active map `NXP-yard-excel-v3`. Verification
-confirmed the exit gate UUID and all 252 slot UUIDs were preserved. Counts
-remained 5 current container positions, 17 bookings and 4 gate transactions.
-Other environments use the review/apply commands above; do not reapply on this DB.
+Express `GET /api/yard/layout` and `GET /api/yard/blocks` still read existing slots
+and physical placements for inventory/booking, filtering the active block directory.
+The layout response adds the current `terminalPlan.version`, module footprints and
+reserved-container labels. The web's protected map reads this live snapshot;
+the unauthenticated DEV preview stays design-only. The legacy
+`node-core/src/shared/yard/reference-layout.json` response remains compatible for
+historical consumers; it is not used to draw the current Tiên Sa UI.
 
-The reviewed dry run on 2026-10-25 found 252 existing slots, no unmapped recorded
-driver positions and no active restrictions. All 252 slots are preserved. Twelve
-slots in block R have no road mapping. The inventory panel additionally lists
-40 positions from A's sixth row outside the source's five-row drawing.
-Coordinates, distances and travel times remain schematic and are not surveyed.
+`ConfiguredYardMapProvider` reads configured maps and live restrictions for legacy
+destinations. `build-yard-map.ts`, its tests, and
+`database/scripts/prepare-excel-yard-map.cjs` support the historical Excel-map
+deployment/rollback workflow. They are not the Tiên Sa exporter and must not be
+used to publish the new design. Migration `20261025_022_exit_gate_02.sql` preserves
+gate UUID/history while renaming the exit to GATE-02; legacy journeys retain their
+recorded gate codes.
 
-## Validation
+## Verification
 
-Tests cover original numbering, missing versus empty inventory, maintenance
-conflicts, atomic block creation, directed routes to handovers and exit, and
-segments staying outside every storage rectangle. Website browser checks exercise
-the actual `/yard` and `/dispatch` routes, narrow-screen containment, source
-selection, stale inventory and unavailable-inventory behavior. DB validation is
-read-only except for the explicitly approved map/gate publication above.
+Frontend geometry/position tests check block clearance, access roads, and bay/row/
+tier limits. Node tests cover shared routes, legacy-provider compatibility,
+restrictions, assignments, arrival, confirmation, and exit. App tests cover its
+journey snapshot and API contract; TypeScript and web/backend builds must pass.
+Fixture-based HTTP tests must use the documented isolated database, never the
+configured shared DB.

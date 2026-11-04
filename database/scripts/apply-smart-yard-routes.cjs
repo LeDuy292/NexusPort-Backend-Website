@@ -12,7 +12,8 @@ async function main() {
     const versions = new Set((await client.query('SELECT version FROM nexusport_schema_versions')).rows.map(row => row.version));
     const folder = path.join(__dirname, '../migrations');
     const target = '20261017_017_smart_yard_routes.sql';
-    const pending = fs.readdirSync(folder).filter(file => file.endsWith('.sql') && file<=target && !versions.has(file.slice(0,12))).sort();
+    const pending = fs.readdirSync(folder).filter(file => file.endsWith('.sql') && file<=target && !versions.has(file.slice(0,12))
+      && !(file==='20261012_005_reefer_power_management.sql' && versions.has('005'))).sort();
     for (const file of pending) {
       if (!process.argv.includes('--apply')) { console.log('Missing: '+file); continue; }
       await client.query(fs.readFileSync(path.join(folder,file),'utf8'));
