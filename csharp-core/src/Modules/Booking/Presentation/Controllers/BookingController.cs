@@ -92,6 +92,9 @@ public class BookingController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<ActionResult<BookingDto>> Create([FromBody] CreateBookingDto dto, CancellationToken cancellationToken)
     {
+        if(IsCarrierRole() && (dto.BookingType==Domain.Enums.BookingType.Dropoff || dto.Operations.Any(o=>o.OperationType=="Export")) &&
+            (!dto.ExportBookingId.HasValue || !dto.ExportContainerId.HasValue))
+            throw new NexusPort.Shared.Exceptions.ValidationException("ExportBookingId","Chọn Booking hãng tàu đã duyệt và container đã được cảng tiếp nhận trước khi đặt lịch Giao.");
         // Auto-assign CarrierId if logged in as Carrier and not explicitly passed
         if (IsCarrierRole())
         {

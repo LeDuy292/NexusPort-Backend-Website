@@ -1,5 +1,11 @@
 # NexusPort container and yard journey contract
 
+Customer unified export submissions use additive migration
+`20261105_032_unified_booking_submission.sql`: cargo, original document references
+and proposed fleet appointments are saved on the export booking before line review.
+Only shipping-line approval creates Pending port appointments and planned visits.
+The migration adds one nullable JSON column; no existing business rows are backfilled.
+
 This application manages one storage yard inside a port.
 
 - `containers` is the shared physical identity (unique number, equipment type) and
@@ -186,3 +192,15 @@ unchanged local DateTimes through timestamp parameters and can shift appointment
 by seven hours. Approval must preserve appointment_start/end and valid_from/to.
 The isolated HTTP regression places a valid Pickup seven hours after Dropoff and
 asserts approval succeeds without changing any stored schedule instant.
+
+## Export bookings and shipping-line handoff
+
+Migration `20261104_031_export_booking_workflow.sql` adds export reservations,
+voyages/cutoffs, per-container VGM, SI/draft snapshots, gate links, outbox/inbox
+receipts and manifests. It is additive and contains no accounts, schedules,
+sample bookings or historical data backfill. Existing unlinked journeys retain
+their behavior; newly created company export journeys require an accepted
+shipping booking/container link. Observed seals are captured at the gate and
+never auto-filled from declarations. See
+[`docs/booking-export-workflow.md`](../docs/booking-export-workflow.md) for scope,
+permissions, stages and deployment prerequisites.

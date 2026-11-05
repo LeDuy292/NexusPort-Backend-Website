@@ -132,6 +132,8 @@ public class BookingValidationService : IBookingValidationService
                     .Select(d => d.DocumentType)
                     .Concat((dto.Documents ?? new List<CreateBookingDocumentDto>()).Select(d => d.DocumentType))
                     .ToList();
+                if(dto.ExportLinkValidated && op.OperationType=="Export")
+                    uploadedDocTypes.AddRange(new[]{"CarrierBookingReference","VgmCertificate"});
 
                 var docValidation = _documentRequirementPolicy.ValidateUploadedDocuments(
                     op.OperationType,

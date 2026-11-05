@@ -48,6 +48,8 @@ public sealed class BookingBatchController:ControllerBase
     [EnableRateLimiting("booking-create")]
     public async Task<IActionResult> Create([FromBody]BookingBatchRequest request,CancellationToken token)
     {
+        if(IsCarrier&&request.BookingType==Domain.Enums.BookingType.Dropoff&&request.Trips.Any(trip=>!trip.ExportBookingId.HasValue||!trip.ExportContainerId.HasValue))
+            throw new ValidationException("ExportBookingId","Mỗi container Giao trong lô cần liên kết Booking hãng tàu đã được tiếp nhận.");
         request.CarrierId=await Scope(token)??request.CarrierId;
         request.CreatedBy=_user.UserId;
         var result=await _service.CreateBatchAsync(request,token);
