@@ -125,6 +125,31 @@ router.post('/login', loginValidator, loginController);
  *         description: Dữ liệu không hợp lệ hoặc sai vai trò
  */
 router.post('/google', googleLoginValidator, googleLoginController);
+/**
+ * @swagger
+ * /api/auth/logout:
+ *   post:
+ *     summary: Đăng xuất khỏi hệ thống
+ *     tags: [Auth]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Đăng xuất thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Đăng xuất thành công.
+ *       401:
+ *         description: Chưa xác thực hoặc token không hợp lệ
+ */
 router.post('/logout', logoutController);
 router.post('/forgot-password', forgotPasswordValidator, forgotPasswordController);
 router.post('/reset-password', resetPasswordValidator, resetPasswordController);
