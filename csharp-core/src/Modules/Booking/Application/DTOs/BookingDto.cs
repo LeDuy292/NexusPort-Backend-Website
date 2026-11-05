@@ -186,6 +186,10 @@ public class BookingContainerSelectionDto
 
 public class CreateBookingDto
 {
+    public Guid? ExportBookingId { get; set; }
+    public Guid? ExportContainerId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ExportLinkValidated { get; set; }
     public string? TrailerNumber { get; set; }
     [System.Text.Json.Serialization.JsonIgnore]
     public Guid? ExcludeBookingId { get; set; }

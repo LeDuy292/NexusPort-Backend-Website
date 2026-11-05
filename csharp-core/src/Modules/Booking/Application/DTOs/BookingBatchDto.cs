@@ -18,6 +18,8 @@ public sealed class BookingBatchRequest
 
 public sealed class BookingBatchTripRequest
 {
+    public Guid? ExportBookingId { get; set; }
+    public Guid? ExportContainerId { get; set; }
     public BookingContainerSelectionDto Selection { get; set; } = new();
     public CreateBookingOperationDto Operation { get; set; } = new();
     public DateTime AppointmentStart { get; set; }
@@ -43,6 +45,8 @@ public sealed class BookingBatchPlan
 }
 public sealed class BookingBatchTripPlan
 {
+    public DateTime? AppointmentStart { get; set; }
+    public DateTime? AppointmentEnd { get; set; }
     public Guid ContainerId { get; set; }
     public bool CargoAvailable { get; set; }
     public BookingPlan Plan { get; set; } = new();

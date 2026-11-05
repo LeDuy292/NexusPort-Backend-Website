@@ -139,7 +139,8 @@ public partial class BookingService
         foreach(var leg in legs)
         {
             var legRequest=new BookingPlanningRequest {BookingId=request.BookingId,ContainerId=leg.ContainerId,DeclarationId=leg.DeclarationId,YardCode=leg.YardCode,
-                BookingType=leg.BookingType,AppointmentStart=request.AppointmentStart,AppointmentEnd=request.AppointmentEnd};
+                BookingType=leg.BookingType,AppointmentStart=request.AppointmentStart,AppointmentEnd=request.AppointmentEnd,
+                ExportBookingId=leg.BookingType=="Dropoff"?request.ExportBookingId:null,ExportContainerId=leg.BookingType=="Dropoff"?request.ExportContainerId:null};
             resolved.Add((legRequest,await ResolveBookingSourceAsync(carrierId,legRequest,token,forPlanning:true)));
         }
         var fleet = await LoadBookingFleetAsync(carrierId, request.AppointmentStart, request.AppointmentEnd,
@@ -192,6 +193,7 @@ public partial class BookingService
         var source = rows[0];
         if (source.LoadStatus != "full") throw new ValidationException("LoadStatus", "Booking xuất/nhập hiện chỉ hỗ trợ container có hàng.");
         if (string.IsNullOrWhiteSpace(source.CargoType)) throw new ValidationException("CargoType", "Bổ sung loại hàng trong bản khai.");
+        await ApplyExportPlanningAsync(carrierId,request,source,token);
         return source;
     }
 

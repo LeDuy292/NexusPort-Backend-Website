@@ -2,6 +2,8 @@ namespace NexusPort.Modules.Booking.Application.DTOs;
 
 public sealed class BookingPlanningRequest : BookingPlanningLeg
 {
+    public Guid? ExportBookingId { get; set; }
+    public Guid? ExportContainerId { get; set; }
     public Guid? BookingId { get; set; }
     public DateTime AppointmentStart { get; set; }
     public DateTime AppointmentEnd { get; set; }

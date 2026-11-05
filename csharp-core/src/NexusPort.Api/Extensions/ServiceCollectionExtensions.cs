@@ -77,6 +77,7 @@ public static class ServiceCollectionExtensions
 
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
+        services.AddScoped<ExportBookingService>();
 
         var jwtSecret = configuration["Jwt:Secret"] ?? "NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!";
         services.AddSingleton<IJwtService>(new JwtService(jwtSecret));

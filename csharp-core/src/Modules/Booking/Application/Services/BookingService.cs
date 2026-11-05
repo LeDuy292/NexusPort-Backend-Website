@@ -87,9 +87,11 @@ public partial class BookingService : IBookingService
     {
         BookingFleetPolicy.ValidateWindow(dto.AppointmentStart, dto.AppointmentEnd);
         if(partOfBatch&&_context.Database.CurrentTransaction==null)throw new InvalidOperationException("Batch journeys require an enclosing transaction.");
-        await using var bookingTransaction = partOfBatch?null:await _context.Database.BeginTransactionAsync(cancellationToken);
+        await using var bookingTransaction = _context.Database.CurrentTransaction!=null?null:await _context.Database.BeginTransactionAsync(cancellationToken);
         await LockBookingFleetAsync(dto.TruckId, dto.DriverId, cancellationToken);
+        await ValidateExportLinkAsync(dto, cancellationToken);
         await PrepareBookingCargoAsync(dto, cancellationToken);
+        await ValidateExportLinkAsync(dto, cancellationToken);
         await EnsureBookingFleetAsync(dto.CarrierId, dto.TruckId, dto.DriverId, dto.AppointmentStart,
             dto.AppointmentEnd, null, cancellationToken);
         bool hasMultiOperations = dto.Operations.Count > 0;
@@ -313,10 +315,12 @@ public partial class BookingService : IBookingService
                   {entity.TemperatureUnit},{entity.TempTolerance},{entity.RequiredPowerKw},{entity.Description},
                   {dto.SpecialColdInstructions},'PENDING_ASSIGNMENT'::reefer_request_status,NOW(),NOW())", cancellationToken);
         }
+        if(dto.ExportLinkValidated)
+            await _context.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO export_gate_links(gate_booking_id,export_booking_id,export_container_id) VALUES({entity.Id},{dto.ExportBookingId!.Value},{dto.ExportContainerId!.Value})",cancellationToken);
         if(bookingTransaction!=null)await bookingTransaction.CommitAsync(cancellationToken);
 
         // Emit real business notification to Database (NXP-044)
-        if(!partOfBatch) try
+        if(!partOfBatch && bookingTransaction!=null) try
         {
             Guid recipientUserId = Guid.Empty;
             try
@@ -380,6 +384,14 @@ public partial class BookingService : IBookingService
         if (entity.Status != BookingStatus.Pending)
         {
             throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể cập nhật.");
+        }
+
+        var exportLink=await ExistingExportLinkAsync(entity.Id,cancellationToken);
+        if(exportLink!=null)
+        {
+            var current=await ExportMetadataAsync(entity.CarrierId,exportLink.BookingId,exportLink.ExportContainerId,entity.Id,cancellationToken);
+            if(current==null)throw new ValidationException("ExportBookingId","Liên kết Booking xuất khẩu không còn hợp lệ.");
+            ExportWindow(current,dto.AppointmentStart,dto.AppointmentEnd);
         }
 
         // Re-validate updated request values

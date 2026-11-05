@@ -4,6 +4,11 @@ using NexusPort.Modules.Booking.Application.Services;
 if (args.FirstOrDefault() == "--postgres-legacy") AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 var count = 0;
 void Check(bool condition, string message) { if (!condition) throw new Exception(message); count++; }
+Check(ExportBookingService.ValidIso6346("CSQU3054383"), "export accepts the ISO 6346 reference number with its correct check digit");
+foreach (var invalidNumber in new[] { "CSQU3054384", "CSQU305438", "CSQA3054383", "csqu3054383", "CSQU30543A3" })
+    Check(!ExportBookingService.ValidIso6346(invalidNumber), "export rejects malformed or incorrect ISO number: " + invalidNumber);
+var forgedExportProof = System.Text.Json.JsonSerializer.Deserialize<CreateBookingDto>("{\"ExportLinkValidated\":true}");
+Check(forgedExportProof?.ExportLinkValidated == false, "a client cannot manufacture authoritative shipping/VGM validation");
 var vehicleDto = new NexusPort.Modules.Vehicle.Application.DTOs.CreateVehicleDto();
 var validation = new List<System.ComponentModel.DataAnnotations.ValidationResult>();
 Check(System.ComponentModel.DataAnnotations.Validator.TryValidateObject(vehicleDto,new System.ComponentModel.DataAnnotations.ValidationContext(vehicleDto),validation,true),"vehicle DTO has no payload requirement");

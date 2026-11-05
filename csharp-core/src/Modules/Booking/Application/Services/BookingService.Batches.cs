@@ -14,10 +14,10 @@ public partial class BookingService
     private static T BatchCopy<T>(T value)=>JsonSerializer.Deserialize<T>(JsonSerializer.Serialize(value,BatchJson),BatchJson)!;
     private static bool BatchOverlap(BookingBatchTripRequest a,BookingBatchTripRequest b)=>a.AppointmentStart<b.AppointmentEnd&&a.AppointmentEnd>b.AppointmentStart;
 
-    private static void ValidateBatchShape(BookingBatchRequest request,bool allowPast=false,bool planning=false)
+    private static void ValidateBatchShape(BookingBatchRequest request,bool allowPast=false,bool planning=false,bool allowSingle=false)
     {
         if(request.CarrierId==Guid.Empty)throw new ValidationException("CarrierId","Cần xác định công ty đặt lô.");
-        if(request.Trips==null||request.Trips.Count is <2 or >50)throw new ValidationException("Trips","Mỗi lô gồm từ 2 đến 50 container, mỗi container một chuyến xe.");
+        if(request.Trips==null||request.Trips.Count < (allowSingle ? 1 : 2)||request.Trips.Count>50)throw new ValidationException("Trips","Chọn tối đa 50 container; Booking theo lô cần ít nhất 2 container.");
         if(request.BookingType is not (BookingType.Dropoff or BookingType.Pickup))throw new ValidationException("BookingType","Lô phải cùng nghiệp vụ Giao hoặc Nhận.");
         if(request.Trips.Any(trip=>trip==null||trip.Selection==null||trip.Operation==null||trip.Selection.ContainerId==Guid.Empty)||
             request.Trips.Select(trip=>trip.Selection.ContainerId).Distinct().Count()!=request.Trips.Count)
@@ -78,7 +78,7 @@ public partial class BookingService
     private static void ValidateBatchDocumentCoverage(BookingBatchRequest request,IReadOnlyList<CreateBookingDto> journeys)
     {
         var expected=journeys.Select(journey=>journey.Operations.Single().ContainerNumber.Trim().ToUpperInvariant()).ToHashSet(StringComparer.Ordinal);
-        if(request.SharedDocuments.Count==0)throw new ValidationException("SharedDocuments","Lô cần bộ chứng từ dùng chung có phạm vi container cụ thể.");
+        if(request.SharedDocuments.Count==0&&!journeys.All(x=>x.ExportLinkValidated))throw new ValidationException("SharedDocuments","Lô cần bộ chứng từ dùng chung có phạm vi container cụ thể.");
         foreach(var document in request.SharedDocuments)
         {
             var numbers=document.ContainerNumbers?.Select(number=>(number??"").Trim().ToUpperInvariant()).ToList();
@@ -96,23 +96,28 @@ public partial class BookingService
     {
         var inBatch=await _context.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM booking_batch_trips WHERE booking_id={0}",bookingId).SingleAsync(token);
         if(inBatch==0)return;
+        var exportTables=await _context.Database.SqlQueryRaw<bool>("SELECT to_regclass('public.export_gate_links') IS NOT NULL AS \"Value\"").SingleAsync(token);
+        var linked=exportTables&&await _context.Database.SqlQueryRaw<int>("SELECT count(*)::int AS \"Value\" FROM export_gate_links WHERE gate_booking_id={0}",bookingId).SingleAsync(token)>0;
         var operations=await _context.Set<Domain.Entities.BookingOperation>().AsNoTracking().Include(operation=>operation.Documents)
             .Where(operation=>operation.BookingId==bookingId).ToListAsync(token);
         foreach(var operation in operations)
         {
             var required=_documentRequirementPolicy.GetRequiredDocuments(operation.OperationType,operation.CargoStatus,operation.CargoType).Where(spec=>spec.IsMandatory);
             foreach(var spec in required)
+            {
+                if(linked&&operation.OperationType=="Export"&&spec.DocumentType is "CarrierBookingReference" or "VgmCertificate")continue;
                 if(!operation.Documents.Any(document=>document.DocumentType==spec.DocumentType&&document.VerificationStatus=="Verified"
                     &&document.VerifiedBy.HasValue&&document.VerifiedAt.HasValue&&!string.IsNullOrWhiteSpace(document.FileUrl)
                     &&(!document.ExpiryDate.HasValue||document.ExpiryDate.Value.Date>=DateTime.UtcNow.Date)))
                     throw new ValidationException("Documents",$"Container {operation.ContainerNumber}: chứng từ {spec.NameVi} cần được đối chiếu và xác minh trước khi duyệt chuyến trong lô.");
+            }
         }
         if(operations.Count==0)throw new ValidationException("Documents","Chuyến trong lô chưa có hồ sơ tác nghiệp để đối chiếu.");
     }
 
-    public async Task<BookingBatchPlan> PlanBatchAsync(BookingBatchRequest request,CancellationToken token)
+    public async Task<BookingBatchPlan> PlanBatchAsync(BookingBatchRequest request,CancellationToken token,bool allowSingle=false)
     {
-        ValidateBatchShape(request,planning:true);
+        ValidateBatchShape(request,planning:true,allowSingle:allowSingle);
         var result=new BookingBatchPlan();
         var fleets=new Dictionary<(DateTime Start,DateTime End),BookingFleetOptions>();
         var trailers=new Dictionary<(DateTime Start,DateTime End),List<BookingBatchTrailerSuggestion>>();
@@ -120,7 +125,8 @@ public partial class BookingService
         {
             var trip=request.Trips[i];
             var input=new BookingPlanningRequest {ContainerId=trip.Selection.ContainerId,DeclarationId=trip.Selection.DeclarationId,
-                YardCode=trip.Selection.YardCode,BookingType=request.BookingType.ToString(),AppointmentStart=trip.AppointmentStart,AppointmentEnd=trip.AppointmentEnd};
+                YardCode=trip.Selection.YardCode,BookingType=request.BookingType.ToString(),AppointmentStart=trip.AppointmentStart,AppointmentEnd=trip.AppointmentEnd,
+                ExportBookingId=trip.ExportBookingId,ExportContainerId=trip.ExportContainerId};
             BookingCargoSource source;
             string? sourceError=null;
             try {source=await ResolveBookingSourceAsync(request.CarrierId,input,token,forPlanning:true);}
@@ -196,13 +202,13 @@ public partial class BookingService
         if(!request.AllowUnassignedTrips&&request.Trips.Any(trip=>!trip.TruckId.HasValue||!trip.DriverId.HasValue))
             throw new ValidationException("Fleet","Phân công đủ xe/tài xế hoặc cho phép lưu chuyến chờ phân công.");
         var hash=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(request,BatchJson))));
-        await using var transaction=await _context.Database.BeginTransactionAsync(token);
+        await using var transaction=_context.Database.CurrentTransaction==null?await _context.Database.BeginTransactionAsync(token):null;
         await _context.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(hashtext({0}),hashtext({1}))",new object[]{request.CarrierId.ToString(),request.RequestId.ToString()},token);
         var previous=await _context.Database.SqlQueryRaw<BatchReplay>("SELECT id AS \"Id\",request_hash AS \"Hash\" FROM booking_batches WHERE carrier_id={0} AND request_id={1}",request.CarrierId,request.RequestId).SingleOrDefaultAsync(token);
         if(previous!=null)
         {
             if(previous.Hash!=hash)throw new ValidationException("RequestId","Mã yêu cầu đã dùng cho nội dung khác. Tải lại thông tin lô trước khi gửi tiếp.");
-            await transaction.CommitAsync(token);
+            if(transaction!=null)await transaction.CommitAsync(token);
             return await GetBatchAsync(previous.Id,request.CarrierId,token);
         }
         ValidateBatchShape(request);
@@ -227,11 +233,14 @@ public partial class BookingService
             // Clear foreign operation links: every shared reference is linked to this new journey's operation.
             foreach(var document in operation.Documents)document.BookingOperationId=null;
             var dto=new CreateBookingDto{CarrierId=request.CarrierId,BookingType=request.BookingType,TruckId=trip.TruckId,DriverId=trip.DriverId,
+                ExportBookingId=trip.ExportBookingId,ExportContainerId=trip.ExportContainerId,
                 TrailerNumber=trip.TrailerNumber,AppointmentStart=trip.AppointmentStart,AppointmentEnd=trip.AppointmentEnd,
                 Description=request.Description,ContainerSelections=new(){BatchCopy(trip.Selection)},Operations=new(){operation},
                 IsReeferPowerRequired=trip.IsReeferPowerRequired,TempTolerance=trip.TempTolerance};
             // Canonical cargo and per-container conditions are checked before any journey is stored.
+            await ValidateExportLinkAsync(dto,token);
             await PrepareBookingCargoAsync(dto,token);
+            await ValidateExportLinkAsync(dto,token);
             if(cargo!=null&&cargo!=operation.CargoType)throw new ValidationException("CargoType","Các container trong lô phải cùng loại hàng.");
             cargo=operation.CargoType;journeys.Add(dto);
         }
@@ -262,11 +271,11 @@ public partial class BookingService
                 var saved=await CreateJourneyAsync(journey,true,token);
                 await _context.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO booking_batch_trips(batch_id,booking_id,sequence_number) VALUES({batchId},{saved.Id},{index+1})",token);
             }
-            await transaction.CommitAsync(token);
+            if(transaction!=null)await transaction.CommitAsync(token);
         }
         catch
         {
-            await transaction.RollbackAsync(token);_context.ChangeTracker.Clear();throw;
+            if(transaction!=null)await transaction.RollbackAsync(token);_context.ChangeTracker.Clear();throw;
         }
         return await GetBatchAsync(batchId,request.CarrierId,token);
     }
