@@ -171,8 +171,54 @@ async function logoutController(req, res) {
   });
 }
 
+/**
+ * POST /api/auth/google
+ * Đăng nhập bằng Google kèm kiểm tra Whitelist.
+ */
+async function googleLoginController(req, res, next) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(422).json({
+        success: false,
+        message: errors.array()[0].msg,
+        errors: errors.array().map((e) => ({ field: e.path, message: e.msg })),
+      });
+    }
+
+    const { credential, idToken, email, expectedRole, rememberMe } = req.body;
+
+    const { token, user } = await authService.loginWithGoogle({
+      credential,
+      idToken,
+      email,
+      expectedRole,
+      rememberMe: !!rememberMe,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Đăng nhập Google thành công.',
+      data: {
+        token,
+        user,
+      },
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        code: error.code || undefined,
+        message: error.message,
+      });
+    }
+    next(error);
+  }
+}
+
 module.exports = {
   loginController,
+  googleLoginController,
   logoutController,
   getMeController,
   forgotPasswordController,

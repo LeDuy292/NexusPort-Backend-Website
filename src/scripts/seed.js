@@ -67,6 +67,25 @@ const SEED_USERS = [
     role: 'Driver',
     full_name: 'Đặng Tài Xế',
   },
+  // --- Google Whitelist Accounts ---
+  {
+    username: 'driver_google01',
+    email: 'driver01@gmail.com',
+    role: 'Driver',
+    full_name: 'Nguyễn Văn A',
+  },
+  {
+    username: 'inspector_google01',
+    email: 'inspector01@gmail.com',
+    role: 'Gate Officer',
+    full_name: 'Trần Văn B',
+  },
+  {
+    username: 'manager_google01',
+    email: 'manager01@gmail.com',
+    role: 'Administrator',
+    full_name: 'Lê Văn C',
+  },
 ];
 
 async function seed() {
