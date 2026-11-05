@@ -66,7 +66,6 @@ async function authenticate(req, res, next) {
         message: 'Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại.',
       });
     }
-    }
 
     // Cập nhật heartbeat hoạt động thời gian thực (nếu service khả dụng)
     if (typeof recordUserHeartbeat === 'function') {
