@@ -29,6 +29,36 @@ router.post('/slots/:id/maintenance',authenticate,authorize('Yard Operator','Adm
 });
 
 /**
+ * Tra cứu lịch sử Slot và Container theo Timeline
+ */
+router.get(
+  '/slots/history',
+  authenticate,
+  authorize('Yard Operator', 'Dispatcher', 'Administrator', 'Gate Officer', 'Carrier Staff', 'Transport Company'),
+  ctrl.getSlotOccupancyHistory
+);
+
+/**
+ * Xuất dữ liệu lịch sử Slot ra CSV làm bằng chứng
+ */
+router.get(
+  '/slots/history/export',
+  authenticate,
+  authorize('Yard Operator', 'Dispatcher', 'Administrator', 'Gate Officer', 'Carrier Staff', 'Transport Company'),
+  ctrl.exportSlotOccupancyHistory
+);
+
+/**
+ * Ghi nhận di chuyển container giữa các slot
+ */
+router.post(
+  '/slots/movement',
+  authenticate,
+  authorize('Yard Operator', 'Dispatcher', 'Administrator'),
+  ctrl.recordContainerMovement
+);
+
+/**
  * @openapi
  * /api/yard/gate-out-requests:
  *   get:

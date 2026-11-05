@@ -96,6 +96,55 @@ async function createGateOutRequest(req, res, next) {
   }
 }
 
+/**
+ * Lấy lịch sử các container từng chiếm một Slot hoặc các vị trí container từng lưu.
+ */
+async function getSlotOccupancyHistory(req, res, next) {
+  try {
+    const result = await yardService.getSlotOccupancyHistory(req.query);
+    res.status(200).json({
+      success: true,
+      message: 'Lấy lịch sử vị trí bãi thành công.',
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Xuất dữ liệu lịch sử Slot ra file CSV tải về.
+ */
+async function exportSlotOccupancyHistory(req, res, next) {
+  try {
+    const csvData = await yardService.exportSlotOccupancyHistoryCsv(req.query);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `yard_slot_history_${timestamp}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.status(200).send(csvData);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Ghi nhận thay đổi vị trí container (lưu lịch sử).
+ */
+async function recordContainerMovement(req, res, next) {
+  try {
+    const result = await yardService.recordContainerMovement(req.body, req.user?.id);
+    res.status(201).json({
+      success: true,
+      message: 'Đã cập nhật vị trí container và ghi nhận lịch sử.',
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getGateOutRequests,
   getGateOutRequestById,
@@ -103,4 +152,8 @@ module.exports = {
   updateFlowStep,
   confirmLoadedOnTruck,
   createGateOutRequest,
+  getSlotOccupancyHistory,
+  exportSlotOccupancyHistory,
+  recordContainerMovement,
 };
+
