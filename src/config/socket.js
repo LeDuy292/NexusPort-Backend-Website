@@ -37,8 +37,13 @@ function initSocket(server) {
       const decoded = verifyToken(token);
       const account = await User.findByPk(decoded.id);
       if (!account?.is_active || account.role !== decoded.role) return next(new Error('Tài khoản hoặc vai trò không còn hợp lệ.'));
-      if (decoded.sessionId && (!account.session_id || decoded.sessionId !== account.session_id)) {
-        return next(new Error('Phiên làm việc đã bị kết thúc do tài khoản đăng xuất hoặc đăng nhập ở nơi khác.'));
+      if (decoded.sessionId) {
+        if (account.session_id && decoded.sessionId !== account.session_id) {
+          return next(new Error('SESSION_KICKED: Tài khoản đã đăng nhập ở thiết bị khác.'));
+        }
+        if (!account.session_id) {
+          return next(new Error('SESSION_LOGGED_OUT: Phiên làm việc đã kết thúc do tài khoản đã đăng xuất.'));
+        }
       }
       socket.data.user = decoded;
       socket.data.driverId = decoded.id;
