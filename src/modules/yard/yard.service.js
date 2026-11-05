@@ -448,6 +448,395 @@ function formatGateOutRequest(req) {
   };
 }
 
+/**
+ * Định dạng khoảng thời gian lưu bãi trực quan (Days, Hours, Minutes).
+ */
+function formatDuration(start, end) {
+  if (!start) return '—';
+  const startTime = new Date(start).getTime();
+  const endTime = end ? new Date(end).getTime() : Date.now();
+  const diffMs = Math.max(0, endTime - startTime);
+  const diffMinutes = Math.floor(diffMs / (1000 * 60));
+  const diffHours = Math.floor(diffMinutes / 60);
+  const days = Math.floor(diffHours / 24);
+  const hours = diffHours % 24;
+  const minutes = diffMinutes % 60;
+
+  if (days > 0) {
+    return `${days} ngày ${hours > 0 ? `${hours} giờ` : ''}`.trim();
+  }
+  if (hours > 0) {
+    return `${hours} giờ ${minutes > 0 ? `${minutes} phút` : ''}`.trim();
+  }
+  return `${Math.max(1, minutes)} phút`;
+}
+
+/**
+ * Phân tích chuỗi mã slot (ví dụ "C01.06.01.1", "C01-06-01-1", "Block C01 06 01 1").
+ */
+function parseSlotCode(code) {
+  if (!code || typeof code !== 'string') return null;
+  const cleaned = code.trim().replace(/^BLOCK\s*/i, '');
+  const parts = cleaned.split(/[.\-_/\s]+/);
+  if (parts.length >= 4) {
+    const bay = parseInt(parts[1], 10);
+    const row = parseInt(parts[2], 10);
+    const tier = parseInt(parts[3], 10);
+    if (!isNaN(bay) && !isNaN(row) && !isNaN(tier)) {
+      return {
+        block: parts[0].toUpperCase(),
+        bay,
+        row,
+        tier,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Tra cứu lịch sử các container từng chiếm một Slot hoặc các vị trí một container từng lưu.
+ * Trả về danh sách timeline theo thứ tự thời gian, hỗ trợ phân trang.
+ */
+async function getSlotOccupancyHistory(params = {}) {
+  const { sequelize } = require('../../config/database');
+  const page = Math.max(1, parseInt(params.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(params.limit, 10) || 10));
+  const offset = (page - 1) * limit;
+  const order = (params.order || 'DESC').toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+  const whereClauses = [];
+  const replacements = { limit, offset };
+
+  const parsedSlot = parseSlotCode(params.slotCode || params.slot);
+
+  if (params.slotId && isUuid(params.slotId)) {
+    whereClauses.push('cp.slot_id = :slotId');
+    replacements.slotId = params.slotId;
+  } else if (parsedSlot) {
+    whereClauses.push('yb.code = :slotBlock');
+    whereClauses.push('ys.bay = :slotBay');
+    whereClauses.push('ys.row_no = :slotRow');
+    whereClauses.push('ys.tier = :slotTier');
+    replacements.slotBlock = parsedSlot.block;
+    replacements.slotBay = parsedSlot.bay;
+    replacements.slotRow = parsedSlot.row;
+    replacements.slotTier = parsedSlot.tier;
+  } else {
+    if (params.block) {
+      whereClauses.push('yb.code = :block');
+      replacements.block = params.block.trim().toUpperCase();
+    }
+    if (params.bay != null && params.bay !== '') {
+      whereClauses.push('ys.bay = :bay');
+      replacements.bay = parseInt(params.bay, 10);
+    }
+    if (params.row != null && params.row !== '') {
+      whereClauses.push('ys.row_no = :row');
+      replacements.row = parseInt(params.row, 10);
+    }
+    if (params.tier != null && params.tier !== '') {
+      whereClauses.push('ys.tier = :tier');
+      replacements.tier = parseInt(params.tier, 10);
+    }
+  }
+
+  if (params.containerId && isUuid(params.containerId)) {
+    whereClauses.push('cp.container_id = :containerId');
+    replacements.containerId = params.containerId;
+  }
+
+  if (params.containerNo) {
+    whereClauses.push('c.container_no ILIKE :containerNo');
+    replacements.containerNo = `%${params.containerNo.trim()}%`;
+  }
+
+  if (params.search && params.search.trim()) {
+    const term = params.search.trim();
+    const parsedSearchSlot = parseSlotCode(term);
+    if (parsedSearchSlot) {
+      whereClauses.push('yb.code = :searchBlock AND ys.bay = :searchBay AND ys.row_no = :searchRow AND ys.tier = :searchTier');
+      replacements.searchBlock = parsedSearchSlot.block;
+      replacements.searchBay = parsedSearchSlot.bay;
+      replacements.searchRow = parsedSearchSlot.row;
+      replacements.searchTier = parsedSearchSlot.tier;
+    } else {
+      whereClauses.push('(c.container_no ILIKE :searchTerm OR yb.code ILIKE :searchTerm OR yb.name ILIKE :searchTerm)');
+      replacements.searchTerm = `%${term}%`;
+    }
+  }
+
+  if (params.dateFrom) {
+    whereClauses.push('cp.placed_at >= :dateFrom');
+    replacements.dateFrom = new Date(params.dateFrom).toISOString();
+  }
+  if (params.dateTo) {
+    whereClauses.push('cp.placed_at <= :dateTo');
+    replacements.dateTo = new Date(params.dateTo).toISOString();
+  }
+
+  const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+  const countSql = `
+    SELECT count(*) AS total
+    FROM container_positions cp
+    JOIN containers c ON c.id = cp.container_id
+    JOIN yard_slots ys ON ys.id = cp.slot_id
+    JOIN yard_blocks yb ON yb.id = ys.block_id
+    LEFT JOIN users u ON u.id = cp.placed_by
+    ${whereSql}
+  `;
+  const [countResult] = await sequelize.query(countSql, { replacements });
+  const totalItems = parseInt(countResult[0]?.total || 0, 10);
+  const totalPages = Math.ceil(totalItems / limit) || 1;
+
+  const dataSql = `
+    SELECT 
+      cp.id,
+      cp.placed_at AS "placedAt",
+      cp.removed_at AS "removedAt",
+      cp.is_current AS "isCurrent",
+      c.id AS "containerId",
+      c.container_no AS "containerNo",
+      c.seal_no AS "sealNo",
+      c.cargo_type::text AS "cargoType",
+      c.status::text AS "containerStatus",
+      c.gross_weight_kg AS "grossWeightKg",
+      c.is_reefer AS "isReefer",
+      ys.id AS "slotId",
+      ys.bay,
+      ys.row_no AS "row",
+      ys.tier,
+      ys.container_length_ft AS "containerLengthFt",
+      ys.has_reefer_plug AS "hasReeferPlug",
+      ys.status::text AS "slotStatus",
+      yb.id AS "blockId",
+      yb.code AS "blockCode",
+      yb.name AS "blockName",
+      yb.zone AS "blockZone",
+      u.id AS "userId",
+      u.username,
+      u.full_name AS "fullName",
+      u.role AS "userRole"
+    FROM container_positions cp
+    JOIN containers c ON c.id = cp.container_id
+    JOIN yard_slots ys ON ys.id = cp.slot_id
+    JOIN yard_blocks yb ON yb.id = ys.block_id
+    LEFT JOIN users u ON u.id = cp.placed_by
+    ${whereSql}
+    ORDER BY cp.placed_at ${order}
+    LIMIT :limit OFFSET :offset
+  `;
+
+  const [rows] = await sequelize.query(dataSql, { replacements });
+
+  const items = rows.map((r, index) => {
+    const slotCode = `${r.blockCode}.${String(r.bay).padStart(2, '0')}.${String(r.row).padStart(2, '0')}.${r.tier}`;
+    const slotLabel = `Block ${r.blockCode} · Bay ${String(r.bay).padStart(2, '0')} · Row ${String(r.row).padStart(2, '0')} · Tier ${r.tier}`;
+    const duration = formatDuration(r.placedAt, r.removedAt);
+
+    return {
+      index: offset + index + 1,
+      id: r.id,
+      placedAt: r.placedAt,
+      removedAt: r.removedAt,
+      isCurrent: r.isCurrent,
+      duration,
+      container: {
+        id: r.containerId,
+        containerNo: r.containerNo,
+        sealNo: r.sealNo,
+        cargoType: r.cargoType,
+        status: r.containerStatus,
+        grossWeightKg: r.grossWeightKg,
+        isReefer: r.isReefer,
+        sizeFt: r.containerLengthFt || 40,
+      },
+      slot: {
+        id: r.slotId,
+        slotCode,
+        slotLabel,
+        blockCode: r.blockCode,
+        blockName: r.blockName,
+        blockZone: r.blockZone,
+        bay: r.bay,
+        row: r.row,
+        tier: r.tier,
+        hasReeferPlug: r.hasReeferPlug,
+        status: r.slotStatus,
+      },
+      placedBy: {
+        id: r.userId || null,
+        username: r.username || 'system',
+        fullName: r.fullName || (r.username ? r.username : 'Điều phối Bãi Tiên Sa (Hệ thống)'),
+        role: r.userRole || 'Yard Operator',
+      },
+    };
+  });
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      totalItems,
+      totalPages,
+      hasNext: page < totalPages,
+      hasPrev: page > 1,
+    },
+    filterSummary: {
+      search: params.search || null,
+      slotCode: parsedSlot ? `${parsedSlot.block}.${String(parsedSlot.bay).padStart(2, '0')}.${String(parsedSlot.row).padStart(2, '0')}.${parsedSlot.tier}` : (params.slotCode || null),
+      containerNo: params.containerNo || null,
+    },
+  };
+}
+
+/**
+ * Xuất dữ liệu lịch sử Slot ra định dạng CSV (UTF-8 BOM hỗ trợ Excel tiếng Việt).
+ */
+async function exportSlotOccupancyHistoryCsv(params = {}) {
+  const result = await getSlotOccupancyHistory({ ...params, page: 1, limit: 1000 });
+  const items = result.items || [];
+
+  const headers = [
+    'STT',
+    'Mã Lượt Lưu',
+    'Số Container',
+    'Loại Hàng',
+    'Vị Trí Slot',
+    'Block',
+    'Bay',
+    'Row',
+    'Tier',
+    'Thời Gian Vào (Bắt đầu)',
+    'Thời Gian Rời (Kết thúc)',
+    'Thời Lượng Lưu',
+    'Trạng Thái',
+    'Người Thực Hiện (Họ tên)',
+    'Tài Khoản',
+    'Vai Trò',
+  ];
+
+  const rows = items.map((item) => [
+    item.index,
+    item.id,
+    item.container.containerNo,
+    item.container.cargoType || 'Hàng tiêu chuẩn',
+    item.slot.slotCode,
+    item.slot.blockCode,
+    String(item.slot.bay).padStart(2, '0'),
+    String(item.slot.row).padStart(2, '0'),
+    item.slot.tier,
+    item.placedAt ? new Date(item.placedAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : '',
+    item.removedAt ? new Date(item.removedAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' }) : 'Đang lưu bãi',
+    item.duration,
+    item.isCurrent ? 'Đang chiếm slot (Hiện tại)' : 'Đã rời slot',
+    item.placedBy.fullName,
+    item.placedBy.username,
+    item.placedBy.role,
+  ]);
+
+  const escapeCsv = (val) => {
+    if (val == null) return '""';
+    const str = String(val).replace(/"/g, '""');
+    return `"${str}"`;
+  };
+
+  const csvContent = '\uFEFF' + [
+    headers.map(escapeCsv).join(','),
+    ...rows.map(row => row.map(escapeCsv).join(',')),
+  ].join('\r\n');
+
+  return csvContent;
+}
+
+/**
+ * Ghi nhận thay đổi vị trí container (dành cho Yard Staff hoặc quy trình hạ bãi).
+ */
+async function recordContainerMovement(data = {}, userId = null) {
+  const { sequelize } = require('../../config/database');
+  const { containerNo, containerId, slotCode, slotId, notes } = data;
+
+  if (!containerNo && !containerId) {
+    const error = new Error('Vui lòng cung cấp số Container (containerNo) hoặc containerId.');
+    error.status = 400;
+    throw error;
+  }
+  if (!slotCode && !slotId) {
+    const error = new Error('Vui lòng cung cấp mã Slot (slotCode) hoặc slotId.');
+    error.status = 400;
+    throw error;
+  }
+
+  let cRow;
+  if (containerId && isUuid(containerId)) {
+    const [c] = await sequelize.query('SELECT * FROM containers WHERE id = :id LIMIT 1', { replacements: { id: containerId } });
+    cRow = c[0];
+  } else if (containerNo) {
+    const [c] = await sequelize.query('SELECT * FROM containers WHERE container_no ILIKE :no LIMIT 1', { replacements: { no: containerNo.trim() } });
+    cRow = c[0];
+  }
+  if (!cRow) {
+    const error = new Error(`Không tìm thấy container "${containerNo || containerId}".`);
+    error.status = 404;
+    throw error;
+  }
+
+  let sRow;
+  if (slotId && isUuid(slotId)) {
+    const [s] = await sequelize.query('SELECT * FROM yard_slots WHERE id = :id LIMIT 1', { replacements: { id: slotId } });
+    sRow = s[0];
+  } else if (slotCode) {
+    const parsed = parseSlotCode(slotCode);
+    if (!parsed) {
+      const error = new Error(`Mã slot không hợp lệ: "${slotCode}". Định dạng chuẩn: Block.Bay.Row.Tier (VD: C01.06.01.1).`);
+      error.status = 400;
+      throw error;
+    }
+    const [s] = await sequelize.query(`
+      SELECT ys.* FROM yard_slots ys
+      JOIN yard_blocks yb ON yb.id = ys.block_id
+      WHERE yb.code = :block AND ys.bay = :bay AND ys.row_no = :row AND ys.tier = :tier
+      LIMIT 1
+    `, { replacements: { block: parsed.block, bay: parsed.bay, row: parsed.row, tier: parsed.tier } });
+    sRow = s[0];
+  }
+  if (!sRow) {
+    const error = new Error(`Không tìm thấy slot "${slotCode || slotId}".`);
+    error.status = 404;
+    throw error;
+  }
+
+  return await sequelize.transaction(async (t) => {
+    // Đánh dấu vị trí cũ đã rời
+    await sequelize.query(`
+      UPDATE container_positions
+      SET is_current = false, removed_at = NOW()
+      WHERE container_id = :containerId AND is_current = true
+    `, { replacements: { containerId: cRow.id }, transaction: t });
+
+    // Tạo bản ghi mới
+    const [ins] = await sequelize.query(`
+      INSERT INTO container_positions (id, container_id, slot_id, placed_by, placed_at, removed_at, is_current)
+      VALUES (gen_random_uuid(), :containerId, :slotId, :userId, NOW(), NULL, true)
+      RETURNING *
+    `, {
+      replacements: {
+        containerId: cRow.id,
+        slotId: sRow.id,
+        userId: userId || null,
+      },
+      transaction: t,
+    });
+
+    await sequelize.query(`UPDATE yard_slots SET status = 'occupied' WHERE id = :slotId`, { replacements: { slotId: sRow.id }, transaction: t });
+    await sequelize.query(`UPDATE containers SET status = 'in_yard' WHERE id = :containerId`, { replacements: { containerId: cRow.id }, transaction: t });
+
+    return ins[0];
+  });
+}
+
 module.exports = {
   getGateOutRequests,
   getGateOutRequestById,
@@ -456,4 +845,9 @@ module.exports = {
   confirmLoadedOnTruck,
   createGateOutRequest,
   formatGateOutRequest,
+  getSlotOccupancyHistory,
+  exportSlotOccupancyHistoryCsv,
+  recordContainerMovement,
+  parseSlotCode,
 };
+
