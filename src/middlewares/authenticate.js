@@ -49,16 +49,21 @@ async function authenticate(req, res, next) {
     }
 
     // Kiểm tra phiên hoạt động duy nhất (Single Active Session)
-    // Nếu tài khoản có session_id đang hoạt động mà token không có hoặc không trùng khớp,
-    // hoặc token mang sessionId mà tài khoản đã đăng xuất (session_id rỗng):
-    if (
-      (user.session_id && (!decoded.sessionId || decoded.sessionId !== user.session_id)) ||
-      (!user.session_id && decoded.sessionId)
-    ) {
+// 1) Nếu tài khoản có session_id trong DB nhưng token không trùng khớp -> bị kick bởi thiết bị khác!
+    if (user.session_id && (!decoded.sessionId || decoded.sessionId !== user.session_id)) {
       return res.status(401).json({
         success: false,
         code: 'SESSION_KICKED',
-        message: 'Phiên làm việc đã kết thúc hoặc tài khoản vừa đăng nhập trên thiết bị khác. Vui lòng đăng nhập lại.',
+        message: 'Tài khoản của bạn vừa đăng nhập trên thiết bị khác. Vui lòng đăng nhập lại.',
+      });
+    }
+
+    // 2) Nếu tài khoản không còn session_id trong DB mà token mang sessionId -> phiên đã đăng xuất bình thường!
+    if (!user.session_id && decoded.sessionId) {
+      return res.status(401).json({
+        success: false,
+        code: 'SESSION_LOGGED_OUT',
+        message: 'Phiên đăng nhập đã kết thúc. Vui lòng đăng nhập lại.',
       });
     }
 
