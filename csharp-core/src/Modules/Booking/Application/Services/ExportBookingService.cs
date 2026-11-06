@@ -11,6 +11,8 @@ using NexusPort.Infrastructure.Database;
 using NexusPort.Modules.Booking.Application.DTOs;
 using NexusPort.Modules.Booking.Application.Interfaces;
 using NexusPort.Shared.Exceptions;
+using NexusPort.Infrastructure.ExternalServices;
+using Microsoft.Extensions.Configuration;
 
 namespace NexusPort.Modules.Booking.Application.Services;
 
@@ -21,9 +23,12 @@ public sealed partial class ExportBookingService
     private readonly ICurrentUser _user;
     private readonly IBookingService _bookings;
     private readonly IBookingDocumentRequirementPolicy _documents;
+    private readonly IS3StorageService? _storage;
+    private readonly string _documentBucket;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-    public ExportBookingService(AppDbContext db, ICurrentUser user, IBookingService bookings, IBookingDocumentRequirementPolicy documents)
-    { _db = db; _user = user; _bookings = bookings; _documents = documents; }
+    public ExportBookingService(AppDbContext db, ICurrentUser user, IBookingService bookings, IBookingDocumentRequirementPolicy documents,
+        IS3StorageService? storage = null, IConfiguration? configuration = null)
+    { _db = db; _user = user; _bookings = bookings; _documents = documents; _storage = storage; _documentBucket = configuration?["AWS:BucketName"] ?? "nexusport"; }
     private bool Carrier => new[] { "Transport Company", "Carrier", "Carrier Staff" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
     private bool Line => string.Equals(_user.Role, "Shipping Line", StringComparison.OrdinalIgnoreCase);
     private bool Admin => new[] { "Administrator", "Admin" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
@@ -69,7 +74,7 @@ public sealed partial class ExportBookingService
         b.line_user_id AS "shippingLineId",COALESCE(u.full_name,u.username) AS "shippingLineName",
         b.voyage_id AS "voyageId",b.container_type_code AS "containerTypeCode",b.quantity,b.commodity_description AS "commodityDescription",
         b.status,b.version,b.port_status AS "portStatus",b.si,b.si_status AS "siStatus",b.draft_version AS "draftVersion",b.draft,
-        b.bl_number AS "blNumber",b.freight_paid AS "freightPaid",b.created_at AS "createdAt",b.created_by AS "createdBy",b.submission
+        b.bl_number AS "blNumber",b.freight_paid AS "freightPaid",b.created_at AS "createdAt",b.created_by AS "createdBy",b.submission,b.preparation
         """;
     private async Task<JsonObject> Booking(Guid id, bool locked, CancellationToken ct)
     {
@@ -94,10 +99,29 @@ public sealed partial class ExportBookingService
             FROM export_history WHERE export_booking_id=@p0 ORDER BY created_at,id) x
             """, ct, id)).Select(x => (JsonNode)x).ToArray());
         CustomerSubmissionVisibility(b);
+        await RenewDocumentLinks(b,G(b,"carrierId"),ct);
+        if (b["preparation"] is JsonObject prepared)
+        {
+            var content = prepared.Deserialize<ExportPreparationContent>(Json)!;
+            foreach(var row in b["containers"]!.AsArray().OfType<JsonObject>())
+            {
+                var source=content.Containers.FirstOrDefault(c=>c.ContainerId==G(row,"containerId"));
+                if(source==null)continue;
+                row["documents"]=JsonSerializer.SerializeToNode(content.SharedDocuments.Concat(source.Documents).GroupBy(d=>d.DocumentType).Select(g=>g.Last()),Json);
+                row["requiredPowerKw"]=source.RequiredPowerKw;
+                row["isReeferPowerRequired"]=source.IsReeferPowerRequired;
+            }
+            b["preparedContainers"] = JsonSerializer.SerializeToNode(content.Containers.Select(container => new {
+                container.ContainerId, container.DeclarationId, container.ContainerNumber, container.ContainerTypeCode,
+                container.CargoType, container.GrossWeightKg, container.SealNumber, container.VgmKg, container.TargetTemperature,
+                container.UnNumber, container.DgClass, status = "Expected"
+            }), Json);
+        }
         return b;
     }
     private void CustomerSubmissionVisibility(JsonObject booking)
     {
+        if(booking["preparation"] is JsonObject preparation) { preparation.Remove("requestReceipts"); preparation.Remove("confirmationHash"); }
         // The transferable pickup code is needed only by the customer and the server handoff.
         if (!Carrier && booking["submission"]?["pickup"] is JsonObject pickup) pickup.Remove("yardCode");
         if (!Carrier && booking["submission"]?["pickupSource"] is JsonObject source) source.Remove("yardCode");
@@ -115,9 +139,10 @@ public sealed partial class ExportBookingService
     public async Task<JsonObject> Options(CancellationToken ct)
     {
         var result = new JsonObject();
+        result["capabilities"] = new JsonObject { ["preparation"] = true, ["serverDrafts"] = true, ["documentOcr"] = false };
         result["shippingLines"] = new JsonArray((await Rows("SELECT row_to_json(x)::text AS \"Value\" FROM (SELECT id,COALESCE(full_name,username) AS name FROM users WHERE role='Shipping Line' AND is_active ORDER BY username) x", ct)).Select(x => (JsonNode)x).ToArray());
         result["containerTypes"] = new JsonArray((await Rows("SELECT row_to_json(x)::text AS \"Value\" FROM (SELECT code,code AS name FROM container_types ORDER BY code) x", ct)).Select(x => (JsonNode)x).ToArray());
-        result["voyages"] = new JsonArray((await Voyages(ct)).Where(x => S(x,"status")=="Scheduled" && D(x,"vgmCutoff")>DateTime.UtcNow).Select(x => (JsonNode)x).ToArray());
+        result["voyages"] = new JsonArray((await Voyages(ct)).Where(x => S(x,"status")=="Scheduled" && D(x,"vgmCutoff")>DateTime.UtcNow && D(x,"cyCutoff")>DateTime.UtcNow).Select(x => (JsonNode)x).ToArray());
         result["sources"] = new JsonArray();
         if (Carrier)
         {
@@ -129,6 +154,7 @@ public sealed partial class ExportBookingService
                 FROM container_declarations d JOIN containers c ON c.id=d.container_id JOIN container_types t ON t.id=c.container_type_id
                 WHERE d.carrier_id=@p0 AND d.load_status='full'
                 AND NOT EXISTS(SELECT 1 FROM export_booking_containers e WHERE e.container_id=c.id AND e.active)
+                AND NOT EXISTS(SELECT 1 FROM export_source_reservations r WHERE r.container_id=c.id AND r.active)
                 AND NOT EXISTS(SELECT 1 FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id WHERE bc.declaration_id=d.id AND b.status::text NOT IN ('canceled','rejected','expired'))
                 AND NOT EXISTS(SELECT 1 FROM container_visits cv WHERE cv.container_id=c.id AND cv.visit_status IN ('planned','active'))
                 ORDER BY c.container_no,d.created_at DESC LIMIT 200) x

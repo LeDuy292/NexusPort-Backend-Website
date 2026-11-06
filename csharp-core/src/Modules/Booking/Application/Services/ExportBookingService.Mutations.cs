@@ -20,6 +20,7 @@ public sealed partial class ExportBookingService
         await Exec("UPDATE export_bookings SET status=@p0,port_status=@p1,version=version+1,updated_at=now() WHERE id=@p2",ct,
             approve?(submitted?"ContainersDeclared":"Approved"):"Rejected",approve?(submitted?"Accepted":"WaitingContainers"):"Pending",id);
         if(submitted && !approve)await Exec("UPDATE export_booking_containers SET active=false WHERE export_booking_id=@p0",ct,id);
+        if(!approve)await Exec("UPDATE export_source_reservations SET active=false WHERE export_booking_id=@p0",ct,id);
         if(submitted && approve)await ForwardSubmission(b,ct);
         await History(id,G(b,"voyageId"),approve?"BookingApproved":"BookingRejected",approve?"Hãng tàu duyệt yêu cầu và gửi thông tin dự kiến sang cảng.":request.Reason!,ct);
         if(approve)await Deliver(id,G(b,"voyageId"),I(b,"version")+1,"BookingApproved",new{bookingId=id,quantity=I(b,"quantity"),containerType=S(b,"containerTypeCode")},ct);
@@ -38,10 +39,13 @@ public sealed partial class ExportBookingService
         }
         return (sum%11)%10==number[10]-'0';
     }
-    public async Task<JsonObject> Declare(Guid id,DeclareExportContainersRequest request,CancellationToken ct)
+    public async Task<JsonObject> Declare(Guid id,DeclareExportContainersRequest request,CancellationToken ct, bool preparedLineReview = false)
     {
-        await using var tx=await _db.Database.BeginTransactionAsync(ct);
-        var b=await Booking(id,true,ct);await Own(b,ct);Version(b,request.ExpectedVersion);
+        await using var tx=_db.Database.CurrentTransaction==null?await _db.Database.BeginTransactionAsync(ct):null;
+        var b=await Booking(id,true,ct);
+        if(preparedLineReview)OwnLine(b);else await Own(b,ct);
+        Version(b,request.ExpectedVersion);
+        Require(b["preparation"]==null || preparedLineReview,"Preparation","Gửi phiên bản container qua bước kiểm tra hãng tàu trước khi chuyển cảng.");
         Require(b["submission"]==null,"Submission","Hồ sơ Booking hợp nhất cần được cập nhật và gửi hãng tàu duyệt lại; không thay riêng danh sách đã gửi.");
         var v=await Voyage(G(b,"voyageId"),true,ct);
         Require(new[]{"Approved","ContainersDeclared","GateIn"}.Contains(S(b,"status")),"Status","Booking cần được hãng tàu duyệt trước khi khai container.");
@@ -65,14 +69,14 @@ public sealed partial class ExportBookingService
             if(sources.Count!=1){errors.Add($"{label}: bản khai không thuộc công ty hoặc không có hàng.");continue;}
             var source=sources[0];sourceRows.Add(source);
             if(!ValidIso6346(S(source,"containerNumber")))errors.Add($"{label} ({S(source,"containerNumber")}): số container không đúng ISO 6346/check digit.");
-            if(!string.Equals(S(source,"containerTypeCode"),S(b,"containerTypeCode"),StringComparison.OrdinalIgnoreCase))errors.Add($"{label}: loại container không khớp loại được duyệt.");
+            if(!ApprovedEquipment(b).ContainsKey(S(source,"containerTypeCode")))errors.Add($"{label}: loại container không khớp loại được duyệt.");
             if(string.IsNullOrWhiteSpace(input.SealNumber)||input.SealNumber.Length>100)errors.Add($"{label}: bổ sung số seal hợp lệ.");
             if(input.VgmKg<=0||input.VgmKg>99999999)errors.Add($"{label}: VGM phải lớn hơn 0, tính bằng kg.");
             if(S(source,"cargoType")=="reefer"&&!input.TargetTemperature.HasValue)errors.Add($"{label}: thiếu nhiệt độ chỉ dẫn hàng lạnh.");
             if(new[]{"dangerous","dangerous_goods"}.Contains(S(source,"cargoType"))&&(string.IsNullOrWhiteSpace(input.UnNumber)||string.IsNullOrWhiteSpace(input.DgClass)))errors.Add($"{label}: thiếu mã UN/phân lớp hàng nguy hiểm.");
             if(input.UnNumber?.Length>30||input.DgClass?.Length>30)errors.Add($"{label}: thông tin UN/phân lớp quá dài.");
             if(!string.IsNullOrWhiteSpace(input.CustomsDocumentUrl)&&!(Uri.TryCreate(input.CustomsDocumentUrl,UriKind.Absolute,out var uri)&&uri.Scheme is "https" or "http")&&!input.CustomsDocumentUrl.StartsWith("/uploads/documents/",StringComparison.Ordinal))errors.Add($"{label}: đường dẫn chứng từ hải quan không hợp lệ.");
-            var reserved=await Rows("SELECT jsonb_build_object('id',id)::text AS \"Value\" FROM export_booking_containers WHERE container_id=@p0 AND active AND export_booking_id<>@p1",ct,input.ContainerId,id);
+            var reserved=await Rows("SELECT jsonb_build_object('id',export_booking_id)::text AS \"Value\" FROM export_booking_containers WHERE container_id=@p0 AND active AND export_booking_id<>@p1 UNION ALL SELECT jsonb_build_object('id',export_booking_id)::text FROM export_source_reservations WHERE container_id=@p0 AND active AND export_booking_id<>@p1",ct,input.ContainerId,id);
             if(reserved.Count>0)errors.Add($"{label}: container đã có Booking hãng tàu còn hiệu lực.");
             if(oldByContainer.TryGetValue(input.ContainerId,out var previous)&&(S(previous,"status")!="Expected"||previous["gateBookingId"]!=null))
             {
@@ -83,6 +87,8 @@ public sealed partial class ExportBookingService
             if(!request.Containers.Any(x=>x.ContainerId==G(previous,"containerId")))errors.Add($"Không được bỏ container {S(previous,"containerNumber")} đã có lịch xe hoặc đã vào cảng.");
         foreach(var previous in old.Where(x=>x["hasGateHistory"]?.GetValue<bool>()==true))
             if(!request.Containers.Any(x=>x.ContainerId==G(previous,"containerId")))errors.Add($"Container {S(previous,"containerNumber")} đã có lịch sử điều xe; giữ hồ sơ này để bảo toàn lịch sử, liên hệ hãng tàu xử lý thay vỏ.");
+        var equipment=ApprovedEquipment(b);
+        if(sourceRows.GroupBy(x=>S(x,"containerTypeCode")).Any(g=>!equipment.TryGetValue(g.Key,out var quantity)||g.Count()>quantity))errors.Add("Số lượng theo từng loại container vượt cơ cấu đã được duyệt.");
         Require(errors.Count==0,"Containers",string.Join("\n",errors));
         var ids=request.Containers.Select(x=>x.ContainerId).ToArray();
         await Exec("DELETE FROM export_booking_containers WHERE export_booking_id=@p0 AND NOT(container_id=ANY(@p1))",ct,id,ids);
@@ -105,7 +111,7 @@ public sealed partial class ExportBookingService
         await Exec("UPDATE export_bookings SET status=CASE WHEN status='GateIn' THEN status ELSE 'ContainersDeclared' END,port_status='Accepted',si_status=CASE WHEN si_status='RevisionRequested' THEN si_status WHEN si IS NULL THEN 'None' ELSE 'Submitted' END,draft=NULL,version=version+1,updated_at=now() WHERE id=@p0",ct,id);
         await Deliver(id,G(b,"voyageId"),I(b,"version")+1,"ContainerListUpdated",request.Containers,ct);
         await History(id,G(b,"voyageId"),"ContainerListUpdated","Danh sách container được kiểm tra và cảng tiếp nhận phiên bản mới.",ct);
-        await tx.CommitAsync(ct);return await Detail(id,ct);
+        if(tx!=null)await tx.CommitAsync(ct);return await Detail(id,ct);
     }
     public async Task<JsonObject> SubmitSi(Guid id,ExportSiRequest request,CancellationToken ct)
     {
@@ -169,6 +175,7 @@ public sealed partial class ExportBookingService
         Require(containers.All(x=>x["gateBookingId"]==null),"GateBooking","Hủy các lịch xe liên quan trước khi hủy Booking hãng tàu.");
         await Exec("UPDATE export_bookings SET status='Cancelled',port_status='Cancelled',version=version+1,updated_at=now() WHERE id=@p0",ct,id);
         await Exec("UPDATE export_booking_containers SET active=false WHERE export_booking_id=@p0",ct,id);
+        await Exec("UPDATE export_source_reservations SET active=false WHERE export_booking_id=@p0",ct,id);
         await Deliver(id,G(b,"voyageId"),I(b,"version")+1,"BookingCancelled",new{id,request.Reason},ct);
         await History(id,G(b,"voyageId"),"BookingCancelled",request.Reason??"Khách hàng hủy Booking trước khi container vào cổng.",ct);
         await tx.CommitAsync(ct);return await Detail(id,ct);

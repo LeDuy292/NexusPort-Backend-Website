@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using NexusPort.Modules.Booking.Application.DTOs;
 using NexusPort.Modules.Booking.Application.Services;
 
@@ -18,6 +19,25 @@ public sealed class ExportBookingController : ControllerBase
 
     [HttpGet("options")]
     public async Task<IActionResult> Options(CancellationToken ct) => Ok(await _service.Options(ct));
+    [Authorize(Roles = Customers)] [HttpGet("drafts")]
+    public async Task<IActionResult> Drafts(CancellationToken ct) => Ok(await _service.Drafts(ct));
+    [Authorize(Roles = Customers)] [HttpGet("drafts/{id:guid}")]
+    public async Task<IActionResult> GetDraft(Guid id, CancellationToken ct) => Ok(await _service.GetDraft(id, ct));
+    [Authorize(Roles = Customers)] [HttpPut("drafts/{id:guid}")]
+    public async Task<IActionResult> SaveDraft(Guid id, ExportDraftSaveRequest request, CancellationToken ct) => Ok(await _service.SaveDraft(id, request, ct));
+    [Authorize(Roles = Customers)] [HttpPost("preparation/readiness")]
+    public async Task<IActionResult> Readiness(ExportPreparationContent content, CancellationToken ct) => Ok(await _service.PreparationReadiness(content, ct));
+    [Authorize(Roles = Customers)] [HttpPost("requests")]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("booking-create")]
+    public async Task<IActionResult> SubmitPreparation(ExportPreparationRequest request, CancellationToken ct) => Ok(await _service.SubmitPreparation(request, ct));
+    [Authorize(Roles = Customers)] [HttpPost("{id:guid}/preparation/confirm")]
+    public async Task<IActionResult> ConfirmPreparation(Guid id, ExportPreparationRequest request, CancellationToken ct) => Ok(await _service.ConfirmPreparation(id, request, ct));
+    [Authorize(Roles = Lines)] [HttpPost("{id:guid}/container-review")]
+    public async Task<IActionResult> ReviewContainers(Guid id, ExportContainerReviewRequest request, CancellationToken ct) => Ok(await _service.ReviewPreparedContainers(id, request, ct));
+    [Authorize(Roles = Customers)] [HttpPost("documents")] [RequestSizeLimit(27 * 1024 * 1024)]
+    public async Task<IActionResult> UploadDocument(IFormFile file, CancellationToken ct) => Ok(await _service.UploadPreparationDocument(file, ct));
+    [Authorize(Roles = Customers)] [HttpGet("{id:guid}/si-suggestions")]
+    public async Task<IActionResult> SiSuggestions(Guid id, CancellationToken ct) => Ok(await _service.SiSuggestions(id, ct));
     [Authorize(Roles = Customers)] [HttpPost("submissions/plan")]
     public async Task<IActionResult> PlanSubmission(ExportSubmissionRequest request, CancellationToken ct) => Ok(await _service.PlanSubmission(request, ct));
     [Authorize(Roles = Customers)]
