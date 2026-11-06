@@ -1,8 +1,8 @@
 'use strict';
 
 const { Router } = require('express');
-const { loginController, logoutController, getMeController, forgotPasswordController, resetPasswordController } = require('./auth.controller');
-const { loginValidator, forgotPasswordValidator, resetPasswordValidator } = require('./auth.validator');
+const { loginController, googleLoginController, logoutController, getMeController, forgotPasswordController, resetPasswordController } = require('./auth.controller');
+const { loginValidator, googleLoginValidator, forgotPasswordValidator, resetPasswordValidator } = require('./auth.validator');
 const { authenticate } = require('../../middlewares/authenticate');
 
 const router = Router();
@@ -68,6 +68,63 @@ const router = Router();
  *         description: Dữ liệu đầu vào không hợp lệ
  */
 router.post('/login', loginValidator, loginController);
+/**
+ * @swagger
+ * /api/auth/google:
+ *   post:
+ *     summary: Đăng nhập bằng Google (chỉ các email trong Whitelist mới được cấp phép)
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               credential:
+ *                 type: string
+ *                 description: Google ID Token (từ Google Identity Services)
+ *               idToken:
+ *                 type: string
+ *                 description: Google ID Token thay thế
+ *               email:
+ *                 type: string
+ *                 description: Email Google (hỗ trợ cho môi trường dev/test)
+ *                 example: driver01@gmail.com
+ *               expectedRole:
+ *                 type: string
+ *                 description: Vai trò mong muốn đăng nhập
+ *               rememberMe:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Đăng nhập Google thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Đăng nhập Google thành công.
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     token:
+ *                       type: string
+ *                     user:
+ *                       $ref: '#/components/schemas/UserSafe'
+ *       401:
+ *         description: Google token không hợp lệ
+ *       403:
+ *         description: Email không thuộc Whitelist hoặc tài khoản bị vô hiệu hóa
+ *       422:
+ *         description: Dữ liệu không hợp lệ hoặc sai vai trò
+ */
+router.post('/google', googleLoginValidator, googleLoginController);
 /**
  * @swagger
  * /api/auth/logout:
