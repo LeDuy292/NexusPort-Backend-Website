@@ -9,11 +9,13 @@ const { sequelize } = require('../config/database');
 const VALID_ROLES = [
   'Administrator',
   'Transport Company',
+  'Carrier Staff',
   'Driver',
   'Dispatcher',
   'Gate Officer',
   'Yard Operator',
   'Berth Staff',
+  'Shipping Line',
 ];
 
 class User extends Model {
@@ -96,6 +98,10 @@ User.init(
     },
     reset_token_exp: {
       type: DataTypes.DATE,
+      allowNull: true,
+    },
+    session_id: {
+      type: DataTypes.STRING(255),
       allowNull: true,
     },
   },

@@ -9,11 +9,19 @@ const loginValidator = [
   body('username')
     .trim()
     .notEmpty()
-    .withMessage('Tên đăng nhập hoặc email không được để trống.'),
+    .withMessage('Tên đăng nhập hoặc email không được để trống.')
+    .isLength({ min: 3 })
+    .withMessage('Tên đăng nhập hoặc email phải có ít nhất 3 ký tự.'),
 
   body('password')
     .notEmpty()
-    .withMessage('Mật khẩu không được để trống.'),
+    .withMessage('Mật khẩu không được để trống.')
+    .isLength({ min: 6 })
+    .withMessage('Mật khẩu phải có ít nhất 6 ký tự.'),
+
+  body('expectedRole')
+    .optional()
+    .trim(),
 ];
 
 const forgotPasswordValidator = [
@@ -41,4 +49,21 @@ const resetPasswordValidator = [
     .withMessage('Mật khẩu mới phải có ít nhất 6 ký tự.'),
 ];
 
-module.exports = { loginValidator, forgotPasswordValidator, resetPasswordValidator };
+const googleLoginValidator = [
+  body().custom((val, { req }) => {
+    const { credential, idToken, email } = req.body || {};
+    if (!credential && !idToken && !email) {
+      throw new Error('Vui lòng cung cấp Google credential (idToken) hoặc email.');
+    }
+    return true;
+  }),
+  body('email')
+    .optional()
+    .isEmail()
+    .withMessage('Email không hợp lệ.'),
+  body('expectedRole')
+    .optional()
+    .trim(),
+];
+
+module.exports = { loginValidator, googleLoginValidator, forgotPasswordValidator, resetPasswordValidator };

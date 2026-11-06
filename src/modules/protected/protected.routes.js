@@ -159,24 +159,6 @@ router.get(
   ok('GET /api/transport/bookings — Transport Company + Dispatcher + Administrator')
 );
 
-// ─── Driver ───────────────────────────────────────────────────────────────────
-
-/**
- * @swagger
- * /api/driver/trips:
- *   get:
- *     summary: Chuyến của tài xế (Administrator + Driver)
- *     tags: [RBAC Demo]
- *     security:
- *       - BearerAuth: []
- */
-router.get(
-  '/driver/trips',
-  authenticate,
-  authorize(PERMISSIONS.DRIVER_ACCESS),
-  ok('GET /api/driver/trips — Driver + Administrator')
-);
-
 // ─── Authenticated only (mọi role) ───────────────────────────────────────────
 
 /**

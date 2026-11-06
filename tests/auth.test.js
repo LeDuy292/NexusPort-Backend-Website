@@ -133,7 +133,7 @@ describe('POST /api/auth/login', () => {
 
       expect(res.status).toBe(401);
       expect(res.body.success).toBe(false);
-      expect(res.body.message).toBe('Mật khẩu không chính xác!');
+      expect(res.body.message).toBe('Tài khoản hoặc mật khẩu không chính xác.');
     });
 
     it('Username không tồn tại → 401', async () => {
@@ -144,7 +144,7 @@ describe('POST /api/auth/login', () => {
 
       expect(res.status).toBe(401);
       expect(res.body.success).toBe(false);
-      expect(res.body.message).toBe('Tài khoản không tồn tại!');
+      expect(res.body.message).toBe('Tài khoản hoặc mật khẩu không chính xác.');
     });
   });
 
@@ -238,6 +238,17 @@ describe('GET /api/auth/me', () => {
   });
 });
 
+// ─── POST /api/auth/logout ───────────────────────────────────────────────────
+describe('POST /api/auth/logout', () => {
+  it('Đăng xuất thành công → 200 + message', async () => {
+    const res = await request(app).post('/api/auth/logout');
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.message).toContain('Đăng xuất thành công');
+  });
+});
+
 // ─── GET /api/health ─────────────────────────────────────────────────────────
 describe('GET /api/health', () => {
   it('Health check → 200', async () => {
@@ -248,6 +259,7 @@ describe('GET /api/health', () => {
     expect(res.body).toHaveProperty('timestamp');
   });
 });
+
 
 // ─── 404 ─────────────────────────────────────────────────────────────────────
 describe('404 Not Found', () => {

@@ -31,7 +31,7 @@ public class ValidationException : AppException
     public IDictionary<string, string[]> Errors { get; }
 
     public ValidationException(IDictionary<string, string[]> errors)
-        : base("One or more validation failures have occurred.", 422, "VALIDATION_ERROR")
+        : base("Yêu cầu Đặt chỗ chưa thỏa mãn các quy tắc nghiệp vụ cảng.", 422, "VALIDATION_ERROR")
     {
         Errors = errors;
     }

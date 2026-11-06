@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -8,6 +8,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Shared\NexusPort.Shared.csproj" />
     <ProjectReference Include="..\..\Infrastructure\NexusPort.Infrastructure.csproj" />
+    <ProjectReference Include="..\Booking\NexusPort.Modules.Booking.csproj" />
+    <ProjectReference Include="..\Vehicle\NexusPort.Modules.Vehicle.csproj" />
+    <ProjectReference Include="..\Driver\NexusPort.Modules.Driver.csproj" />
+    <ProjectReference Include="..\Container\NexusPort.Modules.Container.csproj" />
   </ItemGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

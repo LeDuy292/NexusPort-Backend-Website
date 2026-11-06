@@ -1,5 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using NexusPort.Infrastructure.Database;
+using NexusPort.Modules.Vehicle.Application.DTOs;
 using NexusPort.Modules.Vehicle.Application.Interfaces;
 
 namespace NexusPort.Modules.Vehicle.Infrastructure.Repositories;
@@ -20,9 +21,30 @@ public class VehicleRepository : IVehicleRepository
         return await _dbSet.FindAsync(new object[] { id }, cancellationToken);
     }
 
-    public async Task<IReadOnlyList<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>> GetAllAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>> GetAllAsync(VehicleFilterDto filter, CancellationToken cancellationToken = default)
     {
-        return await _dbSet.ToListAsync(cancellationToken);
+        var query = _dbSet.AsQueryable();
+
+        if (filter.CarrierId.HasValue)
+        {
+            query = query.Where(x => x.CarrierId == filter.CarrierId.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Status))
+        {
+            if (Enum.TryParse<NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus>(filter.Status, true, out var parsedStatus))
+            {
+                query = query.Where(x => x.Status == parsedStatus);
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.SearchTerm))
+        {
+            var search = filter.SearchTerm.ToLower();
+            query = query.Where(x => x.PlateNumber.ToLower().Contains(search));
+        }
+
+        return await query.OrderByDescending(x => x.CreatedAt).ToListAsync(cancellationToken);
     }
 
     public async Task AddAsync(NexusPort.Modules.Vehicle.Domain.Entities.Vehicle entity, CancellationToken cancellationToken = default)
@@ -45,5 +67,17 @@ public class VehicleRepository : IVehicleRepository
             _dbSet.Remove(entity);
             await _context.SaveChangesAsync(cancellationToken);
         }
+    }
+
+    public async Task<bool> ExistsByPlateNumberAsync(string plateNumber, Guid? excludeVehicleId = null, CancellationToken cancellationToken = default)
+    {
+        var query = _dbSet.Where(x => x.PlateNumber.ToLower() == plateNumber.ToLower());
+        
+        if (excludeVehicleId.HasValue)
+        {
+            query = query.Where(x => x.Id != excludeVehicleId.Value);
+        }
+
+        return await query.AnyAsync(cancellationToken);
     }
 }

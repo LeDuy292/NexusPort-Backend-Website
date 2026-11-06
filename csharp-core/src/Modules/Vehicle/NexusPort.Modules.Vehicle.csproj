@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\Shared\NexusPort.Shared.csproj" />
     <ProjectReference Include="..\..\Infrastructure\NexusPort.Infrastructure.csproj" />
+    <ProjectReference Include="..\Driver\NexusPort.Modules.Driver.csproj" />
   </ItemGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

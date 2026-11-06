@@ -1,0 +1,14 @@
+{
+  "watch": [
+    "server.js",
+    "src"
+  ],
+  "ext": "js,json",
+  "ignore": [
+    "node-core/**",
+    "csharp-core/**",
+    "ai-service/**",
+    "database/**",
+    "tests/**"
+  ]
+}

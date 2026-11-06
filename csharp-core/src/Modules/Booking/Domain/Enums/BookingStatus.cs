@@ -1,11 +1,16 @@
-﻿namespace NexusPort.Modules.Booking.Domain.Enums;
+using System.Text.Json.Serialization;
 
+namespace NexusPort.Modules.Booking.Domain.Enums;
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum BookingStatus
 {
-    Draft,
-    Active,
     Pending,
-    Processing,
+    Ready,
+    Approved,
+    Rejected,
+    Canceled,
+    CheckedIn,
     Completed,
-    Cancelled
+    Expired
 }
