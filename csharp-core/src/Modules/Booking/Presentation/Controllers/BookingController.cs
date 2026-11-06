@@ -4,7 +4,6 @@ using NexusPort.Infrastructure.Database;
 using NexusPort.Shared.Exceptions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Hosting;
 using System.IO;
 using NexusPort.Infrastructure.Authentication;
 using NexusPort.Infrastructure.ExternalServices;
@@ -24,20 +23,17 @@ public class BookingController : ControllerBase
     private readonly ICurrentUser _currentUser;
     private readonly AppDbContext _context;
     private readonly IS3StorageService _s3StorageService;
-    private readonly IWebHostEnvironment _env;
 
     public BookingController(
         IBookingService service, 
         ICurrentUser currentUser, 
         AppDbContext context,
-        IS3StorageService s3StorageService,
-        IWebHostEnvironment env)
+        IS3StorageService s3StorageService)
     {
         _service = service;
         _currentUser = currentUser;
         _context = context;
         _s3StorageService = s3StorageService;
-        _env = env;
     }
 
     /// <summary>
@@ -452,14 +448,14 @@ public class BookingController : ControllerBase
     }
 
     /// <summary>
-    /// Tải lên tệp chứng từ đính kèm trực tiếp từ máy tính (AWS S3 hoặc lưu trữ cục bộ)
+    /// Tải lên tệp chứng từ đính kèm trực tiếp từ máy tính vào AWS S3.
     /// </summary>
     [AllowAnonymous]
     [HttpPost("upload-document")]
     [Consumes("multipart/form-data")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> UploadDocument([FromForm] IFormFile file, CancellationToken cancellationToken)
     {
         if (file == null || file.Length == 0)
@@ -476,63 +472,28 @@ public class BookingController : ControllerBase
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
         var safeFileName = $"doc_{DateTime.UtcNow:yyyyMMddHHmmss}_{Guid.NewGuid().ToString("N")[..8]}{ext}";
 
-        // 1. Thử tải lên AWS S3
         try
         {
-            if (_s3StorageService != null)
-            {
-                using var stream = file.OpenReadStream();
-                var s3Url = await _s3StorageService.UploadFileAsync(stream, safeFileName, file.ContentType, "documents", cancellationToken);
-                if (!string.IsNullOrEmpty(s3Url))
-                {
-                    return Ok(new
-                    {
-                        fileUrl = s3Url,
-                        fileName = file.FileName,
-                        fileSizeBytes = file.Length,
-                        contentType = file.ContentType
-                    });
-                }
-            }
-        }
-        catch
-        {
-            // Fallback khi AWS S3 không khả dụng hoặc chưa cấu hình AccessKey
-        }
+            using var stream = file.OpenReadStream();
+            var s3Url = await _s3StorageService.UploadFileAsync(stream, safeFileName, file.ContentType, "documents", cancellationToken);
+            if (string.IsNullOrWhiteSpace(s3Url))
+                return StatusCode(503, new { message = "AWS S3 chưa trả đường dẫn chứng từ. Vui lòng thử lại." });
 
-        // 2. Dự phòng lưu trữ cục bộ (Local fallback in wwwroot/uploads/documents)
-        try
-        {
-            var webRoot = _env.WebRootPath;
-            if (string.IsNullOrEmpty(webRoot))
-            {
-                webRoot = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
-            }
-
-            var uploadsDir = Path.Combine(webRoot, "uploads", "documents");
-            if (!Directory.Exists(uploadsDir))
-            {
-                Directory.CreateDirectory(uploadsDir);
-            }
-
-            var filePath = Path.Combine(uploadsDir, safeFileName);
-            using (var localStream = new FileStream(filePath, FileMode.Create))
-            {
-                await file.CopyToAsync(localStream, cancellationToken);
-            }
-
-            var localUrl = $"/uploads/documents/{safeFileName}";
             return Ok(new
             {
-                fileUrl = localUrl,
+                fileUrl = s3Url,
                 fileName = file.FileName,
                 fileSizeBytes = file.Length,
                 contentType = file.ContentType
             });
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return StatusCode(500, new { message = $"Lỗi khi lưu trữ tệp đính kèm: {ex.Message}" });
+            throw;
+        }
+        catch
+        {
+            return StatusCode(503, new { message = "Không thể tải chứng từ lên AWS S3. Vui lòng thử lại." });
         }
     }
 

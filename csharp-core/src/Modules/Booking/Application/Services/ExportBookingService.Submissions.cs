@@ -62,8 +62,10 @@ public sealed partial class ExportBookingService
             var unavailable = await Rows("""
                 SELECT jsonb_build_object('count',count(*)::int)::text AS "Value" FROM export_booking_containers e
                 WHERE e.container_id=@p0 AND e.active AND (@p1::uuid IS NULL OR e.export_booking_id<>@p1)
+                UNION ALL SELECT jsonb_build_object('count',count(*)::int)::text AS "Value" FROM export_source_reservations r
+                WHERE r.container_id=@p0 AND r.active AND (@p1::uuid IS NULL OR r.export_booking_id<>@p1)
                 """, ct, trip.ContainerId, request.BookingId);
-            Require(I(unavailable[0], "count") == 0, "Container", "Container đã được gửi trong một Booking hãng tàu khác còn hiệu lực.");
+            Require(unavailable.All(row=>I(row,"count")==0), "Container", "Container đã được gửi trong một Booking hãng tàu khác còn hiệu lực.");
         }
     }
 

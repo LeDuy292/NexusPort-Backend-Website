@@ -1,5 +1,16 @@
 # NexusPort container and yard journey contract
 
+Transport Company staged export preparation uses additive migration
+`20261106_033_export_preparation.sql`. It adds private versioned drafts, separate
+candidate-container reservations and company-scoped S3 file identities. No existing
+business records are seeded or backfilled. New requests may specify equipment
+demand before container numbers, VGM or fleet assignments exist. Commercial approval
+does not allocate vehicles. The customer sends a completed container version for
+shipping-line review; only line acceptance declares the official list to the port.
+Truck appointments remain separate and require current resource availability.
+Existing unified submissions retain their previous contract.
+See [the preparation API contract](../docs/export-preparation-api.md).
+
 Customer unified export submissions use additive migration
 `20261105_032_unified_booking_submission.sql`: cargo, original document references
 and proposed fleet appointments are saved on the export booking before line review.

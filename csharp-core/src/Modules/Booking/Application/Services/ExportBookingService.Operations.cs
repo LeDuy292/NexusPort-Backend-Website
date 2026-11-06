@@ -120,6 +120,7 @@ public sealed partial class ExportBookingService
             await History(G(item,"exportBookingId"),id,"ContainerExcluded",S(item,"containerNumber")+": "+S(item,"reason"),ct);
         }
         await Exec("UPDATE export_voyages SET status='Closed',version=version+1 WHERE id=@p0",ct,id);
+        await Exec("UPDATE export_source_reservations r SET active=false FROM export_bookings b WHERE b.id=r.export_booking_id AND b.voyage_id=@p0 AND NOT EXISTS(SELECT 1 FROM export_booking_containers e WHERE e.export_booking_id=b.id AND e.container_id=r.container_id AND e.active)",ct,id);
         var bookings=await Rows("SELECT jsonb_build_object('id',id,'version',version)::text AS \"Value\" FROM export_bookings WHERE voyage_id=@p0 AND status NOT IN ('Cancelled','Rejected') FOR UPDATE",ct,id);
         foreach(var b in bookings)
         {
@@ -157,6 +158,7 @@ public sealed partial class ExportBookingService
         else throw new ValidationException("EventType","Sự kiện chuyến tàu không hợp lệ.");
         await Exec("UPDATE export_voyages SET status=@p0,departed_at=CASE WHEN @p1 THEN @p2 ELSE departed_at END,version=version+1 WHERE id=@p3",ct,request.EventType=="LoadingStarted"?"Loading":"Departed",request.EventType=="VoyageDeparted",request.OccurredAt,id);
         if(request.EventType=="VoyageDeparted")await Exec("UPDATE export_booking_containers e SET active=false FROM export_bookings b WHERE b.id=e.export_booking_id AND b.voyage_id=@p0 AND e.status='Loaded'",ct,id);
+        if(request.EventType=="VoyageDeparted")await Exec("UPDATE export_source_reservations r SET active=false FROM export_bookings b WHERE b.id=r.export_booking_id AND b.voyage_id=@p0",ct,id);
         await Exec("INSERT INTO export_inbox(event_id,voyage_id,version,event,payload_hash) VALUES(@p0,@p1,@p2,@p3,@p4)",ct,request.EventId,id,I(v,"version")+1,request.EventType,Hash(request));
         await Exec("INSERT INTO export_outbox(id,voyage_id,version,event,payload,delivered_at) VALUES(@p0,@p1,@p2,@p3,@p4::jsonb,now())",ct,request.EventId,id,I(v,"version")+1,request.EventType,JsonSerializer.Serialize(request,Json));
         await Exec("INSERT INTO export_history(id,voyage_id,event,actor_id,description) VALUES(@p0,@p1,@p2,@p3,@p4)",ct,Guid.NewGuid(),id,request.EventType,Actor,"Cảng ghi nhận "+request.EventType+" lúc "+request.OccurredAt.ToString("O"));
