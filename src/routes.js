@@ -9,7 +9,7 @@ const yardRoutes = require('./modules/yard/yard.routes');
 const driverBookingRoutes = require('./modules/driver-bookings/driver-bookings.routes');
 const dispatchRoutes = require('./modules/booking-dispatch/dispatch.routes');
 const gateIotRoutes = require('./modules/gate-iot/gate-iot.routes');
-const shippingRoutes = require('./modules/shipping/shipping.routes');
+const shippingLineRoutes = require('./modules/shipping-line/shippingLine.routes');
 const { nodeEnv } = require('./config/env');
 
 const systemRoutes = Router();
@@ -27,7 +27,7 @@ const mountedRouters = [
   { prefix: '/', tag: 'System', secured: false, router: systemRoutes },
   { prefix: '/api/auth', tag: 'Auth', secured: false, router: authRoutes },
   { prefix: '/api/gate', tag: 'Gate IoT', secured: false, router: gateIotRoutes },
-  { prefix: '/api/shipping', tag: 'Shipping Line', secured: false, router: shippingRoutes },
+  { prefix: '/api/shipping-line', tag: 'Shipping Line', secured: false, router: shippingLineRoutes },
   { prefix: '/api/driver-bookings', tag: 'Driver Bookings', secured: true, router: driverBookingRoutes },
   { prefix: '/api/booking-dispatch', tag: 'Booking Dispatch', secured: true, router: dispatchRoutes },
   { prefix: '/api/users', tag: 'Users', secured: true, router: usersRoutes },

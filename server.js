@@ -22,7 +22,11 @@ async function startServer() {
 
     // 2. Sync schema (chỉ dùng trong dev — dùng migrations ở production)
     if (nodeEnv !== 'production') {
-      await syncDB({ alter: true });
+      try {
+        await syncDB({ alter: true });
+      } catch (syncErr) {
+        console.warn('[DB] Schema sync skipped/warning:', syncErr.message);
+      }
     }
 
     // 3. Khởi động HTTP server & Socket.IO
