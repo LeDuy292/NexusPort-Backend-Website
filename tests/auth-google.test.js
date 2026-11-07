@@ -135,12 +135,26 @@ describe('POST /api/auth/google - Đăng nhập bằng Google & Whitelist', () =
     expect(res.body.message).toContain('không thể đăng nhập với vai trò');
   });
 
-  it('6. Báo lỗi khi request rỗng (thiếu credential/email) -> 422', async () => {
+  it('6. Báo lỗi khi request rỗng (thiếu credential/email/accessToken) -> 422', async () => {
     const res = await request(app)
       .post('/api/auth/google')
       .send({});
 
     expect(res.status).toBe(422);
     expect(res.body.success).toBe(false);
+  });
+
+  it('7. Đăng nhập thành công với mock Google access token', async () => {
+    const res = await request(app)
+      .post('/api/auth/google')
+      .send({
+        accessToken: 'mock-google-access-token',
+        email: 'driver01@gmail.com',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.data.token).toBeDefined();
+    expect(res.body.data.user.email).toBe('driver01@gmail.com');
   });
 });
