@@ -51,9 +51,9 @@ const resetPasswordValidator = [
 
 const googleLoginValidator = [
   body().custom((val, { req }) => {
-    const { credential, idToken, email } = req.body || {};
-    if (!credential && !idToken && !email) {
-      throw new Error('Vui lòng cung cấp Google credential (idToken) hoặc email.');
+    const { credential, idToken, accessToken, email } = req.body || {};
+    if (!credential && !idToken && !accessToken && !email) {
+      throw new Error('Vui lòng cung cấp Google credential (idToken), accessToken hoặc email.');
     }
     return true;
   }),

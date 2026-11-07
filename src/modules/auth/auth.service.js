@@ -280,7 +280,7 @@ async function resetPassword(emailOrUsername, otp, newPassword) {
  * @param {boolean} [options.rememberMe=false]
  * @returns {Promise<{ token: string, user: Object }>}
  */
-async function loginWithGoogle({ credential, idToken, email, expectedRole = null, rememberMe = false }) {
+async function loginWithGoogle({ credential, idToken, accessToken, email, expectedRole = null, rememberMe = false }) {
   let verifiedEmail = null;
   const tokenToVerify = credential || idToken;
 
@@ -289,7 +289,7 @@ async function loginWithGoogle({ credential, idToken, email, expectedRole = null
       // Mock token dành cho test/dev
       verifiedEmail = email || 'driver01@gmail.com';
     } else {
-      // Xác thực token với Google OAuth2 API
+      // Xác thực ID Token với Google OAuth2 API
       try {
         const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenToVerify)}`, {
           method: 'GET',
@@ -316,6 +316,44 @@ async function loginWithGoogle({ credential, idToken, email, expectedRole = null
       } catch (err) {
         if (err.statusCode) throw err;
         const fetchErr = new Error(`Lỗi kết nối xác thực với Google: ${err.message}`);
+        fetchErr.statusCode = 502;
+        throw fetchErr;
+      }
+    }
+  } else if (accessToken) {
+    if (accessToken === 'mock-google-access-token' || accessToken.startsWith('mock-')) {
+      verifiedEmail = email || 'driver01@gmail.com';
+    } else {
+      // Xác thực Access Token với Google Userinfo API
+      try {
+        const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          const err = new Error(errData.error_description || 'Google Access Token không hợp lệ hoặc đã hết hạn.');
+          err.statusCode = 401;
+          err.code = 'INVALID_GOOGLE_TOKEN';
+          throw err;
+        }
+
+        const userInfo = await response.json();
+        if (userInfo.email_verified !== 'true' && userInfo.email_verified !== true) {
+          const err = new Error('Tài khoản Google chưa được xác thực địa chỉ email.');
+          err.statusCode = 401;
+          err.code = 'UNVERIFIED_GOOGLE_EMAIL';
+          throw err;
+        }
+
+        verifiedEmail = userInfo.email;
+      } catch (err) {
+        if (err.statusCode) throw err;
+        const fetchErr = new Error(`Lỗi kết nối xác thực thông tin tài khoản Google: ${err.message}`);
         fetchErr.statusCode = 502;
         throw fetchErr;
       }
