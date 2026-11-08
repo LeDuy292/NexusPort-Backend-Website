@@ -52,7 +52,7 @@ const SEED_USERS = [
   {
     username: 'shipping01',
     email: 'shipping01@nexusport.vn',
-    role: 'Berth Staff',
+    role: 'Shipping Line',
     full_name: 'Đại diện Hãng Tàu',
   },
   {
