@@ -34,7 +34,12 @@ export interface RegisterContainerIdentityDto extends Partial<ContainerRegistrat
 
 export type ResolvedContainerIdentityDto = RegisterContainerIdentityDto & ContainerRegistrationEquipment;
 
-export interface ContainerIdentitySearchDto {
+export interface ContainerIdentityPageDto {
+  page: number;
+  limit: number;
+}
+
+export interface ContainerIdentitySearchDto extends ContainerIdentityPageDto {
   containerNumber?: string;
   prefix?: string;
   shippingLineId?: string;
@@ -42,8 +47,8 @@ export interface ContainerIdentitySearchDto {
   isoSizeType?: string;
   size?: ContainerSize;
   category?: ContainerCategory;
-  page: number;
-  limit: number;
+  manufacturer?: string;
+  minPayloadKg?: number;
 }
 
 export type UpdateContainerDto = Partial<Omit<CreateContainerDto, 'containerNumber'>> & {

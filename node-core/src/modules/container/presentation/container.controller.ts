@@ -1,4 +1,4 @@
-import { ContainerJourneyRepository } from '../infrastructure/container-journey.repository';
+import { ContainerJourneyRepository, ContainerRole } from '../infrastructure/container-journey.repository';
 import { NextFunction, Request, Response, Router } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
 import { z, ZodError, ZodSchema, ZodTypeDef } from 'zod';
@@ -9,8 +9,7 @@ import { ContainerStatusService } from '../application/container-status.service'
 import { ContainerIntakeService } from '../application/container-intake.service';
 import { ShippingLineDirectoryRepository } from '../infrastructure/shipping-line-directory.repository';
 import { ContainerSearchDto } from '../application/container.dto';
-import { containerIdentitySearchSchema, containerSearchSchema, idSchema, registerContainerIdentitySchema, transitionContainerStatusSchema } from '../application/container.validator';
-type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier' | 'Shipping Line' | 'Driver' | 'Berth Staff';
+import { ownContainerIdentitySearchSchema, containerIdentitySearchSchema, containerSearchSchema, idSchema, registerContainerIdentitySchema, transitionContainerStatusSchema } from '../application/container.validator';
 interface AuthorizedRequest extends Request {
     containerUser?: {
         id: string;
@@ -211,6 +210,13 @@ export const createContainerRouter = (): Router => {
         catch (error) { next(error); }
     });
     const journeys = new ContainerJourneyRepository();
+    router.get('/identities/mine', allowRoles('Shipping Line'), async (req: AuthorizedRequest, res, next) => {
+        try {
+            sendSuccess(res, await journeys.listOwnIdentities(req.containerUser!.id, parse(ownContainerIdentitySearchSchema, req.query)));
+        } catch (error) {
+            next(error);
+        }
+    });
     router.get('/identities', allowRoles(...identityReaders), async (req, res, next) => {
         try {
             sendSuccess(res, await journeys.searchIdentities(parse(containerIdentitySearchSchema, req.query)));
@@ -223,6 +229,9 @@ export const createContainerRouter = (): Router => {
     });
     router.get('/journeys', allowRoles(...readers), async (req: AuthorizedRequest,res,next) => {
       try { sendSuccess(res,await journeys.search(req.query,req.containerUser!.role==='Carrier')); } catch(e){next(e);}
+    });
+    router.get('/yard-visits', allowRoles(...identityReaders), async (req: AuthorizedRequest, res, next) => {
+      try { sendSuccess(res, await journeys.searchYardVisits(req.query, req.containerUser!)); } catch (e) { next(e); }
     });
     router.get('/own-visits/:id', allowRoles('Carrier'), async (req: AuthorizedRequest,res,next) => {
       try { sendSuccess(res,await journeys.ownVisits(parse(idSchema,req.params.id),req.containerUser!.id)); } catch(e){next(e);}

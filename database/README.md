@@ -47,11 +47,21 @@ Node `/containers/lookup?containerNumber=...` returns identity/type only.
 `/containers/journeys` requires explicit search; pagination is bounded to 50 rows.
 Carriers may filter only by number and receive identity fields only. Staff search
 visits by number, normalized truck plate, customer or time range. Generic rich
-container/detail/status endpoints are staff-only. No list loads on page entry.
+container/detail/status endpoints are staff-only.
+
+`GET /containers/yard-visits` is the shared yard visit search. It requires a filter
+and returns planned appointments, actual entry/exit times and issued EIRs.
+Carriers see visits linked to their bookings or explicitly granted to their company.
+Drivers see visits linked to bookings assigned to them, shipping lines see visits
+for their own equipment, and berth staff see visits linked to a vessel call.
+Vehicle and customer filters are available to port yard visit operators.
 
 `GET /containers/identities` searches physical equipment by number, BIC prefix,
-shipping line, catalog type, ISO size/type, size or category. Supply at least one
-filter. The response contains technical data and excludes cargo or booking data.
+shipping line, catalog type, ISO size/type, size, category, manufacturer or minimum
+payload. Supply at least one filter. `GET /containers/identities/mine` is the
+paginated default list for Shipping Line accounts. It uses the active account's
+linked profile and optionally accepts equipment filters. Both responses contain
+technical equipment data and exclude cargo or booking data.
 `POST /containers/intake/shipping-line/manual` lets an active Shipping Line account
 register a container whose BIC prefix belongs to its profile. It requires the
 container number, an ISO size/type from `GET /containers/intake/shipping-line/iso-types`,

@@ -73,9 +73,35 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
     },
   },
   'GET /api/v1/containers/identities': {
-    summary: 'Search container equipment by number, BIC prefix, shipping line, type, size or category',
-    parameters: ['containerNumber', 'prefix', 'shippingLineId', 'containerTypeId', 'isoSizeType', 'size', 'category']
-      .map(name => ({ name, in: 'query', schema: { type: 'string' } })),
+    summary: 'Search registered containers using at least one equipment filter',
+    parameters: [
+      ...['containerNumber', 'prefix', 'shippingLineId', 'containerTypeId', 'isoSizeType', 'size', 'category', 'manufacturer']
+        .map(name => ({ name, in: 'query', schema: { type: 'string' } })),
+      { name: 'minPayloadKg', in: 'query', schema: { type: 'number', minimum: 0, exclusiveMinimum: true } },
+    ],
+  },
+  'GET /api/v1/containers/identities/mine': {
+    summary: 'List registered containers for the signed-in Shipping Line',
+    description: 'The service resolves the shipping line from the active account. No search filter is required.',
+    parameters: [
+      { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 10000, default: 1 } },
+      { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
+      ...['containerNumber', 'prefix', 'containerTypeId', 'isoSizeType', 'size', 'category', 'manufacturer']
+        .map(name => ({ name, in: 'query', schema: { type: 'string' } })),
+      { name: 'minPayloadKg', in: 'query', schema: { type: 'number', minimum: 0, exclusiveMinimum: true } },
+    ],
+  },
+  'GET /api/v1/containers/yard-visits': {
+    summary: 'Search yard visits, planned appointments and issued EIRs',
+    description: 'Requires a filter. Visits and linked details are scoped to the authenticated role and account. Date filters match actual gate events or scheduled appointments.',
+    parameters: [
+      { name: 'containerNumber', in: 'query', schema: { type: 'string', minLength: 4, maxLength: 11 } },
+      { name: 'visitStatus', in: 'query', schema: { type: 'string', enum: ['planned', 'active', 'completed', 'canceled'] } },
+      ...['dateFrom', 'dateTo'].map(name => ({ name, in: 'query', schema: { type: 'string', format: 'date-time' } })),
+      ...['plateNumber', 'customerName'].map(name => ({ name, in: 'query', description: 'Yard visit operators only', schema: { type: 'string' } })),
+      { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 10000, default: 1 } },
+      { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
+    ],
   },
   'GET /api/v1/containers/intake/shipping-line/iso-types': {
     summary: 'List ISO markings supported for registration with their catalog types and nominal dimensions',
