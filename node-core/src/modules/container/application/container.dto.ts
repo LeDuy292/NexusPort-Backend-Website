@@ -15,6 +15,8 @@ export interface CreateContainerDto {
   expectedGateOutAt?: string | null;
 }
 
+export type RegisterContainerIdentityDto = Pick<CreateContainerDto, 'containerNumber' | 'containerTypeId'>;
+
 export type UpdateContainerDto = Partial<Omit<CreateContainerDto, 'containerNumber'>> & {
   containerNumber?: string;
   arrivedAt?: string | null;

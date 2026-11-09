@@ -1,7 +1,6 @@
 import { ContainerJourneyRepository } from '../infrastructure/container-journey.repository';
 import { NextFunction, Request, Response, Router } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
-import multer from 'multer';
 import { ZodError, ZodSchema } from 'zod';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '../../../shared/errors/app-error';
 import { sendCreated, sendSuccess } from '../../../shared/utils/response';
@@ -9,8 +8,8 @@ import { ContainerService } from '../application/container.service';
 import { ContainerStatusService } from '../application/container-status.service';
 import { ContainerIntakeService } from '../application/container-intake.service';
 import { ContainerSearchDto } from '../application/container.dto';
-import { containerSearchSchema, idSchema, transitionContainerStatusSchema, } from '../application/container.validator';
-type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier';
+import { containerSearchSchema, idSchema, registerContainerIdentitySchema, transitionContainerStatusSchema } from '../application/container.validator';
+type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier' | 'Shipping Line' | 'Driver' | 'Berth Staff';
 interface AuthorizedRequest extends Request {
     containerUser?: {
         id: string;
@@ -21,7 +20,8 @@ const roleAliases: Record<string, ContainerRole> = {
     administrator: 'Administrator', admin: 'Administrator', dispatcher: 'Dispatcher', operation: 'Dispatcher',
     'yard staff': 'Yard Staff', 'yard operator': 'Yard Staff', yard: 'Yard Staff',
     'gate officer': 'Gate Officer', gate: 'Gate Officer', carrier: 'Carrier',
-    'carrier staff': 'Carrier', 'transport company': 'Carrier', 'transportcompany': 'Carrier'
+    'carrier staff': 'Carrier', 'transport company': 'Carrier', 'transportcompany': 'Carrier',
+    'shipping line': 'Shipping Line', shippingline: 'Shipping Line', driver: 'Driver', 'berth staff': 'Berth Staff',
 };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const vietnameseValidationMessage = (issue: ZodError['issues'][number]): string => {
@@ -56,9 +56,11 @@ const authenticateContainerUser = (req: AuthorizedRequest, _res: Response, next:
     if (!token)
         return next(new UnauthorizedError('Vui lòng đăng nhập để sử dụng chức năng quản lý Container.'));
     try {
-        const payload = jwt.verify(token, process.env.JWT_SECRET || 'NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!', { algorithms: ['HS256'] }) as JwtPayload;
-        const rawRole = String(payload.role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? '').toLowerCase();
-        const role = roleAliases[rawRole];
+        const secret = process.env.JWT_SECRET;
+        if (!secret) return next(new UnauthorizedError('Dịch vụ chưa cấu hình xác thực Container.'));
+        const payload = jwt.verify(token, secret, { algorithms: ['HS256'] }) as JwtPayload;
+        const rawRole = String(payload.role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? '').trim().toLowerCase();
+        const role = Object.hasOwn(roleAliases, rawRole) ? roleAliases[rawRole] : undefined;
         if (!role)
             return next(new ForbiddenError('Vai trò của bạn không có quyền truy cập chức năng quản lý Container.'));
         const userId = String(payload.sub ?? payload.id ?? '');
@@ -79,17 +81,10 @@ const allowRoles = (...roles: ContainerRole[]) => (req: AuthorizedRequest, _res:
 };
 export class ContainerController {
     constructor(private readonly service = new ContainerService(), private readonly statusService = new ContainerStatusService(), private readonly intakeService = new ContainerIntakeService()) { }
-    createTransportIntake = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
+    registerIdentity = async (req: Request, res: Response, next: NextFunction) => {
         try {
-            sendCreated(res, await this.intakeService.createManual(req.body, 'transport_company', req.containerUser!.id));
-        }
-        catch (error) {
-            next(error);
-        }
-    };
-    importTransportExcel = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
-        try {
-            sendSuccess(res, await this.intakeService.importExcel(req.file, 'transport_company', req.containerUser!.id));
+            const dto = parse(registerContainerIdentitySchema, req.body);
+            sendCreated(res, await this.service.registerIdentity(dto));
         }
         catch (error) {
             next(error);
@@ -137,15 +132,6 @@ export class ContainerController {
             next(error);
         }
     };
-    downloadTemplate = async (_req: Request, res: Response, next: NextFunction) => {
-        try {
-            res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-                .attachment('Mau_Khai_Bao_Container.xlsx').send(await this.intakeService.buildTemplate());
-        }
-        catch (error) {
-            next(error);
-        }
-    };
     getById = async (req: Request, res: Response, next: NextFunction) => {
         try {
             sendSuccess(res, await this.service.getById(parse(idSchema, req.params.id)));
@@ -185,26 +171,28 @@ export class ContainerController {
 export const createContainerRouter = (): Router => {
     const router = Router();
     const controller = new ContainerController();
-    const upload = multer({
-        storage: multer.memoryStorage(),
-        limits: { fileSize: 5 * 1024 * 1024, files: 1 },
-    });
     const readers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer', 'Carrier'];
+    const identityReaders: ContainerRole[] = [...readers, 'Shipping Line', 'Driver', 'Berth Staff'];
     const writers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Gate Officer'];
     router.use(authenticateContainerUser);
-    router.get('/types', allowRoles(...readers), controller.getTypes);
+    router.get('/types', allowRoles(...readers, 'Shipping Line'), controller.getTypes);
     router.get('/cargo-types', allowRoles(...readers), controller.getCargoTypes);
     router.get('/intake/imports', allowRoles('Administrator', 'Dispatcher'), controller.listImports);
     router.get('/intake/transport/declarations', allowRoles('Carrier'), controller.listTransportDeclarations);
-    router.get('/intake/transport/template', allowRoles('Carrier'), controller.downloadTemplate);
-    router.post('/intake/transport/manual', allowRoles('Carrier'), controller.createTransportIntake);
-    router.post('/intake/transport/import', allowRoles('Carrier'), upload.single('file'), controller.importTransportExcel);
+    router.post('/intake/shipping-line/manual', allowRoles('Shipping Line'), controller.registerIdentity);
     const journeys = new ContainerJourneyRepository();
-    router.get('/lookup', allowRoles(...readers), async (req,res,next) => {
+    router.get('/identities', allowRoles(...identityReaders), async (req, res, next) => {
+        try {
+            sendSuccess(res, await journeys.searchIdentities(req.query));
+        } catch (error) {
+            next(error);
+        }
+    });
+    router.get('/lookup', allowRoles(...identityReaders), async (req,res,next) => {
       try { sendSuccess(res,await journeys.lookup(String(req.query.containerNumber??'').trim().toUpperCase())); } catch(e){next(e);}
     });
     router.get('/journeys', allowRoles(...readers), async (req: AuthorizedRequest,res,next) => {
-      try { sendSuccess(res,await journeys.search(req.query,req.containerUser!.role==='Carrier'?req.containerUser!.id:undefined)); } catch(e){next(e);}
+      try { sendSuccess(res,await journeys.search(req.query,req.containerUser!.role==='Carrier')); } catch(e){next(e);}
     });
     router.get('/own-visits/:id', allowRoles('Carrier'), async (req: AuthorizedRequest,res,next) => {
       try { sendSuccess(res,await journeys.ownVisits(parse(idSchema,req.params.id),req.containerUser!.id)); } catch(e){next(e);}

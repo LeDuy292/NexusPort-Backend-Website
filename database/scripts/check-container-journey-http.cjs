@@ -27,9 +27,19 @@ async function api(port,path,index,method='GET',body,status=200,role) {
       await db.query("INSERT INTO drivers(id,carrier_id,full_name,license_number) VALUES($1,$2,$3,$4)",[drivers[i],carriers[i],'HTTP driver '+i,'FC-'+drivers[i]]);
       await db.query("INSERT INTO trucks(id,carrier_id,plate_number,vehicle_type,driver_id) VALUES($1,$2,$3,'Truck 24T',$4)",[trucks[i],carriers[i],'HTTP-'+trucks[i].slice(0,8),drivers[i]]);
     }
-    const created=await api(5189,'/api/v1/containers/intake/transport/manual',0,'POST',{containerNumber:'CSQU3054383',containerTypeCode:'40RF',cargoType:'reefer',requiredPowerKw:10,customerName:'PRIVATE HTTP A',sealNumber:'ACTUAL-SEAL',grossWeightKg:18000},201);
-    containerId=created.containerId;
-    assert.ok(created.declarationId); assert.equal(created.visitId,undefined);
+    const {id:containerTypeId}=(await db.query("SELECT id FROM container_types WHERE code='40RF'")).rows[0];
+    const registration={containerNumber:'CSQU3054383',containerTypeId};
+    const registerPath='/api/v1/containers/intake/shipping-line/manual';
+    await api(5189,registerPath,0,'POST',registration,403);
+    const identityCreated=await api(5189,registerPath,0,'POST',registration,201,'Shipping Line');
+    containerId=identityCreated.id;
+    await api(5189,registerPath,0,'POST',registration,409,'Shipping Line');
+    // Simulate cargo that was declared by the company before transport intake was retired.
+    const {id:declarationId}=(await db.query(`INSERT INTO container_declarations
+      (container_id,declared_by,carrier_id,load_status,cargo_type,required_power_kw,customer_name,seal_number,gross_weight_kg)
+      VALUES($1,$2,$3,'full','reefer',10,'PRIVATE HTTP A','ACTUAL-SEAL',18000) RETURNING id`,
+      [containerId,users[0],carriers[0]])).rows[0];
+    const created={declarationId};
     const identity=await api(5189,'/api/v1/containers/lookup?containerNumber=CSQU3054383',1);
     assert.equal(identity.customerName,undefined);assert.equal(identity.sealNumber,undefined);
     await api(5189,`/api/v1/containers/${containerId}`,1,'GET',null,403);

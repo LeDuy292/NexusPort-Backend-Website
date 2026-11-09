@@ -1,5 +1,5 @@
 import { AppError } from '../../../shared/errors/app-error';
-import { CreateContainerDto, ContainerSearchDto, UpdateContainerDto } from './container.dto';
+import { ContainerSearchDto, RegisterContainerIdentityDto, UpdateContainerDto } from './container.dto';
 import { ContainerRepository } from '../infrastructure/container.repository';
 
 type PostgresError = Error & { code?: string; constraint?: string };
@@ -16,14 +16,12 @@ export class ContainerService {
     return container;
   }
 
-  async create(dto: CreateContainerDto) {
-    if (await this.repository.findByContainerNumber(dto.containerNumber)) {
-      throw new AppError('Mã Container đã tồn tại.', 409, 'CONTAINER_ID_DUPLICATE');
-    }
+  async registerIdentity(dto: RegisterContainerIdentityDto) {
     const containerType = await this.repository.findTypeById(dto.containerTypeId);
     if (!containerType) throw new AppError(`Không tìm thấy loại Container có ID '${dto.containerTypeId}'.`, 404, 'CONTAINER_TYPE_NOT_FOUND');
     try {
-      return await this.repository.create(dto, containerType.category);
+      const id = await this.repository.createIdentity(dto, containerType.category === 'reefer');
+      return { id, ...dto, containerTypeCode: containerType.code };
     } catch (error) {
       this.handlePersistenceError(error as PostgresError);
     }

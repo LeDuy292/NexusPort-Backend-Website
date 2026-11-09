@@ -35,6 +35,27 @@ const parameterSchema = (path: string) => [...path.matchAll(/\{([A-Za-z0-9_]+)\}
 }));
 
 const operationOverrides: Record<string, Record<string, unknown>> = {
+  'GET /api/v1/containers/identities': {
+    summary: 'Search physical container identities by number prefix',
+    parameters: [{
+      name: 'containerNumber', in: 'query', required: true,
+      schema: { type: 'string', minLength: 4, maxLength: 11 },
+    }],
+  },
+  'POST /api/v1/containers/intake/shipping-line/manual': {
+    summary: 'Register a physical container (Shipping Line only)',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', required: ['containerNumber', 'containerTypeId'], additionalProperties: false,
+      properties: { containerNumber: { type: 'string', description: 'ISO 6346 equipment number' }, containerTypeId: { type: 'string', format: 'uuid' } },
+    } } } },
+    responses: {
+      201: { description: 'Container registered' },
+      401: { description: 'Missing or invalid token' },
+      403: { description: 'Shipping Line role required' },
+      409: { description: 'Container number already registered' },
+      422: { description: 'Invalid container identity' },
+    },
+  },
   'GET /api/v1/drivers/me/yard-map': {
     summary: 'Read the approved 2D yard layout before Gate In without granting entry permission',
     security: [{ BearerAuth: [] }],

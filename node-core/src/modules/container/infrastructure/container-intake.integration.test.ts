@@ -42,10 +42,10 @@ const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_U
     expect((await repository.listTransportDeclarations(userB,row.containerNumber)).map(d=>d.customerName)).toEqual(['Private B']);
     const lookup=await journeys.lookup(row.containerNumber);
     expect(Object.keys(lookup).sort()).toEqual(['id','containerNumber','containerTypeId','containerTypeCode','containerTypeDescription'].sort());
-    const publicSearch=await journeys.search({containerNumber:'EMCU'},userB);
+    const publicSearch=await journeys.search({containerNumber:'EMCU'},true);
     expect(publicSearch.items[0]).not.toHaveProperty('customerName');expect(publicSearch.items[0]).not.toHaveProperty('status');
-    await expect(journeys.search({},userA)).rejects.toThrow('Nhập');
-    await expect(journeys.search({containerNumber:'EMCU',customerName:'Private'},userB)).rejects.toThrow('chỉ được tìm');
+    await expect(journeys.search({},true)).rejects.toThrow('Nhập');
+    await expect(journeys.search({containerNumber:'EMCU',customerName:'Private'},true)).rejects.toThrow('chỉ được tìm');
   });
   it('deduplicates identical unbooked input and rejects a conflicting equipment type',async()=>{
     expect((await service.createManual(row,'transport_company',userA)).declarationId).toBe(declarationA);

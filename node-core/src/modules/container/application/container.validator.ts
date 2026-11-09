@@ -39,6 +39,11 @@ export const createContainerSchema = z.object({
   expectedGateOutAt: nullableDateTime,
 });
 
+export const registerContainerIdentitySchema = createContainerSchema.pick({
+  containerNumber: true,
+  containerTypeId: true,
+}).strict();
+
 export const updateContainerSchema = createContainerSchema.partial().extend({
   arrivedAt: nullableDateTime,
   leftAt: nullableDateTime,

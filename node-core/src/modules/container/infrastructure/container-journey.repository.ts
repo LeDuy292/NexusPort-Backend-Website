@@ -10,7 +10,22 @@ export class ContainerJourneyRepository {
     return result.rows[0] ?? null;
   }
 
-  async search(filters: Record<string, unknown>, userId?: string) {
+  async searchIdentities(filters: Record<string, unknown>) {
+    const number = String(filters.containerNumber ?? '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{4,11}$/.test(number))
+      throw new AppError('Nhập số Container từ 4 đến 11 ký tự để tìm kiếm.', 422);
+    const page = Math.max(1, Math.min(Math.trunc(Number(filters.page)) || 1, 10000));
+    const limit = Math.max(1, Math.min(Math.trunc(Number(filters.limit)) || 20, 50));
+    const prefix = number + '%';
+    const from = 'FROM containers c JOIN container_types ct ON ct.id=c.container_type_id WHERE c.container_no LIKE $1';
+    const total = Number((await query('SELECT count(*) ' + from, [prefix])).rows[0].count);
+    const { rows } = await query(`SELECT c.id,c.container_no AS "containerNumber",ct.code AS "containerTypeCode",
+      ct.description AS "containerTypeDescription" ${from} ORDER BY c.container_no LIMIT $2 OFFSET $3`,
+      [prefix, limit, (page - 1) * limit]);
+    return { items: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async search(filters: Record<string, unknown>, identityOnly = false) {
     const number = String(filters.containerNumber ?? '').trim().toUpperCase();
     const plate = String(filters.plateNumber ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase();
     const customer = String(filters.customerName ?? '').trim();
@@ -18,7 +33,10 @@ export class ContainerJourneyRepository {
     const to = filters.dateTo ? new Date(String(filters.dateTo)) : null;
     if ((from && !Number.isFinite(from.getTime())) || (to && !Number.isFinite(to.getTime())) || (from && to && from > to))
       throw new AppError('Khoảng thời gian không hợp lệ.', 422);
-    if (userId && (plate || customer || from || to)) throw new AppError('Công ty vận tải chỉ được tìm theo số Container.', 403);
+    if (identityOnly) {
+      if (plate || customer || from || to) throw new AppError('Công ty vận tải chỉ được tìm theo số Container.', 403);
+      return this.searchIdentities(filters);
+    }
     if ((!number || number.length < 4) && !plate && customer.length < 3)
       throw new AppError('Nhập số Container (ít nhất 4 ký tự), biển số xe hoặc khách hàng (ít nhất 3 ký tự).', 422);
     if (number && !/^[A-Z0-9]{4,11}$/.test(number)) throw new AppError('Số Container tìm kiếm không hợp lệ.', 422);
@@ -29,13 +47,6 @@ export class ContainerJourneyRepository {
     const where: string[] = [];
     const add = (sql: string, value: unknown) => { params.push(value); where.push(sql.replace('?', '$' + params.length)); };
     if (number) add('c.container_no LIKE ?', number + '%');
-    if (userId) {
-      // A separate projection makes cargo/customer/operational fields unreachable.
-      const base = `FROM containers c JOIN container_types ct ON ct.id=c.container_type_id WHERE ${where.join(' AND ')}`;
-      const total = Number((await query('SELECT count(*) ' + base, params)).rows[0].count);
-      const rows = await query(`SELECT c.id,c.container_no AS "containerNumber",ct.code AS "containerTypeCode",ct.description AS "containerTypeDescription" ${base} ORDER BY c.container_no LIMIT $${params.length + 1} OFFSET $${params.length + 2}`, [...params,limit,(page-1)*limit]);
-      return { items: rows.rows, total, page, limit, totalPages: Math.ceil(total/limit) };
-    }
     if (customer) add("v.customer_name ILIKE ? ESCAPE '\\'", '%' + customer.replace(/[\\%_]/g, '\\$&') + '%');
     if (plate) add(`EXISTS(SELECT 1 FROM eir_transactions ex WHERE ex.container_visit_id=v.id AND regexp_replace(upper(ex.plate_number),'[^A-Z0-9]','','g') LIKE ?)
       OR EXISTS(SELECT 1 FROM booking_containers bx JOIN bookings b ON b.id=bx.booking_id LEFT JOIN trucks t ON t.id=b.truck_id

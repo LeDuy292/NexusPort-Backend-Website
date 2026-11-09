@@ -49,21 +49,26 @@ Carriers may filter only by number and receive identity fields only. Staff searc
 visits by number, normalized truck plate, customer or time range. Generic rich
 container/detail/status endpoints are staff-only. No list loads on page entry.
 
-`/containers/intake/transport/manual` and `/import` are carrier-only. The authenticated
-user must have one unambiguous company membership. Manual and the single-sheet
-empty Excel template share eight input fields. Seal is optional; frozen cargo
-requires positive kW and refrigerated equipment. IDs returned include
-`declarationId`, not a fabricated `visitId`.
+`GET /containers/identities?containerNumber=...` lets authenticated roles search
+physical identities by number prefix. `POST /containers/intake/shipping-line/manual`
+allows only Shipping Line to register a physical container with its ISO number and
+equipment type. An existing number returns a conflict. Registration creates no
+declaration or visit. Transport intake writes and the old Excel template are retired.
+Transport companies can still search their existing declarations and use them in Booking.
+Set Node Core's `JWT_SECRET` to the key used by the login service.
 
-C# Dropoff requires `containerSelections` with `containerId` and the exact `declarationId` passed from the declaration page. Pickup requires `containerId` and private `yardCode`; the server resolves the stay and copies the inbound cargo snapshot into the receiving company scope in the same transaction. Client-supplied visit/declaration IDs cannot replace the code for Pickup. Tenant is resolved from authenticated DB
+C# Dropoff requires `containerSelections` with `containerId` and the exact `declarationId`
+from an existing declaration in the transport company's scope. A newly registered
+identity alone cannot satisfy this requirement. Pickup requires `containerId` and
+private `yardCode`; the server resolves the stay and copies the inbound cargo snapshot into the receiving company scope in the same transaction. Client-supplied visit/declaration IDs cannot replace the code for Pickup. Tenant is resolved from authenticated DB
 membership; client carrier IDs cannot override it. C# returns the visit assigned
 by the DB trigger. Changing dates/assignments revalidates the whole schedule.
 Physical status is updated by actual gate/yard actions, not booking creation or
 cancellation. Passed physical GateOut completes the Pickup stay and creates its
 receipt; completing a Dropoff exchange retains an active stay.
 
-The declaration screen passes the selected identity/declaration into Booking; the
-Booking wizard has no declaration or stay dropdown. Its original two-step layout,
+The transport search screen passes a selected existing identity/declaration into Booking.
+Its original two-step layout,
 fleet recommendation, payload gauge, shift presets and e-Pass preview are retained.
 `POST /Booking/recommend-selection` accepts the exact private declaration for Dropoff
 or the pickup code for Pickup; the original matching algorithm uses this cargo and

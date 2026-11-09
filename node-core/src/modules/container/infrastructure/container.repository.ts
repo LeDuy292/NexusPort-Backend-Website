@@ -1,5 +1,5 @@
 import { getClient, query } from '../../../infrastructure/database/db';
-import { CreateContainerDto, ContainerListItem, ContainerListResult, ContainerSearchDto, UpdateContainerDto } from '../application/container.dto';
+import { ContainerListItem, ContainerListResult, ContainerSearchDto, RegisterContainerIdentityDto, UpdateContainerDto } from '../application/container.dto';
 import {
   ContainerBookingSummary, ContainerDetailEntity, ContainerEirDamage, ContainerEirMedia,
   ContainerEirSeal, ContainerEirTransaction, ContainerPositionSummary, ContainerStatus,
@@ -457,19 +457,13 @@ export class ContainerRepository {
     return result.rows.map((row) => mapType(row));
   }
 
-  async create(dto: CreateContainerDto, typeCategory: string): Promise<ContainerDetailEntity> {
+  async createIdentity(dto: RegisterContainerIdentityDto, isReefer: boolean): Promise<string> {
     const result = await query(
-      `INSERT INTO containers (
-         carrier_id, container_type_id, vessel_call_id, container_no, seal_no, cargo_type, status,
-         gross_weight_kg, is_reefer, is_dangerous, is_perishable, is_oversized, expected_gate_out_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
-       RETURNING id`,
-      [dto.carrierId ?? null, dto.containerTypeId, dto.vesselCallId ?? null, dto.containerNumber,
-       dto.sealNumber ?? null, dto.cargoType ?? 'general', dto.status ?? 'expected', dto.grossWeightKg ?? null,
-       typeCategory === 'reefer' || dto.cargoType === 'reefer', dto.cargoType === 'dangerous',
-       dto.cargoType === 'perishable', dto.cargoType === 'oversized', dto.expectedGateOutAt ?? null],
+      `INSERT INTO containers (container_type_id, container_no, status, is_reefer)
+       VALUES ($1, $2, 'expected', $3) RETURNING id`,
+      [dto.containerTypeId, dto.containerNumber, isReefer],
     );
-    return (await this.findById(result.rows[0].id))!;
+    return result.rows[0].id;
   }
 
   async update(id: string, dto: UpdateContainerDto, typeCategory: string, effectiveCargoType: string): Promise<ContainerDetailEntity> {
