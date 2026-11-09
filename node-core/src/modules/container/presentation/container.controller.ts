@@ -89,6 +89,9 @@ const allowRoles = (...roles: ContainerRole[]) => (req: AuthorizedRequest, _res:
 };
 export class ContainerController {
     constructor(private readonly service = new ContainerService(), private readonly statusService = new ContainerStatusService(), private readonly intakeService = new ContainerIntakeService()) { }
+    getRegistrationIsoTypes = async (_req: Request, res: Response, next: NextFunction) => {
+        try { sendSuccess(res, await this.service.getRegistrationIsoTypes()); } catch (error) { next(error); }
+    };
     registerIdentity = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
         try {
             const dto = parse(registerContainerIdentitySchema, req.body);
@@ -187,6 +190,7 @@ export const createContainerRouter = (): Router => {
     router.get('/cargo-types', allowRoles(...readers), controller.getCargoTypes);
     router.get('/intake/imports', allowRoles('Administrator', 'Dispatcher'), controller.listImports);
     router.get('/intake/transport/declarations', allowRoles('Carrier'), controller.listTransportDeclarations);
+    router.get('/intake/shipping-line/iso-types', allowRoles('Shipping Line'), controller.getRegistrationIsoTypes);
     router.post('/intake/shipping-line/manual', allowRoles('Shipping Line'), controller.registerIdentity);
     const shippingLines = new ShippingLineDirectoryRepository();
     router.get('/shipping-lines', allowRoles(...identityReaders), async (_req, res, next) => {

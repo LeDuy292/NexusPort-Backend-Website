@@ -1,5 +1,5 @@
 import { getClient, query } from '../../../infrastructure/database/db';
-import { ContainerListItem, ContainerListResult, ContainerSearchDto, RegisterContainerIdentityDto, UpdateContainerDto } from '../application/container.dto';
+import { ContainerListItem, ContainerListResult, ContainerSearchDto, ResolvedContainerIdentityDto, UpdateContainerDto } from '../application/container.dto';
 import {
   ContainerBookingSummary, ContainerDetailEntity, ContainerEirDamage, ContainerEirMedia,
   ContainerEirSeal, ContainerEirTransaction, ContainerPositionSummary, ContainerStatus,
@@ -457,7 +457,7 @@ export class ContainerRepository {
     return result.rows.map((row) => mapType(row));
   }
 
-  async createIdentity(dto: RegisterContainerIdentityDto, isReefer: boolean, userId: string): Promise<string | undefined> {
+  async createIdentity(dto: ResolvedContainerIdentityDto, isReefer: boolean, userId: string): Promise<string | undefined> {
     const result = await query(
       `INSERT INTO containers (container_type_id, container_no, status, is_reefer, shipping_line_id,
          iso_size_type, equipment_description, external_length_mm, external_width_mm, external_height_mm,

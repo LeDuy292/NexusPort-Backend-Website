@@ -53,9 +53,12 @@ container/detail/status endpoints are staff-only. No list loads on page entry.
 shipping line, catalog type, ISO size/type, size or category. Supply at least one
 filter. The response contains technical data and excludes cargo or booking data.
 `POST /containers/intake/shipping-line/manual` lets an active Shipping Line account
-register a container whose BIC prefix belongs to its profile. It requires an ISO
-number, catalog type, ISO size/type, external dimensions in mm, tare and maximum
-gross mass in kg. Description, manufacturer and capacity in m³ are optional.
+register a container whose BIC prefix belongs to its profile. It requires the
+container number, an ISO size/type from `GET /containers/intake/shipping-line/iso-types`,
+tare and maximum gross mass in kg. The server derives the catalog type and nominal
+external dimensions in mm from the selected code. If a caller sends those fields,
+they must match the code. The list covers ISO markings mapped to the NexusPort
+equipment catalog. Description, manufacturer and internal capacity in m³ are optional.
 Payload is maximum gross mass minus tare. A duplicate returns a conflict.
 Registration creates no declaration or visit. Transport intake writes and the old Excel template are retired.
 Transport companies can still search their existing declarations and use them in Booking.

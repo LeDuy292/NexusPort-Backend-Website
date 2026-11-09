@@ -46,12 +46,12 @@ const mass = z.number().positive().max(999999.99).multipleOf(0.01);
 export const registerContainerIdentitySchema = createContainerSchema.pick({
   containerNumber: true,
   containerTypeId: true,
-}).extend({
+}).partial({ containerTypeId: true }).extend({
   isoSizeType,
   equipmentDescription: z.string().trim().min(1).max(250).optional(),
-  externalLengthMm: dimension,
-  externalWidthMm: dimension,
-  externalHeightMm: dimension,
+  externalLengthMm: dimension.optional(),
+  externalWidthMm: dimension.optional(),
+  externalHeightMm: dimension.optional(),
   tareWeightKg: mass,
   maxGrossMassKg: mass,
   capacityM3: z.number().positive().max(9999.999).multipleOf(0.001).optional(),

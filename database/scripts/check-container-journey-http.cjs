@@ -31,15 +31,19 @@ async function api(port,path,index,method='GET',body,status=200,role) {
     await db.query('INSERT INTO shipping_lines(id,full_name,short_name) VALUES($1,$2,$3)',[shippingLineId,'HTTP Test Shipping Line','HTTP-NXP-038']);
     await db.query("INSERT INTO shipping_line_prefixes(prefix,shipping_line_id) VALUES('CSQU',$1)",[shippingLineId]);
     await db.query("INSERT INTO users(id,username,email,password,role,is_active,created_at,updated_at,shipping_line_id) VALUES($1,$2,$3,'test-only','Shipping Line',true,now(),now(),$4)",[users[2],'http-'+users[2],users[2]+'@example.invalid',shippingLineId]);
-    const {id:containerTypeId}=(await db.query("SELECT id FROM container_types WHERE code='40RF'")).rows[0];
-    const registration={containerNumber:'CSQU3054383',containerTypeId,isoSizeType:'45R1',externalLengthMm:12192,
-      externalWidthMm:2438,externalHeightMm:2896,tareWeightKg:4200,maxGrossMassKg:34000};
+    const {id:wrongTypeId}=(await db.query("SELECT id FROM container_types WHERE code='20RF'")).rows[0];
+    const registration={containerNumber:'CSQU3054383',isoSizeType:'42R1',tareWeightKg:4200,maxGrossMassKg:34000};
     const registerPath='/api/v1/containers/intake/shipping-line/manual';
     await api(5189,registerPath,0,'POST',registration,403);
+    const isoTypes=await api(5189,'/api/v1/containers/intake/shipping-line/iso-types',2,'GET',null,200,'Shipping Line');
+    assert.equal(isoTypes.find(option=>option.isoSizeType==='45G0').externalHeightMm,2896);
+    await api(5189,registerPath,2,'POST',{...registration,containerTypeId:wrongTypeId,externalHeightMm:2896},422,'Shipping Line');
     const identityCreated=await api(5189,registerPath,2,'POST',registration,201,'Shipping Line');
+    assert.equal(identityCreated.containerTypeCode,'40RF');
+    assert.equal(identityCreated.externalHeightMm,2591);
     containerId=identityCreated.id;
     await api(5189,registerPath,2,'POST',registration,409,'Shipping Line');
-    const equipment=await api(5189,`/api/v1/containers/identities?shippingLineId=${shippingLineId}&isoSizeType=45R1`,1);
+    const equipment=await api(5189,`/api/v1/containers/identities?shippingLineId=${shippingLineId}&isoSizeType=42R1`,1);
     assert.equal(equipment.items[0].maxPayloadKg,29800);
     assert.equal(equipment.items[0].customerName,undefined);
     // Simulate cargo that was declared by the company before transport intake was retired.

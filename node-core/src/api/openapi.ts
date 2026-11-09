@@ -40,16 +40,22 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
     parameters: ['containerNumber', 'prefix', 'shippingLineId', 'containerTypeId', 'isoSizeType', 'size', 'category']
       .map(name => ({ name, in: 'query', schema: { type: 'string' } })),
   },
+  'GET /api/v1/containers/intake/shipping-line/iso-types': {
+    summary: 'List ISO markings supported for registration with their catalog types and nominal dimensions',
+  },
   'POST /api/v1/containers/intake/shipping-line/manual': {
     summary: 'Register a physical container (Shipping Line only)',
     requestBody: { required: true, content: { 'application/json': { schema: {
       type: 'object', additionalProperties: false,
-      required: ['containerNumber', 'containerTypeId', 'isoSizeType', 'externalLengthMm', 'externalWidthMm', 'externalHeightMm', 'tareWeightKg', 'maxGrossMassKg'],
+      required: ['containerNumber', 'isoSizeType', 'tareWeightKg', 'maxGrossMassKg'],
       properties: {
         containerNumber: { type: 'string', description: 'ISO 6346 equipment number' },
-        containerTypeId: { type: 'string', format: 'uuid' }, isoSizeType: { type: 'string' },
+        containerTypeId: { type: 'string', format: 'uuid', description: 'Optional. Must match the selected ISO code.' },
+        isoSizeType: { type: 'string', description: 'Use a code returned by the shipping-line ISO types endpoint.' },
         equipmentDescription: { type: 'string' }, manufacturer: { type: 'string' },
-        externalLengthMm: { type: 'integer' }, externalWidthMm: { type: 'integer' }, externalHeightMm: { type: 'integer' },
+        externalLengthMm: { type: 'integer', description: 'Optional. Must match the nominal length.' },
+        externalWidthMm: { type: 'integer', description: 'Optional. Must match the nominal width.' },
+        externalHeightMm: { type: 'integer', description: 'Optional. Must match the nominal height.' },
         tareWeightKg: { type: 'number' }, maxGrossMassKg: { type: 'number' }, capacityM3: { type: 'number' },
       },
     } } } },
