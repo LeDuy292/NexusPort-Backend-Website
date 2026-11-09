@@ -3,6 +3,18 @@
 const swaggerJsdoc = require('swagger-jsdoc');
 const { mountedRouters } = require('../routes');
 const { addDiscoveredRoutes } = require('./route-openapi');
+const shippingLineReference = require('../../node-core/src/modules/container/domain/shipping-line-reference.json');
+
+const shippingLineAccounts = [
+  '**Tài khoản Hãng tàu đã nhập trên Aiven**',
+  '',
+  '| Username | Role | Hãng tàu | Tiền tố BIC |',
+  '|---|---|---|---|',
+  ...shippingLineReference.map(({ seedUsername, fullName, prefixes }) =>
+    `| ${seedUsername} | Shipping Line | ${fullName} | ${prefixes.join(', ')} |`),
+  '',
+  'Mật khẩu khởi tạo của các tài khoản này được lưu trong tệp bàn giao riêng.',
+].join('\n');
 
 const options = {
   definition: {
@@ -21,7 +33,8 @@ const options = {
         '| yard01 | Yard Operator | NexusPort@2026 |\n' +
         '| berth01 | Berth Staff | NexusPort@2026 |\n' +
         '| carrier01 | Transport Company | NexusPort@2026 |\n' +
-        '| driver01 | Driver | NexusPort@2026 |\n',
+        '| driver01 | Driver | NexusPort@2026 |\n\n' +
+        shippingLineAccounts,
       contact: {
         name: 'NexusPort Dev Team',
         email: 'dev@nexusport.vn',
@@ -70,6 +83,7 @@ const options = {
                 'Gate Officer',
                 'Yard Operator',
                 'Berth Staff',
+                'Shipping Line',
               ],
               example: 'Dispatcher',
             },

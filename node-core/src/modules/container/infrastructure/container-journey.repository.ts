@@ -1,5 +1,16 @@
 import { getClient, query } from '../../../infrastructure/database/db';
 import { AppError } from '../../../shared/errors/app-error';
+import { ContainerIdentitySearchDto } from '../application/container.dto';
+
+export type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier' | 'Shipping Line' | 'Driver' | 'Berth Staff';
+
+interface YardVisitReader {
+  id: string;
+  role: ContainerRole;
+}
+
+const ownShippingLine = `SELECT a.shipping_line_id FROM shipping_line_accounts a JOIN users u ON u.id=a.user_id
+  WHERE u.id=? AND u.role='Shipping Line' AND u.is_active`;
 
 export class ContainerJourneyRepository {
   async lookup(number: string) {
@@ -10,52 +21,148 @@ export class ContainerJourneyRepository {
     return result.rows[0] ?? null;
   }
 
-  async search(filters: Record<string, unknown>, userId?: string) {
+  listOwnIdentities(userId: string, filters: Omit<ContainerIdentitySearchDto, 'shippingLineId'>) {
+    return this.searchIdentities(filters, userId);
+  }
+
+  async searchIdentities(filters: ContainerIdentitySearchDto, shippingLineUserId?: string) {
+    const { containerNumber, prefix, shippingLineId, containerTypeId, isoSizeType, size, category,
+      manufacturer, minPayloadKg, page, limit } = filters;
+    const params: Array<string | number> = [];
+    const conditions: string[] = [];
+    const add = (condition: string, value?: string | number) => {
+      if (value === undefined) return;
+      params.push(value);
+      conditions.push(condition.replace('?', '$' + params.length));
+    };
+    add('c.container_no LIKE ?', containerNumber && containerNumber + '%');
+    add('c.container_no LIKE ?', prefix && prefix + '%');
+    add('l.id = ?', shippingLineId);
+    add('c.container_type_id = ?', containerTypeId);
+    add('c.iso_size_type = ?', isoSizeType);
+    add('ct.size = ?', size);
+    add('ct.category = ?', category);
+    add('strpos(lower(c.manufacturer),lower(?)) > 0', manufacturer);
+    add('c.max_gross_mass_kg-c.tare_weight_kg >= ?', minPayloadKg);
+    add(`l.id = (${ownShippingLine})`, shippingLineUserId);
+    if (!conditions.length) throw new AppError('Nhập số container hoặc chọn ít nhất một bộ lọc.', 422);
+    const from = `FROM containers c JOIN container_types ct ON ct.id=c.container_type_id
+      LEFT JOIN shipping_line_prefixes p ON c.shipping_line_id IS NULL AND p.prefix=left(c.container_no,4)
+      LEFT JOIN shipping_lines l ON l.id=COALESCE(c.shipping_line_id,p.shipping_line_id)
+      WHERE ${conditions.join(' AND ')}`;
+    const total = Number((await query('SELECT count(*) ' + from, params)).rows[0].count);
+    const { rows } = await query(`SELECT c.id,c.container_no AS "containerNumber",ct.code AS "containerTypeCode",
+      ct.description AS "containerTypeDescription",ct.size,ct.category,
+      l.id AS "shippingLineId",l.full_name AS "shippingLineFullName",l.short_name AS "shippingLineShortName",
+      left(c.container_no,4) AS prefix,c.iso_size_type AS "isoSizeType",c.equipment_description AS "equipmentDescription",
+      c.external_length_mm AS "externalLengthMm",c.external_width_mm AS "externalWidthMm",c.external_height_mm AS "externalHeightMm",
+      c.tare_weight_kg::float8 AS "tareWeightKg",c.max_gross_mass_kg::float8 AS "maxGrossMassKg",
+      (c.max_gross_mass_kg-c.tare_weight_kg)::float8 AS "maxPayloadKg",
+      c.capacity_m3::float8 AS "capacityM3",c.manufacturer
+      ${from} ORDER BY c.container_no LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, (page - 1) * limit]);
+    return { items: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async search(filters: Record<string, unknown>, identityOnly = false) {
+    if (!identityOnly) return this.searchVisits(filters);
     const number = String(filters.containerNumber ?? '').trim().toUpperCase();
     const plate = String(filters.plateNumber ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase();
     const customer = String(filters.customerName ?? '').trim();
+    if (plate || customer || filters.dateFrom || filters.dateTo)
+      throw new AppError('Công ty vận tải chỉ được tìm theo số Container.', 403);
+    if (!/^[A-Z0-9]{4,11}$/.test(number))
+      throw new AppError('Nhập số Container từ 4 đến 11 ký tự để tìm kiếm.', 422);
+    const page = Math.max(1, Math.min(Math.trunc(Number(filters.page)) || 1, 10000));
+    const limit = Math.max(1, Math.min(Math.trunc(Number(filters.limit)) || 20, 50));
+    return this.searchIdentities({ containerNumber: number, page, limit });
+  }
+
+  searchYardVisits(filters: Record<string, unknown>, reader: YardVisitReader) {
+    return this.searchVisits(filters, reader);
+  }
+
+  private async searchVisits(filters: Record<string, unknown>, reader?: YardVisitReader) {
+    const number = String(filters.containerNumber ?? '').trim().toUpperCase();
+    const plate = String(filters.plateNumber ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase();
+    const customer = String(filters.customerName ?? '').trim();
+    const status = reader ? String(filters.visitStatus ?? '').trim() : '';
     const from = filters.dateFrom ? new Date(String(filters.dateFrom)) : null;
     const to = filters.dateTo ? new Date(String(filters.dateTo)) : null;
     if ((from && !Number.isFinite(from.getTime())) || (to && !Number.isFinite(to.getTime())) || (from && to && from > to))
       throw new AppError('Khoảng thời gian không hợp lệ.', 422);
-    if (userId && (plate || customer || from || to)) throw new AppError('Công ty vận tải chỉ được tìm theo số Container.', 403);
-    if ((!number || number.length < 4) && !plate && customer.length < 3)
-      throw new AppError('Nhập số Container (ít nhất 4 ký tự), biển số xe hoặc khách hàng (ít nhất 3 ký tự).', 422);
+    const canReadPrivate = !reader || ['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer'].includes(reader.role);
+    if (!canReadPrivate && (plate || customer)) throw new AppError('Vai trò này không được lọc theo xe hoặc khách hàng.', 403);
+    if (!number && !plate && !customer && !(reader && (status || from || to)))
+      throw new AppError('Nhập số Container hoặc chọn ít nhất một bộ lọc.', 422);
     if (number && !/^[A-Z0-9]{4,11}$/.test(number)) throw new AppError('Số Container tìm kiếm không hợp lệ.', 422);
     if (plate && plate.length < 4) throw new AppError('Biển số xe cần ít nhất 4 ký tự.', 422);
-    const page = Math.max(1, Math.min(Number(filters.page) || 1, 10000));
-    const limit = Math.max(1, Math.min(Number(filters.limit) || 20, 50));
+    if (customer && customer.length < 3 && (reader || (!number && !plate)))
+      throw new AppError('Tên khách hàng cần ít nhất 3 ký tự.', 422);
+    if (status && !['planned', 'active', 'completed', 'canceled'].includes(status))
+      throw new AppError('Trạng thái lượt bãi không hợp lệ.', 422);
+    const page = Math.max(1, Math.min(Math.trunc(Number(filters.page)) || 1, 10000));
+    const limit = Math.max(1, Math.min(Math.trunc(Number(filters.limit)) || 20, 50));
     const params: unknown[] = [];
     const where: string[] = [];
-    const add = (sql: string, value: unknown) => { params.push(value); where.push(sql.replace('?', '$' + params.length)); };
-    if (number) add('c.container_no LIKE ?', number + '%');
-    if (userId) {
-      // A separate projection makes cargo/customer/operational fields unreachable.
-      const base = `FROM containers c JOIN container_types ct ON ct.id=c.container_type_id WHERE ${where.join(' AND ')}`;
-      const total = Number((await query('SELECT count(*) ' + base, params)).rows[0].count);
-      const rows = await query(`SELECT c.id,c.container_no AS "containerNumber",ct.code AS "containerTypeCode",ct.description AS "containerTypeDescription" ${base} ORDER BY c.container_no LIMIT $${params.length + 1} OFFSET $${params.length + 2}`, [...params,limit,(page-1)*limit]);
-      return { items: rows.rows, total, page, limit, totalPages: Math.ceil(total/limit) };
+    const bind = (value: unknown) => '$' + params.push(value);
+    const add = (sql: string, value: unknown) => where.push(sql.replace(/\?/g, bind(value)));
+    const bookingsForVisit = 'FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id';
+    let bookingScope = '';
+    if (reader?.role === 'Carrier') {
+      const actor = bind(reader.id);
+      const carrierIds = `SELECT carrier_id FROM carrier_users WHERE user_id=${actor}`;
+      bookingScope = ` AND b.carrier_id IN (${carrierIds})`;
+      where.push(`(EXISTS(SELECT 1 ${bookingsForVisit} WHERE bc.container_visit_id=v.id${bookingScope})
+        OR EXISTS(SELECT 1 FROM container_visit_access a WHERE a.container_visit_id=v.id AND a.carrier_id IN (${carrierIds})))`);
+    } else if (reader?.role === 'Driver') {
+      bookingScope = ` AND b.driver_id IN (SELECT id FROM drivers WHERE user_id=${bind(reader.id)})`;
+      where.push(`EXISTS(SELECT 1 ${bookingsForVisit} WHERE bc.container_visit_id=v.id${bookingScope})`);
+    } else if (reader?.role === 'Shipping Line') {
+      add(`COALESCE(c.shipping_line_id,(SELECT p.shipping_line_id FROM shipping_line_prefixes p WHERE p.prefix=left(c.container_no,4)))
+        = (${ownShippingLine})`, reader.id);
+    } else if (reader?.role === 'Berth Staff') {
+      where.push('v.vessel_call_id IS NOT NULL');
     }
+    if (number) add('c.container_no LIKE ?', number + '%');
     if (customer) add("v.customer_name ILIKE ? ESCAPE '\\'", '%' + customer.replace(/[\\%_]/g, '\\$&') + '%');
-    if (plate) add(`EXISTS(SELECT 1 FROM eir_transactions ex WHERE ex.container_visit_id=v.id AND regexp_replace(upper(ex.plate_number),'[^A-Z0-9]','','g') LIKE ?)
+    if (plate) add(`(EXISTS(SELECT 1 FROM eir_transactions ex WHERE ex.container_visit_id=v.id AND regexp_replace(upper(ex.plate_number),'[^A-Z0-9]','','g') LIKE ?)
       OR EXISTS(SELECT 1 FROM booking_containers bx JOIN bookings b ON b.id=bx.booking_id LEFT JOIN trucks t ON t.id=b.truck_id
-      WHERE bx.container_visit_id=v.id AND regexp_replace(upper(COALESCE(b.vehicle_plate,t.plate_number)),'[^A-Z0-9]','','g') LIKE ?)`, plate + '%');
-    // The plate predicate uses the same parameter twice.
-    if (plate) where[where.length-1] = '(' + where[where.length-1].replace('?', '$'+params.length) + ')';
-    if (from) add('COALESCE(v.started_at,v.created_at)>=?',from);
-    if (to) add('COALESCE(v.started_at,v.created_at)<?',to);
+      WHERE bx.container_visit_id=v.id AND regexp_replace(upper(COALESCE(b.vehicle_plate,t.plate_number)),'[^A-Z0-9]','','g') LIKE ?))`, plate + '%');
+    if (status) add('v.visit_status=?', status);
+    if (from || to) {
+      const fromParam = from && bind(from);
+      const toParam = to && bind(to);
+      const inRange = (column: string) => [
+        fromParam && `${column}>=${fromParam}`, toParam && `${column}<${toParam}`,
+      ].filter(Boolean).join(' AND ');
+      where.push(reader
+        ? `((${inRange('v.started_at')}) OR (${inRange('v.completed_at')}) OR EXISTS(
+            SELECT 1 ${bookingsForVisit} WHERE bc.container_visit_id=v.id${bookingScope}
+            AND b.status::text NOT IN ('rejected','canceled','expired') AND ${inRange('b.appointment_start')}))`
+        : inRange('COALESCE(v.started_at,v.created_at)'));
+    }
+    const visitPrivate = (column: string) => canReadPrivate ? column : 'NULL';
+    const bookingPlate = canReadPrivate || bookingScope ? 'COALESCE(b.vehicle_plate,t.plate_number)' : 'NULL';
+    const bookingCode = canReadPrivate || bookingScope ? 'b.booking_code' : 'NULL';
+    const direction = reader ? 'yard_booking_direction(b.id,bc.container_id)' : 'b.booking_type';
+    const receiptScope = bookingScope ? ` AND EXISTS(SELECT 1 FROM bookings b WHERE b.id=e.booking_id${bookingScope})` : '';
     const base = `FROM container_visits v JOIN containers c ON c.id=v.container_id JOIN container_types ct ON ct.id=c.container_type_id WHERE ${where.join(' AND ')}`;
     const total = Number((await query('SELECT count(*) ' + base,params)).rows[0].count);
     const rows = await query(`SELECT v.id,c.id AS "containerId",c.container_no AS "containerNumber",ct.code AS "containerTypeCode",
       v.visit_reference AS "visitReference",v.visit_status AS "visitStatus",v.started_at AS "startedAt",v.completed_at AS "completedAt",
-      v.customer_name AS "customerName",v.seal_number AS "sealNumber",v.load_status AS "loadStatus",v.cargo_type AS "cargoType",
-      v.gross_weight_kg::float8 AS "grossWeightKg",v.required_power_kw::float8 AS "requiredPowerKw",
-      (SELECT json_agg(json_build_object('id',b.id,'bookingCode',b.booking_code,'bookingType',b.booking_type,'status',b.status,
-       'plateNumber',COALESCE(b.vehicle_plate,t.plate_number),'appointmentStart',b.appointment_start,'appointmentEnd',b.appointment_end))
-       FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id LEFT JOIN trucks t ON t.id=b.truck_id WHERE bc.container_visit_id=v.id) AS bookings,
-      (SELECT json_agg(json_build_object('id',e.id,'referenceNo',e.reference_no,'activity',e.activity,'plateNumber',e.plate_number,
-       'checkInAt',e.check_in_at,'checkOutAt',e.check_out_at,'locationCode',e.location_code,'customerName',e.customer_name,'cargoTypeName',e.cargo_type_description,'grossWeightKg',e.gross_weight_kg,'requiredPowerKw',e.required_power_kw,'sealNumber',(SELECT string_agg(s.seal_number,', ') FROM eir_seals s WHERE s.eir_transaction_id=e.id)))
-       FROM eir_transactions e WHERE e.container_visit_id=v.id) AS receipts
+      ${visitPrivate('v.customer_name')} AS "customerName",${visitPrivate('v.seal_number')} AS "sealNumber",
+      v.load_status AS "loadStatus",${visitPrivate('v.cargo_type')} AS "cargoType",
+      ${visitPrivate('v.gross_weight_kg::float8')} AS "grossWeightKg",${visitPrivate('v.required_power_kw::float8')} AS "requiredPowerKw",
+      (SELECT json_agg(json_build_object('id',b.id,'bookingCode',${bookingCode},'bookingType',${direction},'status',b.status,
+       'plateNumber',${bookingPlate},'appointmentStart',b.appointment_start,'appointmentEnd',b.appointment_end) ORDER BY b.appointment_start,b.id)
+       ${bookingsForVisit} LEFT JOIN trucks t ON t.id=b.truck_id WHERE bc.container_visit_id=v.id${bookingScope}) AS bookings,
+      (SELECT json_agg(json_build_object('id',e.id,'referenceNo',e.reference_no,'activity',e.activity,'plateNumber',${visitPrivate('e.plate_number')},
+       'checkInAt',e.check_in_at,'checkOutAt',e.check_out_at,'locationCode',e.location_code,'customerName',${visitPrivate('e.customer_name')},
+       'cargoTypeName',${visitPrivate('e.cargo_type_description')},'grossWeightKg',${visitPrivate('e.gross_weight_kg')},
+       'requiredPowerKw',${visitPrivate('e.required_power_kw')},'sealNumber',${visitPrivate("(SELECT string_agg(s.seal_number,', ') FROM eir_seals s WHERE s.eir_transaction_id=e.id)")})
+       ORDER BY e.check_in_at,e.id)
+       FROM eir_transactions e WHERE e.container_visit_id=v.id${reader ? " AND e.eir_status='issued'" : ''}${receiptScope}) AS receipts
       ${base} ORDER BY COALESCE(v.started_at,v.created_at) DESC,v.id LIMIT $${params.length+1} OFFSET $${params.length+2}`, [...params,limit,(page-1)*limit]);
     return { items: rows.rows,total,page,limit,totalPages: Math.ceil(total/limit) };
   }

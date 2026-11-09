@@ -35,5 +35,7 @@ describe('JavaScript OpenAPI', () => {
     expect(response.text).toContain('<title>NexusPort API Docs</title>');
     const initializer = await request(app).get('/api-docs/swagger-ui-init.js').expect(200);
     expect(initializer.text).toContain('NexusPort API');
+    expect(initializer.text).toContain('ship-hapag | Shipping Line | Hapag-Lloyd AG');
+    expect(initializer.text).toContain('ship-msc | Shipping Line | MSC Mediterranean Shipping Company S.A.');
   });
 });

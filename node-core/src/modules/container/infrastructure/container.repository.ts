@@ -1,5 +1,5 @@
 import { getClient, query } from '../../../infrastructure/database/db';
-import { CreateContainerDto, ContainerListItem, ContainerListResult, ContainerSearchDto, UpdateContainerDto } from '../application/container.dto';
+import { ContainerListItem, ContainerListResult, ContainerSearchDto, ResolvedContainerIdentityDto, UpdateContainerDto } from '../application/container.dto';
 import {
   ContainerBookingSummary, ContainerDetailEntity, ContainerEirDamage, ContainerEirMedia,
   ContainerEirSeal, ContainerEirTransaction, ContainerPositionSummary, ContainerStatus,
@@ -457,19 +457,22 @@ export class ContainerRepository {
     return result.rows.map((row) => mapType(row));
   }
 
-  async create(dto: CreateContainerDto, typeCategory: string): Promise<ContainerDetailEntity> {
+  async createIdentity(dto: ResolvedContainerIdentityDto, isReefer: boolean, userId: string): Promise<string | undefined> {
     const result = await query(
-      `INSERT INTO containers (
-         carrier_id, container_type_id, vessel_call_id, container_no, seal_no, cargo_type, status,
-         gross_weight_kg, is_reefer, is_dangerous, is_perishable, is_oversized, expected_gate_out_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+      `INSERT INTO containers (container_type_id, container_no, status, is_reefer, shipping_line_id,
+         iso_size_type, equipment_description, external_length_mm, external_width_mm, external_height_mm,
+         tare_weight_kg, max_gross_mass_kg, capacity_m3, manufacturer)
+       SELECT $1,$2,'expected',$3,a.shipping_line_id,$4,$5,$6,$7,$8,$9,$10,$11,$12
+       FROM users u JOIN shipping_line_accounts a ON a.user_id=u.id
+       JOIN shipping_line_prefixes p ON p.shipping_line_id=a.shipping_line_id AND p.prefix=left($2,4)
+       WHERE u.id=$13 AND u.role='Shipping Line' AND u.is_active
+       FOR SHARE OF u,a,p
        RETURNING id`,
-      [dto.carrierId ?? null, dto.containerTypeId, dto.vesselCallId ?? null, dto.containerNumber,
-       dto.sealNumber ?? null, dto.cargoType ?? 'general', dto.status ?? 'expected', dto.grossWeightKg ?? null,
-       typeCategory === 'reefer' || dto.cargoType === 'reefer', dto.cargoType === 'dangerous',
-       dto.cargoType === 'perishable', dto.cargoType === 'oversized', dto.expectedGateOutAt ?? null],
+      [dto.containerTypeId, dto.containerNumber, isReefer, dto.isoSizeType, dto.equipmentDescription ?? null,
+       dto.externalLengthMm, dto.externalWidthMm, dto.externalHeightMm, dto.tareWeightKg, dto.maxGrossMassKg,
+       dto.capacityM3 ?? null, dto.manufacturer ?? null, userId],
     );
-    return (await this.findById(result.rows[0].id))!;
+    return result.rows[0]?.id;
   }
 
   async update(id: string, dto: UpdateContainerDto, typeCategory: string, effectiveCargoType: string): Promise<ContainerDetailEntity> {

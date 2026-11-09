@@ -1,8 +1,11 @@
 import { randomUUID } from 'crypto';
 import pool, { query, getClient } from '../../../infrastructure/database/db';
+import * as database from '../../../infrastructure/database/db';
 import { ContainerIntakeService } from '../application/container-intake.service';
 import { ContainerIntakeRepository } from './container-intake.repository';
 import { ContainerJourneyRepository } from './container-journey.repository';
+import { ShippingLineDirectoryRepository } from './shipping-line-directory.repository';
+import { ContainerService } from '../application/container.service';
 const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_URL === 'postgresql://postgres@127.0.0.1:55438/nxp038_test';
 (enabled ? describe : describe.skip)('Shared container identity and private journeys in PostgreSQL', () => {
   const userA=randomUUID(),userB=randomUUID(),carrierA=randomUUID(),carrierB=randomUUID();
@@ -42,10 +45,10 @@ const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_U
     expect((await repository.listTransportDeclarations(userB,row.containerNumber)).map(d=>d.customerName)).toEqual(['Private B']);
     const lookup=await journeys.lookup(row.containerNumber);
     expect(Object.keys(lookup).sort()).toEqual(['id','containerNumber','containerTypeId','containerTypeCode','containerTypeDescription'].sort());
-    const publicSearch=await journeys.search({containerNumber:'EMCU'},userB);
+    const publicSearch=await journeys.search({containerNumber:'EMCU'},true);
     expect(publicSearch.items[0]).not.toHaveProperty('customerName');expect(publicSearch.items[0]).not.toHaveProperty('status');
-    await expect(journeys.search({},userA)).rejects.toThrow('Nhập');
-    await expect(journeys.search({containerNumber:'EMCU',customerName:'Private'},userB)).rejects.toThrow('chỉ được tìm');
+    await expect(journeys.search({},true)).rejects.toThrow('Nhập');
+    await expect(journeys.search({containerNumber:'EMCU',customerName:'Private'},true)).rejects.toThrow('chỉ được tìm');
   });
   it('deduplicates identical unbooked input and rejects a conflicting equipment type',async()=>{
     expect((await service.createManual(row,'transport_company',userA)).declarationId).toBe(declarationA);
@@ -54,6 +57,7 @@ const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_U
   });
   it('links opposite directions, rejects overlapping stays, freezes history and snapshots exact cargo',async()=>{
     const c=await getClient();await c.query('BEGIN');
+    const searchQuery = jest.spyOn(database, 'query').mockImplementation((sql, params) => c.query(sql, params));
     const rejected=async(work:()=>Promise<unknown>,text:string)=>{
       await c.query('SAVEPOINT invalid_case');
       try{await expect(work()).rejects.toThrow(text);}finally{await c.query('ROLLBACK TO SAVEPOINT invalid_case');await c.query('RELEASE SAVEPOINT invalid_case');}
@@ -66,6 +70,53 @@ const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_U
     };
     try{
       const inbound=await book('dropoff',carrierA,declarationA,'2030-01-01T08:00Z','2030-01-01T09:00Z');
+      const filters = { containerNumber: row.containerNumber };
+      const staff = { id: userA, role: 'Dispatcher' } as const;
+      const carrier = { id: userB, role: 'Carrier' } as const;
+      const berth = { id: userA, role: 'Berth Staff' } as const;
+      const driver = { id: randomUUID(), role: 'Driver' } as const;
+      const lineUser = { id: randomUUID(), role: 'Shipping Line' } as const;
+      const lineId = randomUUID();
+      const driverId = randomUUID();
+      const vesselId = randomUUID();
+      const callId = randomUUID();
+      await c.query("INSERT INTO shipping_lines(id,full_name,short_name) VALUES($1,'Test line',$2)", [lineId, lineId]);
+      await c.query("UPDATE containers SET shipping_line_id=$1 WHERE id=$2", [lineId, containerId]);
+      await c.query(`INSERT INTO users(id,username,email,password,role,is_active,created_at,updated_at)
+        VALUES($1,$1::uuid::text,$2,'test-only','Shipping Line',true,now(),now()),
+          ($3,$3::uuid::text,$4,'test-only','Driver',true,now(),now())`,
+      [lineUser.id, lineUser.id+'@example.invalid', driver.id, driver.id+'@example.invalid']);
+      await c.query('INSERT INTO shipping_line_accounts(user_id,shipping_line_id) VALUES($1,$2)', [lineUser.id, lineId]);
+      await c.query("INSERT INTO drivers(id,carrier_id,user_id,full_name,license_number) VALUES($1,$2,$3,'Test driver',$4)",
+        [driverId, carrierA, driver.id, driverId.slice(0, 12)]);
+      await c.query('UPDATE bookings SET driver_id=$1 WHERE id=$2', [driverId, inbound.id]);
+
+      const planned = await journeys.searchYardVisits({ ...filters, visitStatus: 'planned',
+        dateFrom: '2030-01-01T00:00Z', dateTo: '2030-01-02T00:00Z' }, staff);
+      expect(planned.items).toEqual([expect.objectContaining({ id: inbound.visit, startedAt: null, completedAt: null, receipts: null,
+        bookings: [expect.objectContaining({ id: inbound.id, bookingType: 'dropoff' })] })]);
+      expect(new Date(planned.items[0].bookings[0].appointmentStart).toISOString()).toBe('2030-01-01T08:00:00.000Z');
+      expect((await journeys.searchYardVisits(filters, carrier)).items).toEqual([]);
+      expect((await journeys.searchYardVisits(filters, berth)).items).toEqual([]);
+      expect((await journeys.searchYardVisits(filters, { ...driver, id: userB })).items).toEqual([]);
+      expect((await journeys.searchYardVisits(filters, { ...lineUser, id: userB })).items).toEqual([]);
+      expect((await journeys.listOwnIdentities(lineUser.id, { ...filters, page: 1, limit: 20 })).total).toBe(1);
+      expect((await journeys.listOwnIdentities(lineUser.id, { containerNumber: 'ZZZU', page: 1, limit: 20 })).total).toBe(0);
+      await expect(journeys.searchYardVisits({ ...filters, customerName: 'Private A' }, lineUser)).rejects.toThrow('không được lọc');
+
+      await c.query("INSERT INTO shipping_line_prefixes(prefix,shipping_line_id) VALUES('CSQU',$1)", [lineId]);
+      expect(await new ShippingLineDirectoryRepository().own(lineUser.id)).toMatchObject({ id: lineId, prefixes: ['CSQU'] });
+      const registration = { containerNumber: 'CSQU3054383', isoSizeType: '42R1', tareWeightKg: 4200, maxGrossMassKg: 34000 };
+      const containers = new ContainerService();
+      await expect(containers.registerIdentity(registration, userB)).rejects.toThrow('tiền tố BIC');
+      await expect(containers.registerIdentity(registration, lineUser.id)).resolves.toMatchObject({ containerTypeCode: '40RF' });
+
+      await c.query("INSERT INTO vessels(id,name) VALUES($1,'Test vessel')", [vesselId]);
+      await c.query("INSERT INTO vessel_calls(id,vessel_id,call_code,eta) VALUES($1,$2,$3,'2030-01-01T08:00Z')", [callId, vesselId, callId.slice(0, 15)]);
+      await c.query('UPDATE container_visits SET vessel_call_id=$1 WHERE id=$2', [callId, inbound.visit]);
+      await c.query(`INSERT INTO eir_transactions(reference_no,container_visit_id,activity,eir_status,check_in_at)
+        VALUES($1,$2,'out','draft','2030-01-02T08:00Z')`, [randomUUID(), inbound.visit]);
+      expect((await journeys.searchYardVisits(filters, berth)).items[0]).toMatchObject({ id: inbound.visit, customerName: null, receipts: null });
       await rejected(()=>c.query('UPDATE container_declarations SET customer_name=\'Overwrite\' WHERE id=$1',[declarationA]),'Bản khai');
       await rejected(()=>book('dropoff',carrierB,declarationB,'2030-01-04T08:00Z','2030-01-04T09:00Z'),'chồng');
       await rejected(()=>book('pickup',carrierB,declarationB,'2030-01-02T08:00Z','2030-01-02T09:00Z',inbound.visit),'cấp quyền');
@@ -80,16 +131,29 @@ const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_U
       await rejected(()=>c.query("UPDATE bookings SET status='checked_in' WHERE id=$1",[next.id]),'đang lưu bãi');
       const receipt=(await c.query("SELECT id,customer_name FROM eir_transactions WHERE container_visit_id=$1 AND activity='in'",[inbound.visit])).rows[0];
       expect(receipt.customer_name).toBe('Private A');
+      expect((await journeys.searchYardVisits(filters, staff)).items.find(item => item.id === inbound.visit))
+        .toMatchObject({ customerName: 'Private A', receipts: [expect.objectContaining({ id: receipt.id, activity: 'in' })] });
+      expect((await journeys.searchYardVisits(filters, carrier)).items.find(item => item.id === inbound.visit))
+        .toMatchObject({ customerName: null, receipts: null, bookings: [expect.objectContaining({ id: outbound.id, bookingType: 'pickup' })] });
+      expect((await journeys.searchYardVisits(filters, driver)).items.find(item => item.id === inbound.visit))
+        .toMatchObject({ customerName: null, bookings: [expect.objectContaining({ id: inbound.id })],
+          receipts: [expect.objectContaining({ id: receipt.id, customerName: null })] });
+      expect((await journeys.searchYardVisits(filters, lineUser)).items.find(item => item.id === inbound.visit))
+        .toMatchObject({ customerName: null, receipts: [expect.objectContaining({ id: receipt.id, sealNumber: null })],
+          bookings: [expect.objectContaining({ id: inbound.id, bookingCode: null }), expect.objectContaining({ id: outbound.id, bookingCode: null })] });
       await rejected(()=>c.query("UPDATE eir_transactions SET customer_name='Overwrite' WHERE id=$1",[receipt.id]),'bất biến');
       await rejected(()=>c.query("UPDATE eir_seals SET seal_number='Overwrite' WHERE eir_transaction_id=$1",[receipt.id]),'đã phát hành');
       await c.query("UPDATE bookings SET status='checked_in' WHERE id=$1",[outbound.id]);
       const gate=randomUUID();await c.query('INSERT INTO gates(id,code,name) VALUES($1,$2,\'Test gate\')',[gate,'TEST-'+gate]);
       await c.query("INSERT INTO gate_transactions(booking_id,gate_id,gate_type,status,checked_at,completed_at) VALUES($1,$2,'gate_out','completed','2030-01-02T08:00Z','2030-01-02T08:05Z')",[outbound.id,gate]);
       expect((await c.query('SELECT visit_status FROM container_visits WHERE id=$1',[inbound.visit])).rows[0].visit_status).toBe('completed');
-      expect((await c.query("SELECT customer_name FROM eir_transactions WHERE container_visit_id=$1 AND activity='out'",[inbound.visit])).rows[0].customer_name).toBe('Private B');
+      const exitReceipt = (await c.query("SELECT id,customer_name FROM eir_transactions WHERE container_visit_id=$1 AND activity='out' AND eir_status='issued'", [inbound.visit])).rows[0];
+      expect(exitReceipt.customer_name).toBe('Private B');
+      expect((await journeys.searchYardVisits(filters, carrier)).items.find(item => item.id === inbound.visit))
+        .toMatchObject({ visitStatus: 'completed', receipts: [expect.objectContaining({ id: exitReceipt.id, activity: 'out' })] });
       await rejected(()=>c.query("UPDATE container_visits SET customer_name='Overwrite' WHERE id=$1",[inbound.visit]),'bất biến');
       await c.query('SET CONSTRAINTS ALL IMMEDIATE');
-    }finally{await c.query('ROLLBACK');c.release();}
+    }finally{searchQuery.mockRestore();await c.query('ROLLBACK');c.release();}
   });
   it('serializes competing reservations from separate database connections',async()=>{
     const a=await getClient(),b=await getClient();

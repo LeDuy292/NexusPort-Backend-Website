@@ -23,7 +23,8 @@ async function startServer() {
     // 2. Sync schema (chỉ dùng trong dev — dùng migrations ở production)
     if (nodeEnv !== 'production') {
       try {
-        await syncDB({ alter: true });
+        // Migrations also own columns on tables shared with Sequelize models.
+        await syncDB({ alter: { drop: false } });
       } catch (syncErr) {
         console.warn('[DB] Schema sync skipped/warning:', syncErr.message);
       }
