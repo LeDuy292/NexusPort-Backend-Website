@@ -32,6 +32,7 @@
     <ProjectReference Include="..\Modules\Driver\NexusPort.Modules.Driver.csproj" />
     <ProjectReference Include="..\Modules\Equipment\NexusPort.Modules.Equipment.csproj" />
     <ProjectReference Include="..\Modules\Carrier\NexusPort.Modules.Carrier.csproj" />
+    <ProjectReference Include="..\Modules\ServiceCatalog\NexusPort.Modules.ServiceCatalog.csproj" />
   </ItemGroup>
 
 </Project>

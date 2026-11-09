@@ -26,7 +26,8 @@ builder.Services.AddControllers()
     .AddApplicationPart(typeof(NexusPort.Modules.Dispatcher.Presentation.Controllers.DispatcherController).Assembly)
     .AddApplicationPart(typeof(NexusPort.Modules.Vehicle.Presentation.Controllers.VehicleController).Assembly)
     .AddApplicationPart(typeof(NexusPort.Modules.Driver.Presentation.Controllers.DriverController).Assembly)
-    .AddApplicationPart(typeof(NexusPort.Modules.Equipment.Presentation.Controllers.EquipmentController).Assembly);
+    .AddApplicationPart(typeof(NexusPort.Modules.Equipment.Presentation.Controllers.EquipmentController).Assembly)
+    .AddApplicationPart(typeof(NexusPort.Modules.ServiceCatalog.Presentation.ServiceCatalogController).Assembly);
 
 // Add SignalR
 builder.Services.AddSignalR();
@@ -34,6 +35,8 @@ builder.Services.AddSignalR();
 // Add Infrastructure & Domain Modules
 builder.Services.AddNexusPortInfrastructure(builder.Configuration);
 builder.Services.AddNexusPortModules();
+builder.Services.AddScoped<NexusPort.Modules.ServiceCatalog.Application.CatalogService>();
+builder.Services.AddScoped<NexusPort.Modules.ServiceCatalog.Application.ServiceDraftService>();
 builder.Services.AddCarrierModule(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Host=localhost;Port=5432;Database=NexusPort;Username=postgres;Password=pgadmin4");
 builder.Services.AddSwaggerDocumentation();
 
