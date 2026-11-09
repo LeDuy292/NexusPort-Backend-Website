@@ -1,12 +1,13 @@
 import { ContainerJourneyRepository } from '../infrastructure/container-journey.repository';
 import { NextFunction, Request, Response, Router } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
-import { ZodError, ZodSchema } from 'zod';
+import { z, ZodError, ZodSchema } from 'zod';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '../../../shared/errors/app-error';
 import { sendCreated, sendSuccess } from '../../../shared/utils/response';
 import { ContainerService } from '../application/container.service';
 import { ContainerStatusService } from '../application/container-status.service';
 import { ContainerIntakeService } from '../application/container-intake.service';
+import { ShippingLineDirectoryRepository } from '../infrastructure/shipping-line-directory.repository';
 import { ContainerSearchDto } from '../application/container.dto';
 import { containerSearchSchema, idSchema, registerContainerIdentitySchema, transitionContainerStatusSchema } from '../application/container.validator';
 type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier' | 'Shipping Line' | 'Driver' | 'Berth Staff';
@@ -24,6 +25,13 @@ const roleAliases: Record<string, ContainerRole> = {
     'shipping line': 'Shipping Line', shippingline: 'Shipping Line', driver: 'Driver', 'berth staff': 'Berth Staff',
 };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const shippingLineSchema = z.object({
+    fullName: z.string().trim().min(1, 'Nhập tên đầy đủ của hãng tàu.').max(250),
+    shortName: z.string().trim().min(1, 'Nhập tên viết tắt của hãng tàu.').max(80),
+    prefixes: z.array(z.string().trim().toUpperCase().regex(/^[A-Z]{3}[UJZ]$/, 'Tiền tố BIC gồm 3 chữ cái và ký tự U, J hoặc Z.'))
+        .min(1, 'Nhập ít nhất một tiền tố BIC.').max(100).transform(values => [...new Set(values)]),
+    userIds: z.array(z.string().uuid().toLowerCase()).max(100).transform(values => [...new Set(values)]),
+}).strict();
 const vietnameseValidationMessage = (issue: ZodError['issues'][number]): string => {
     if (issue.message !== 'Invalid input' && !issue.message.startsWith('Invalid'))
         return issue.message;
@@ -180,6 +188,24 @@ export const createContainerRouter = (): Router => {
     router.get('/intake/imports', allowRoles('Administrator', 'Dispatcher'), controller.listImports);
     router.get('/intake/transport/declarations', allowRoles('Carrier'), controller.listTransportDeclarations);
     router.post('/intake/shipping-line/manual', allowRoles('Shipping Line'), controller.registerIdentity);
+    const shippingLines = new ShippingLineDirectoryRepository();
+    router.get('/shipping-lines', allowRoles(...identityReaders), async (_req, res, next) => {
+        try { sendSuccess(res, await shippingLines.list()); } catch (error) { next(error); }
+    });
+    router.get('/shipping-lines/me', allowRoles('Shipping Line'), async (req: AuthorizedRequest, res, next) => {
+        try { sendSuccess(res, await shippingLines.own(req.containerUser!.id)); } catch (error) { next(error); }
+    });
+    router.get('/shipping-lines/accounts', allowRoles('Administrator'), async (req: AuthorizedRequest, res, next) => {
+        try { sendSuccess(res, await shippingLines.accounts(req.containerUser!.id)); } catch (error) { next(error); }
+    });
+    router.post('/shipping-lines', allowRoles('Administrator'), async (req: AuthorizedRequest, res, next) => {
+        try { sendCreated(res, await shippingLines.save(parse(shippingLineSchema, req.body), req.containerUser!.id)); }
+        catch (error) { next(error); }
+    });
+    router.put('/shipping-lines/:id', allowRoles('Administrator'), async (req: AuthorizedRequest, res, next) => {
+        try { sendSuccess(res, await shippingLines.save(parse(shippingLineSchema, req.body), req.containerUser!.id, parse(idSchema, req.params.id))); }
+        catch (error) { next(error); }
+    });
     const journeys = new ContainerJourneyRepository();
     router.get('/identities', allowRoles(...identityReaders), async (req, res, next) => {
         try {

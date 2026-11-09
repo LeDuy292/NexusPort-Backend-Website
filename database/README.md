@@ -87,6 +87,11 @@ Times use local UI time and UTC API values; booking creation remains Pending.
 
 ## Migration and deployment
 
+Apply `20261109_034_shipping_line_directory.sql` before deploying the shipping
+line directory. Administrators maintain full and short names, unique BIC prefixes,
+and links to existing Shipping Line accounts. Export booking still uses account
+IDs. Existing accounts can be linked from the directory once the profile is set up.
+
 Dispatcher-to-gate entry and simulated barrier commands use additive migration
 `20261018_018_dispatch_gate_entry_orders.sql`, evidence migration 019 and single
 entrance/exit map migration 020. Inspect missing prerequisites with
