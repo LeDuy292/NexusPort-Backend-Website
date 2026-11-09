@@ -111,9 +111,11 @@ IDs. Existing accounts can be linked from the directory once the profile is set 
 Apply `20261109_035_container_equipment_specs.sql` after 034 before deploying
 equipment registration and search. Legacy containers retain their type and history
 with unknown technical values displayed as missing.
-Migration `20261109_036_restore_shipping_line_account_link.sql` restores the
-account-link column on databases where Express development schema sync removed it.
-Restore previous account assignments from the import report or the admin directory.
+Apply `20261109_039_shipping_line_account_membership.sql` before deploying Node
+Core. It moves account links to `shipping_line_accounts`, which is independent of
+Express development sync on `users`. It preserves links from the old column when
+available and recovers the five known import links if the column was removed.
+Other missing assignments can be set again in the admin directory.
 
 ### Import five shipping lines and login accounts
 

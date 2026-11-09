@@ -18,7 +18,8 @@ export class ShippingLineDirectoryRepository {
   }
 
   async own(userId: string) {
-    const result = await query(`${directory} JOIN users u ON u.shipping_line_id=l.id
+    const result = await query(`${directory} JOIN shipping_line_accounts a ON a.shipping_line_id=l.id
+      JOIN users u ON u.id=a.user_id
       WHERE u.id=$1 AND u.role='Shipping Line' AND u.is_active`, [userId]);
     return result.rows[0] ?? null;
   }
@@ -26,8 +27,9 @@ export class ShippingLineDirectoryRepository {
   async accounts(adminId: string) {
     if (!(await query("SELECT 1 FROM users WHERE id=$1 AND role='Administrator' AND is_active", [adminId])).rowCount)
       throw new ForbiddenError('Cần tài khoản quản trị đang hoạt động.');
-    return (await query(`SELECT id,username,full_name AS "fullName",shipping_line_id AS "shippingLineId",is_active AS "isActive"
-      FROM users WHERE role='Shipping Line' ORDER BY username`)).rows;
+    return (await query(`SELECT u.id,u.username,u.full_name AS "fullName",a.shipping_line_id AS "shippingLineId",u.is_active AS "isActive"
+      FROM users u LEFT JOIN shipping_line_accounts a ON a.user_id=u.id
+      WHERE u.role='Shipping Line' ORDER BY u.username`)).rows;
   }
 
   async save(input: ShippingLineInput, adminId: string, id?: string) {
@@ -43,12 +45,15 @@ export class ShippingLineDirectoryRepository {
       const lineId = result.rows[0]?.id;
       if (!lineId) throw new AppError('Không tìm thấy hãng tàu.', 404);
 
-      const accounts = await client.query(`SELECT id,shipping_line_id FROM users
+      const accounts = await client.query(`SELECT id FROM users
         WHERE id=ANY($1::uuid[]) AND role='Shipping Line' ORDER BY id FOR UPDATE`, [input.userIds]);
-      if (accounts.rows.length !== input.userIds.length || accounts.rows.some(row => row.shipping_line_id && row.shipping_line_id !== lineId))
+      const conflict = await client.query(`SELECT 1 FROM shipping_line_accounts
+        WHERE user_id=ANY($1::uuid[]) AND shipping_line_id<>$2 LIMIT 1`, [input.userIds, lineId]);
+      if (accounts.rows.length !== input.userIds.length || conflict.rowCount)
         throw new AppError('Tài khoản phải có vai trò Hãng tàu và chỉ thuộc một hãng.', 409);
-      await client.query('UPDATE users SET shipping_line_id=NULL WHERE shipping_line_id=$1 AND NOT (id=ANY($2::uuid[]))', [lineId, input.userIds]);
-      await client.query('UPDATE users SET shipping_line_id=$1 WHERE id=ANY($2::uuid[])', [lineId, input.userIds]);
+      await client.query('DELETE FROM shipping_line_accounts WHERE shipping_line_id=$1 AND NOT (user_id=ANY($2::uuid[]))', [lineId, input.userIds]);
+      await client.query(`INSERT INTO shipping_line_accounts(user_id,shipping_line_id)
+        SELECT u,$1 FROM unnest($2::uuid[]) AS u ON CONFLICT (user_id) DO NOTHING`, [lineId, input.userIds]);
       await client.query('DELETE FROM shipping_line_prefixes WHERE shipping_line_id=$1 AND NOT (prefix=ANY($2::varchar[]))', [lineId, input.prefixes]);
       await client.query(`INSERT INTO shipping_line_prefixes(prefix,shipping_line_id)
         SELECT p,$1 FROM unnest($2::varchar[]) AS p

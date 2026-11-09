@@ -30,7 +30,8 @@ async function api(port,path,index,method='GET',body,status=200,role) {
     }
     await db.query('INSERT INTO shipping_lines(id,full_name,short_name) VALUES($1,$2,$3)',[shippingLineId,'HTTP Test Shipping Line','HTTP-NXP-038']);
     await db.query("INSERT INTO shipping_line_prefixes(prefix,shipping_line_id) VALUES('CSQU',$1)",[shippingLineId]);
-    await db.query("INSERT INTO users(id,username,email,password,role,is_active,created_at,updated_at,shipping_line_id) VALUES($1,$2,$3,'test-only','Shipping Line',true,now(),now(),$4)",[users[2],'http-'+users[2],users[2]+'@example.invalid',shippingLineId]);
+    await db.query("INSERT INTO users(id,username,email,password,role,is_active,created_at,updated_at) VALUES($1,$2,$3,'test-only','Shipping Line',true,now(),now())",[users[2],'http-'+users[2],users[2]+'@example.invalid']);
+    await db.query('INSERT INTO shipping_line_accounts(user_id,shipping_line_id) VALUES($1,$2)', [users[2], shippingLineId]);
     const {id:wrongTypeId}=(await db.query("SELECT id FROM container_types WHERE code='20RF'")).rows[0];
     const registration={containerNumber:'CSQU3054383',isoSizeType:'42R1',tareWeightKg:4200,maxGrossMassKg:34000};
     const registerPath='/api/v1/containers/intake/shipping-line/manual';

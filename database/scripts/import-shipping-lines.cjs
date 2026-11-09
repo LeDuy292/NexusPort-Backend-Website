@@ -37,8 +37,8 @@ async function main() {
       const select = (sql, bind = []) => sequelize.query(sql, { bind, transaction, type: QueryTypes.SELECT });
       const execute = (sql, bind = []) => sequelize.query(sql, { bind, transaction });
       const lock = apply ? ' FOR UPDATE' : '';
-      const versions = await select("SELECT version FROM nexusport_schema_versions WHERE version IN ('20261109_034','20261109_035')");
-      if (versions.length !== 2) throw new Error('Apply migrations 20261109_034 and 20261109_035 before importing.');
+      const versions = await select("SELECT version FROM nexusport_schema_versions WHERE version IN ('20261109_034','20261109_035','20261109_039')");
+      if (versions.length !== 3) throw new Error('Apply migrations 20261109_034, 20261109_035 and 20261109_039 before importing.');
       if (apply) await execute("SELECT pg_advisory_xact_lock(hashtext('nexusport-import-shipping-lines'))");
       const prefixOwners = new Map();
       const credentials = [];
@@ -57,8 +57,9 @@ async function main() {
         if (owners.some(owner => owner.shipping_line_id !== profiles[0]?.id)) {
           throw new Error(`At least one BIC prefix for ${shortName} already belongs to a different profile.`);
         }
-        const accounts = await select(`SELECT username,email,role,shipping_line_id,is_active FROM users
-          WHERE lower(username)=lower($1) OR lower(email)=lower($2)${lock}`, [username, email]);
+        const accounts = await select(`SELECT u.username,u.email,u.role,a.shipping_line_id,u.is_active FROM users u
+          LEFT JOIN shipping_line_accounts a ON a.user_id=u.id
+          WHERE lower(u.username)=lower($1) OR lower(u.email)=lower($2)${apply ? ' FOR UPDATE OF u' : ''}`, [username, email]);
         const account = accounts[0];
         if (accounts.length > 1 || (account && (account.username !== username || account.email !== email ||
           account.role !== 'Shipping Line' || account.shipping_line_id !== profiles[0]?.id || !account.is_active))) {
@@ -76,8 +77,9 @@ async function main() {
           if (!account) {
             const password = randomBytes(20).toString('base64url') + 'Aa9!';
             const hash = await bcrypt.hash(password, bcryptConfig.saltRounds);
-            await execute(`INSERT INTO users(id,username,email,password,role,full_name,is_active,created_at,updated_at,shipping_line_id)
-              VALUES(gen_random_uuid(),$1,$2,$3,'Shipping Line',$4,true,now(),now(),$5)`, [username, email, hash, fullName, lineId]);
+            const [created] = await select(`INSERT INTO users(id,username,email,password,role,full_name,is_active,created_at,updated_at)
+              VALUES(gen_random_uuid(),$1,$2,$3,'Shipping Line',$4,true,now(),now()) RETURNING id`, [username, email, hash, fullName]);
+            await execute('INSERT INTO shipping_line_accounts(user_id,shipping_line_id) VALUES($1,$2)', [created.id, lineId]);
             credentials.push({ username, password });
           }
         }

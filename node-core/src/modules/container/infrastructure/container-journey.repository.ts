@@ -9,6 +9,9 @@ interface YardVisitReader {
   role: ContainerRole;
 }
 
+const ownShippingLine = `SELECT a.shipping_line_id FROM shipping_line_accounts a JOIN users u ON u.id=a.user_id
+  WHERE u.id=? AND u.role='Shipping Line' AND u.is_active`;
+
 export class ContainerJourneyRepository {
   async lookup(number: string) {
     if (!/^[A-Z]{4}\d{7}$/.test(number)) throw new AppError('Nhập đầy đủ số Container gồm 11 ký tự.', 422);
@@ -41,7 +44,7 @@ export class ContainerJourneyRepository {
     add('ct.category = ?', category);
     add('strpos(lower(c.manufacturer),lower(?)) > 0', manufacturer);
     add('c.max_gross_mass_kg-c.tare_weight_kg >= ?', minPayloadKg);
-    add("l.id = (SELECT shipping_line_id FROM users WHERE id=? AND role='Shipping Line' AND is_active)", shippingLineUserId);
+    add(`l.id = (${ownShippingLine})`, shippingLineUserId);
     if (!conditions.length) throw new AppError('Nhập số container hoặc chọn ít nhất một bộ lọc.', 422);
     const from = `FROM containers c JOIN container_types ct ON ct.id=c.container_type_id
       LEFT JOIN shipping_line_prefixes p ON c.shipping_line_id IS NULL AND p.prefix=left(c.container_no,4)
@@ -117,7 +120,7 @@ export class ContainerJourneyRepository {
       where.push(`EXISTS(SELECT 1 ${bookingsForVisit} WHERE bc.container_visit_id=v.id${bookingScope})`);
     } else if (reader?.role === 'Shipping Line') {
       add(`COALESCE(c.shipping_line_id,(SELECT p.shipping_line_id FROM shipping_line_prefixes p WHERE p.prefix=left(c.container_no,4)))
-        = (SELECT shipping_line_id FROM users WHERE id=? AND role='Shipping Line' AND is_active)`, reader.id);
+        = (${ownShippingLine})`, reader.id);
     } else if (reader?.role === 'Berth Staff') {
       where.push('v.vessel_call_id IS NOT NULL');
     }

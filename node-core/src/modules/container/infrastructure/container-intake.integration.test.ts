@@ -4,6 +4,8 @@ import * as database from '../../../infrastructure/database/db';
 import { ContainerIntakeService } from '../application/container-intake.service';
 import { ContainerIntakeRepository } from './container-intake.repository';
 import { ContainerJourneyRepository } from './container-journey.repository';
+import { ShippingLineDirectoryRepository } from './shipping-line-directory.repository';
+import { ContainerService } from '../application/container.service';
 const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_URL === 'postgresql://postgres@127.0.0.1:55438/nxp038_test';
 (enabled ? describe : describe.skip)('Shared container identity and private journeys in PostgreSQL', () => {
   const userA=randomUUID(),userB=randomUUID(),carrierA=randomUUID(),carrierB=randomUUID();
@@ -80,10 +82,11 @@ const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_U
       const callId = randomUUID();
       await c.query("INSERT INTO shipping_lines(id,full_name,short_name) VALUES($1,'Test line',$2)", [lineId, lineId]);
       await c.query("UPDATE containers SET shipping_line_id=$1 WHERE id=$2", [lineId, containerId]);
-      await c.query(`INSERT INTO users(id,username,email,password,role,is_active,shipping_line_id,created_at,updated_at)
-        VALUES($1,$1::uuid::text,$2,'test-only','Shipping Line',true,$3,now(),now()),
-          ($4,$4::uuid::text,$5,'test-only','Driver',true,NULL,now(),now())`,
-      [lineUser.id, lineUser.id+'@example.invalid', lineId, driver.id, driver.id+'@example.invalid']);
+      await c.query(`INSERT INTO users(id,username,email,password,role,is_active,created_at,updated_at)
+        VALUES($1,$1::uuid::text,$2,'test-only','Shipping Line',true,now(),now()),
+          ($3,$3::uuid::text,$4,'test-only','Driver',true,now(),now())`,
+      [lineUser.id, lineUser.id+'@example.invalid', driver.id, driver.id+'@example.invalid']);
+      await c.query('INSERT INTO shipping_line_accounts(user_id,shipping_line_id) VALUES($1,$2)', [lineUser.id, lineId]);
       await c.query("INSERT INTO drivers(id,carrier_id,user_id,full_name,license_number) VALUES($1,$2,$3,'Test driver',$4)",
         [driverId, carrierA, driver.id, driverId.slice(0, 12)]);
       await c.query('UPDATE bookings SET driver_id=$1 WHERE id=$2', [driverId, inbound.id]);
@@ -100,6 +103,13 @@ const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_U
       expect((await journeys.listOwnIdentities(lineUser.id, { ...filters, page: 1, limit: 20 })).total).toBe(1);
       expect((await journeys.listOwnIdentities(lineUser.id, { containerNumber: 'ZZZU', page: 1, limit: 20 })).total).toBe(0);
       await expect(journeys.searchYardVisits({ ...filters, customerName: 'Private A' }, lineUser)).rejects.toThrow('không được lọc');
+
+      await c.query("INSERT INTO shipping_line_prefixes(prefix,shipping_line_id) VALUES('CSQU',$1)", [lineId]);
+      expect(await new ShippingLineDirectoryRepository().own(lineUser.id)).toMatchObject({ id: lineId, prefixes: ['CSQU'] });
+      const registration = { containerNumber: 'CSQU3054383', isoSizeType: '42R1', tareWeightKg: 4200, maxGrossMassKg: 34000 };
+      const containers = new ContainerService();
+      await expect(containers.registerIdentity(registration, userB)).rejects.toThrow('tiền tố BIC');
+      await expect(containers.registerIdentity(registration, lineUser.id)).resolves.toMatchObject({ containerTypeCode: '40RF' });
 
       await c.query("INSERT INTO vessels(id,name) VALUES($1,'Test vessel')", [vesselId]);
       await c.query("INSERT INTO vessel_calls(id,vessel_id,call_code,eta) VALUES($1,$2,$3,'2030-01-01T08:00Z')", [callId, vesselId, callId.slice(0, 15)]);
