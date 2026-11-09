@@ -1,6 +1,8 @@
 'use strict';
 
 const swaggerJsdoc = require('swagger-jsdoc');
+const { mountedRouters } = require('../routes');
+const { addDiscoveredRoutes } = require('./route-openapi');
 
 const options = {
   definition: {
@@ -91,6 +93,6 @@ const options = {
   apis: ['./src/modules/**/*.routes.js'],
 };
 
-const swaggerSpec = swaggerJsdoc(options);
+const swaggerSpec = addDiscoveredRoutes(swaggerJsdoc(options), mountedRouters);
 
 module.exports = { swaggerSpec };

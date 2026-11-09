@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Modules/ServiceCatalog/NexusPort.Modules.ServiceCatalog.csproj" />
+    <Compile Include="../ServiceDraftChecks/DraftFixtures.cs" Link="DraftFixtures.cs" />
+    <None Include="../../../database/migrations/20261108_035_eport_service_catalog.sql" Link="catalog.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../../database/migrations/20261108_036_eport_service_drafts.sql" Link="drafts.sql" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../../database/migrations/20261109_037_eport_service_registrations.sql" Link="registrations.sql" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

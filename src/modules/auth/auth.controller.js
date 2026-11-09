@@ -20,9 +20,9 @@ async function loginController(req, res, next) {
       });
     }
 
-    const { username, password, rememberMe } = req.body;
+    const { username, password, rememberMe, expectedRole } = req.body;
 
-    const { token, user } = await authService.login(username, password, !!rememberMe);
+    const { token, user } = await authService.login(username, password, !!rememberMe, expectedRole);
 
     return res.status(200).json({
       success: true,
@@ -33,7 +33,7 @@ async function loginController(req, res, next) {
       },
     });
   } catch (error) {
-    // Lỗi có statusCode (401, 403) từ service → trả trực tiếp
+    // Lỗi có statusCode (401, 403, 422) từ service → trả trực tiếp
     if (error.statusCode) {
       return res.status(error.statusCode).json({
         success: false,
@@ -121,7 +121,7 @@ async function resetPasswordController(req, res, next) {
 async function getMeController(req, res, next) {
   try {
     // req.user được gắn bởi authenticate middleware
-    const user = await User.findByPk(req.user.id);
+    const user = req.authenticatedAccount || await User.findByPk(req.user.id);
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -140,4 +140,88 @@ async function getMeController(req, res, next) {
   }
 }
 
-module.exports = { loginController, getMeController, forgotPasswordController, resetPasswordController };
+/**
+ * POST /api/auth/logout
+ * Đăng xuất người dùng: xóa session_id trong DB, ngắt socket, xóa cookie (nếu có).
+ */
+async function logoutController(req, res) {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const token = authHeader.split(' ')[1];
+      try {
+        const { verifyToken } = require('../../utils/jwt');
+        const decoded = verifyToken(token);
+        if (decoded && decoded.id) {
+          await User.update({ session_id: null }, { where: { id: decoded.id } });
+          authService.clearUserHeartbeat(decoded.id);
+          const { kickUserSockets } = require('../../config/socket');
+          kickUserSockets(decoded.id, 'LOGGED_OUT', 'Bạn đã đăng xuất.');
+        }
+      } catch (_) {}
+    }
+    if (res.clearCookie) {
+      res.clearCookie('token');
+      res.clearCookie('refreshToken');
+    }
+  } catch (_) {}
+  return res.status(200).json({
+    success: true,
+    message: 'Đăng xuất thành công.',
+  });
+}
+
+/**
+ * POST /api/auth/google
+ * Đăng nhập bằng Google kèm kiểm tra Whitelist.
+ */
+async function googleLoginController(req, res, next) {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(422).json({
+        success: false,
+        message: errors.array()[0].msg,
+        errors: errors.array().map((e) => ({ field: e.path, message: e.msg })),
+      });
+    }
+
+    const { credential, idToken, email, expectedRole, rememberMe } = req.body;
+
+    const { token, user } = await authService.loginWithGoogle({
+      credential,
+      idToken,
+      email,
+      expectedRole,
+      rememberMe: !!rememberMe,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Đăng nhập Google thành công.',
+      data: {
+        token,
+        user,
+      },
+    });
+  } catch (error) {
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        code: error.code || undefined,
+        message: error.message,
+      });
+    }
+    next(error);
+  }
+}
+
+module.exports = {
+  loginController,
+  googleLoginController,
+  logoutController,
+  getMeController,
+  forgotPasswordController,
+  resetPasswordController,
+};
+
