@@ -1,4 +1,4 @@
-import { AppError } from '../../../shared/errors/app-error';
+import { AppError, ForbiddenError } from '../../../shared/errors/app-error';
 import { ContainerSearchDto, RegisterContainerIdentityDto, UpdateContainerDto } from './container.dto';
 import { ContainerRepository } from '../infrastructure/container.repository';
 
@@ -16,11 +16,12 @@ export class ContainerService {
     return container;
   }
 
-  async registerIdentity(dto: RegisterContainerIdentityDto) {
+  async registerIdentity(dto: RegisterContainerIdentityDto, userId: string) {
     const containerType = await this.repository.findTypeById(dto.containerTypeId);
     if (!containerType) throw new AppError(`Không tìm thấy loại Container có ID '${dto.containerTypeId}'.`, 404, 'CONTAINER_TYPE_NOT_FOUND');
     try {
-      const id = await this.repository.createIdentity(dto, containerType.category === 'reefer');
+      const id = await this.repository.createIdentity(dto, containerType.category === 'reefer', userId);
+      if (!id) throw new ForbiddenError('Tài khoản cần thuộc hãng tàu đã đăng ký tiền tố BIC của container này.');
       return { id, ...dto, containerTypeCode: containerType.code };
     } catch (error) {
       this.handlePersistenceError(error as PostgresError);

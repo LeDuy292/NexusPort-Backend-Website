@@ -36,17 +36,22 @@ const parameterSchema = (path: string) => [...path.matchAll(/\{([A-Za-z0-9_]+)\}
 
 const operationOverrides: Record<string, Record<string, unknown>> = {
   'GET /api/v1/containers/identities': {
-    summary: 'Search physical container identities by number prefix',
-    parameters: [{
-      name: 'containerNumber', in: 'query', required: true,
-      schema: { type: 'string', minLength: 4, maxLength: 11 },
-    }],
+    summary: 'Search container equipment by number, BIC prefix, shipping line, type, size or category',
+    parameters: ['containerNumber', 'prefix', 'shippingLineId', 'containerTypeId', 'isoSizeType', 'size', 'category']
+      .map(name => ({ name, in: 'query', schema: { type: 'string' } })),
   },
   'POST /api/v1/containers/intake/shipping-line/manual': {
     summary: 'Register a physical container (Shipping Line only)',
     requestBody: { required: true, content: { 'application/json': { schema: {
-      type: 'object', required: ['containerNumber', 'containerTypeId'], additionalProperties: false,
-      properties: { containerNumber: { type: 'string', description: 'ISO 6346 equipment number' }, containerTypeId: { type: 'string', format: 'uuid' } },
+      type: 'object', additionalProperties: false,
+      required: ['containerNumber', 'containerTypeId', 'isoSizeType', 'externalLengthMm', 'externalWidthMm', 'externalHeightMm', 'tareWeightKg', 'maxGrossMassKg'],
+      properties: {
+        containerNumber: { type: 'string', description: 'ISO 6346 equipment number' },
+        containerTypeId: { type: 'string', format: 'uuid' }, isoSizeType: { type: 'string' },
+        equipmentDescription: { type: 'string' }, manufacturer: { type: 'string' },
+        externalLengthMm: { type: 'integer' }, externalWidthMm: { type: 'integer' }, externalHeightMm: { type: 'integer' },
+        tareWeightKg: { type: 'number' }, maxGrossMassKg: { type: 'number' }, capacityM3: { type: 'number' },
+      },
     } } } },
     responses: {
       201: { description: 'Container registered' },

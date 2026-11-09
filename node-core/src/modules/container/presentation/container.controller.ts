@@ -1,7 +1,7 @@
 import { ContainerJourneyRepository } from '../infrastructure/container-journey.repository';
 import { NextFunction, Request, Response, Router } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
-import { z, ZodError, ZodSchema } from 'zod';
+import { z, ZodError, ZodSchema, ZodTypeDef } from 'zod';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '../../../shared/errors/app-error';
 import { sendCreated, sendSuccess } from '../../../shared/utils/response';
 import { ContainerService } from '../application/container.service';
@@ -9,7 +9,7 @@ import { ContainerStatusService } from '../application/container-status.service'
 import { ContainerIntakeService } from '../application/container-intake.service';
 import { ShippingLineDirectoryRepository } from '../infrastructure/shipping-line-directory.repository';
 import { ContainerSearchDto } from '../application/container.dto';
-import { containerSearchSchema, idSchema, registerContainerIdentitySchema, transitionContainerStatusSchema } from '../application/container.validator';
+import { containerIdentitySearchSchema, containerSearchSchema, idSchema, registerContainerIdentitySchema, transitionContainerStatusSchema } from '../application/container.validator';
 type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier' | 'Shipping Line' | 'Driver' | 'Berth Staff';
 interface AuthorizedRequest extends Request {
     containerUser?: {
@@ -43,7 +43,7 @@ const vietnameseValidationMessage = (issue: ZodError['issues'][number]): string 
         return 'Giá trị không đúng định dạng yêu cầu.';
     return 'Giá trị không hợp lệ.';
 };
-const parse = <T>(schema: ZodSchema<T>, value: unknown): T => {
+const parse = <T>(schema: ZodSchema<T, ZodTypeDef, unknown>, value: unknown): T => {
     try {
         return schema.parse(value);
     }
@@ -89,10 +89,10 @@ const allowRoles = (...roles: ContainerRole[]) => (req: AuthorizedRequest, _res:
 };
 export class ContainerController {
     constructor(private readonly service = new ContainerService(), private readonly statusService = new ContainerStatusService(), private readonly intakeService = new ContainerIntakeService()) { }
-    registerIdentity = async (req: Request, res: Response, next: NextFunction) => {
+    registerIdentity = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
         try {
             const dto = parse(registerContainerIdentitySchema, req.body);
-            sendCreated(res, await this.service.registerIdentity(dto));
+            sendCreated(res, await this.service.registerIdentity(dto, req.containerUser!.id));
         }
         catch (error) {
             next(error);
@@ -183,7 +183,7 @@ export const createContainerRouter = (): Router => {
     const identityReaders: ContainerRole[] = [...readers, 'Shipping Line', 'Driver', 'Berth Staff'];
     const writers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Gate Officer'];
     router.use(authenticateContainerUser);
-    router.get('/types', allowRoles(...readers, 'Shipping Line'), controller.getTypes);
+    router.get('/types', allowRoles(...identityReaders), controller.getTypes);
     router.get('/cargo-types', allowRoles(...readers), controller.getCargoTypes);
     router.get('/intake/imports', allowRoles('Administrator', 'Dispatcher'), controller.listImports);
     router.get('/intake/transport/declarations', allowRoles('Carrier'), controller.listTransportDeclarations);
@@ -209,7 +209,7 @@ export const createContainerRouter = (): Router => {
     const journeys = new ContainerJourneyRepository();
     router.get('/identities', allowRoles(...identityReaders), async (req, res, next) => {
         try {
-            sendSuccess(res, await journeys.searchIdentities(req.query));
+            sendSuccess(res, await journeys.searchIdentities(parse(containerIdentitySearchSchema, req.query)));
         } catch (error) {
             next(error);
         }

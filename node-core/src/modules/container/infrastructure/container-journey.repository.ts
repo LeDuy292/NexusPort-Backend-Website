@@ -1,5 +1,6 @@
 import { getClient, query } from '../../../infrastructure/database/db';
 import { AppError } from '../../../shared/errors/app-error';
+import { ContainerIdentitySearchDto } from '../application/container.dto';
 
 export class ContainerJourneyRepository {
   async lookup(number: string) {
@@ -10,18 +11,38 @@ export class ContainerJourneyRepository {
     return result.rows[0] ?? null;
   }
 
-  async searchIdentities(filters: Record<string, unknown>) {
-    const number = String(filters.containerNumber ?? '').trim().toUpperCase();
-    if (!/^[A-Z0-9]{4,11}$/.test(number))
-      throw new AppError('Nhập số Container từ 4 đến 11 ký tự để tìm kiếm.', 422);
-    const page = Math.max(1, Math.min(Math.trunc(Number(filters.page)) || 1, 10000));
-    const limit = Math.max(1, Math.min(Math.trunc(Number(filters.limit)) || 20, 50));
-    const prefix = number + '%';
-    const from = 'FROM containers c JOIN container_types ct ON ct.id=c.container_type_id WHERE c.container_no LIKE $1';
-    const total = Number((await query('SELECT count(*) ' + from, [prefix])).rows[0].count);
+  async searchIdentities(filters: ContainerIdentitySearchDto) {
+    const { containerNumber, prefix, shippingLineId, containerTypeId, isoSizeType, size, category, page, limit } = filters;
+    const params: string[] = [];
+    const conditions: string[] = [];
+    const add = (column: string, operator: '=' | 'LIKE', value?: string) => {
+      if (value) {
+        params.push(value);
+        conditions.push(`${column} ${operator} $${params.length}`);
+      }
+    };
+    add('c.container_no', 'LIKE', containerNumber && containerNumber + '%');
+    add('c.container_no', 'LIKE', prefix && prefix + '%');
+    add('l.id', '=', shippingLineId);
+    add('c.container_type_id', '=', containerTypeId);
+    add('c.iso_size_type', '=', isoSizeType);
+    add('ct.size', '=', size);
+    add('ct.category', '=', category);
+    const from = `FROM containers c JOIN container_types ct ON ct.id=c.container_type_id
+      LEFT JOIN shipping_line_prefixes p ON c.shipping_line_id IS NULL AND p.prefix=left(c.container_no,4)
+      LEFT JOIN shipping_lines l ON l.id=COALESCE(c.shipping_line_id,p.shipping_line_id)
+      WHERE ${conditions.join(' AND ')}`;
+    const total = Number((await query('SELECT count(*) ' + from, params)).rows[0].count);
     const { rows } = await query(`SELECT c.id,c.container_no AS "containerNumber",ct.code AS "containerTypeCode",
-      ct.description AS "containerTypeDescription" ${from} ORDER BY c.container_no LIMIT $2 OFFSET $3`,
-      [prefix, limit, (page - 1) * limit]);
+      ct.description AS "containerTypeDescription",ct.size,ct.category,
+      l.id AS "shippingLineId",l.full_name AS "shippingLineFullName",l.short_name AS "shippingLineShortName",
+      left(c.container_no,4) AS prefix,c.iso_size_type AS "isoSizeType",c.equipment_description AS "equipmentDescription",
+      c.external_length_mm AS "externalLengthMm",c.external_width_mm AS "externalWidthMm",c.external_height_mm AS "externalHeightMm",
+      c.tare_weight_kg::float8 AS "tareWeightKg",c.max_gross_mass_kg::float8 AS "maxGrossMassKg",
+      (c.max_gross_mass_kg-c.tare_weight_kg)::float8 AS "maxPayloadKg",
+      c.capacity_m3::float8 AS "capacityM3",c.manufacturer
+      ${from} ORDER BY c.container_no LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, limit, (page - 1) * limit]);
     return { items: rows, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
@@ -35,7 +56,11 @@ export class ContainerJourneyRepository {
       throw new AppError('Khoảng thời gian không hợp lệ.', 422);
     if (identityOnly) {
       if (plate || customer || from || to) throw new AppError('Công ty vận tải chỉ được tìm theo số Container.', 403);
-      return this.searchIdentities(filters);
+      if (!/^[A-Z0-9]{4,11}$/.test(number))
+        throw new AppError('Nhập số Container từ 4 đến 11 ký tự để tìm kiếm.', 422);
+      const page = Math.max(1, Math.min(Math.trunc(Number(filters.page)) || 1, 10000));
+      const limit = Math.max(1, Math.min(Math.trunc(Number(filters.limit)) || 20, 50));
+      return this.searchIdentities({ containerNumber: number, page, limit });
     }
     if ((!number || number.length < 4) && !plate && customer.length < 3)
       throw new AppError('Nhập số Container (ít nhất 4 ký tự), biển số xe hoặc khách hàng (ít nhất 3 ký tự).', 422);

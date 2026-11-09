@@ -6,7 +6,8 @@ const jwt = require('../../node-core/node_modules/jsonwebtoken');
 const { Client } = require('../../node-core/node_modules/pg');
 if (process.env.DATABASE_URL !== 'postgresql://postgres@127.0.0.1:55438/nxp038_test') throw new Error('Isolated test DB required');
 const db = new Client({ connectionString: process.env.DATABASE_URL });
-const users = [randomUUID(), randomUUID()], carriers = [randomUUID(), randomUUID()];
+const users = [randomUUID(), randomUUID(), randomUUID()], carriers = [randomUUID(), randomUUID()];
+const shippingLineId = randomUUID();
 let containerId;
 const fixtureGate = randomUUID();
 const trucks=[randomUUID(),randomUUID()],drivers=[randomUUID(),randomUUID()];
@@ -27,13 +28,20 @@ async function api(port,path,index,method='GET',body,status=200,role) {
       await db.query("INSERT INTO drivers(id,carrier_id,full_name,license_number) VALUES($1,$2,$3,$4)",[drivers[i],carriers[i],'HTTP driver '+i,'FC-'+drivers[i]]);
       await db.query("INSERT INTO trucks(id,carrier_id,plate_number,vehicle_type,driver_id) VALUES($1,$2,$3,'Truck 24T',$4)",[trucks[i],carriers[i],'HTTP-'+trucks[i].slice(0,8),drivers[i]]);
     }
+    await db.query('INSERT INTO shipping_lines(id,full_name,short_name) VALUES($1,$2,$3)',[shippingLineId,'HTTP Test Shipping Line','HTTP-NXP-038']);
+    await db.query("INSERT INTO shipping_line_prefixes(prefix,shipping_line_id) VALUES('CSQU',$1)",[shippingLineId]);
+    await db.query("INSERT INTO users(id,username,email,password,role,is_active,created_at,updated_at,shipping_line_id) VALUES($1,$2,$3,'test-only','Shipping Line',true,now(),now(),$4)",[users[2],'http-'+users[2],users[2]+'@example.invalid',shippingLineId]);
     const {id:containerTypeId}=(await db.query("SELECT id FROM container_types WHERE code='40RF'")).rows[0];
-    const registration={containerNumber:'CSQU3054383',containerTypeId};
+    const registration={containerNumber:'CSQU3054383',containerTypeId,isoSizeType:'45R1',externalLengthMm:12192,
+      externalWidthMm:2438,externalHeightMm:2896,tareWeightKg:4200,maxGrossMassKg:34000};
     const registerPath='/api/v1/containers/intake/shipping-line/manual';
     await api(5189,registerPath,0,'POST',registration,403);
-    const identityCreated=await api(5189,registerPath,0,'POST',registration,201,'Shipping Line');
+    const identityCreated=await api(5189,registerPath,2,'POST',registration,201,'Shipping Line');
     containerId=identityCreated.id;
-    await api(5189,registerPath,0,'POST',registration,409,'Shipping Line');
+    await api(5189,registerPath,2,'POST',registration,409,'Shipping Line');
+    const equipment=await api(5189,`/api/v1/containers/identities?shippingLineId=${shippingLineId}&isoSizeType=45R1`,1);
+    assert.equal(equipment.items[0].maxPayloadKg,29800);
+    assert.equal(equipment.items[0].customerName,undefined);
     // Simulate cargo that was declared by the company before transport intake was retired.
     const {id:declarationId}=(await db.query(`INSERT INTO container_declarations
       (container_id,declared_by,carrier_id,load_status,cargo_type,required_power_kw,customer_name,seal_number,gross_weight_kg)
@@ -137,6 +145,7 @@ async function api(port,path,index,method='GET',body,status=200,role) {
     await db.query('DELETE FROM drivers WHERE id=ANY($1::uuid[])',[drivers]);
     await db.query('DELETE FROM carriers WHERE id=ANY($1::uuid[])',[carriers]);
     await db.query('DELETE FROM users WHERE id=ANY($1::uuid[])',[users]);
+    await db.query('DELETE FROM shipping_lines WHERE id=$1',[shippingLineId]);
     await db.query('DELETE FROM gates WHERE id=$1',[fixtureGate]);
     for(const [table,trigger] of guards)await db.query(`ALTER TABLE ${table} ENABLE TRIGGER ${trigger}`);
     await db.query('COMMIT');

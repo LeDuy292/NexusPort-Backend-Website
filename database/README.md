@@ -49,11 +49,15 @@ Carriers may filter only by number and receive identity fields only. Staff searc
 visits by number, normalized truck plate, customer or time range. Generic rich
 container/detail/status endpoints are staff-only. No list loads on page entry.
 
-`GET /containers/identities?containerNumber=...` lets authenticated roles search
-physical identities by number prefix. `POST /containers/intake/shipping-line/manual`
-allows only Shipping Line to register a physical container with its ISO number and
-equipment type. An existing number returns a conflict. Registration creates no
-declaration or visit. Transport intake writes and the old Excel template are retired.
+`GET /containers/identities` searches physical equipment by number, BIC prefix,
+shipping line, catalog type, ISO size/type, size or category. Supply at least one
+filter. The response contains technical data and excludes cargo or booking data.
+`POST /containers/intake/shipping-line/manual` lets an active Shipping Line account
+register a container whose BIC prefix belongs to its profile. It requires an ISO
+number, catalog type, ISO size/type, external dimensions in mm, tare and maximum
+gross mass in kg. Description, manufacturer and capacity in m³ are optional.
+Payload is maximum gross mass minus tare. A duplicate returns a conflict.
+Registration creates no declaration or visit. Transport intake writes and the old Excel template are retired.
 Transport companies can still search their existing declarations and use them in Booking.
 Set Node Core's `JWT_SECRET` to the key used by the login service.
 
@@ -91,6 +95,9 @@ Apply `20261109_034_shipping_line_directory.sql` before deploying the shipping
 line directory. Administrators maintain full and short names, unique BIC prefixes,
 and links to existing Shipping Line accounts. Export booking still uses account
 IDs. Existing accounts can be linked from the directory once the profile is set up.
+Apply `20261109_035_container_equipment_specs.sql` after 034 before deploying
+equipment registration and search. Legacy containers retain their type and history
+with unknown technical values displayed as missing.
 
 Dispatcher-to-gate entry and simulated barrier commands use additive migration
 `20261018_018_dispatch_gate_entry_orders.sql`, evidence migration 019 and single
