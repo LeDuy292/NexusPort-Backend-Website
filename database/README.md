@@ -101,6 +101,35 @@ IDs. Existing accounts can be linked from the directory once the profile is set 
 Apply `20261109_035_container_equipment_specs.sql` after 034 before deploying
 equipment registration and search. Legacy containers retain their type and history
 with unknown technical values displayed as missing.
+Migration `20261109_036_restore_shipping_line_account_link.sql` restores the
+account-link column on databases where Express development schema sync removed it.
+Restore previous account assignments from the import report or the admin directory.
+
+### Import five shipping lines and login accounts
+
+Build Node Core first, then pass a text file with one container number per line.
+The first command previews the import. Add `--allow-remote` only when targeting
+the configured shared database. The apply command requires a new private path for
+the initial passwords. Keep that file outside the repo and Swagger.
+
+```powershell
+npm --prefix node-core run build
+node database/scripts/import-shipping-lines.cjs --containers <container-numbers.txt>
+node database/scripts/import-shipping-lines.cjs --containers <container-numbers.txt> --apply --credentials-file <private-path> --report <new-report-path>
+```
+
+Each imported line gets one active Shipping Line account. The script preserves
+existing credentials and aborts on conflicting profiles, prefixes or accounts.
+It deduplicates and validates the supplied numbers. A verified number is linked
+only when its physical record already exists with no assigned line. Other numbers
+appear in the report. Registration still requires the technical equipment data.
+Evergreen Line represents verified Evergreen member prefixes as a single operating
+profile. See the [BIC register](https://www.bic-code.org/bic-codes/) and
+[Evergreen joint service agreement](https://www2.fmc.gov/FMC.Agreements.Web/Public/Document/61650).
+Express Swagger at `http://localhost:3001/api-docs` lists the five imported account
+names and BIC prefixes under the default seed accounts. Node Core Swagger at
+`http://localhost:4000/api-docs` documents the live
+`GET /api/v1/containers/shipping-lines` directory.
 
 Dispatcher-to-gate entry and simulated barrier commands use additive migration
 `20261018_018_dispatch_gate_entry_orders.sql`, evidence migration 019 and single

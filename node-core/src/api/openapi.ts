@@ -1,4 +1,5 @@
 import { ContainerStatus } from '../modules/container/domain/container.entity';
+import shippingLineReference from '../modules/container/domain/shipping-line-reference.json';
 import { NodeCoreRouteModule, nodeCoreRouteModules } from './routes';
 
 type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
@@ -35,6 +36,42 @@ const parameterSchema = (path: string) => [...path.matchAll(/\{([A-Za-z0-9_]+)\}
 }));
 
 const operationOverrides: Record<string, Record<string, unknown>> = {
+  'GET /api/v1/containers/shipping-lines': {
+    summary: 'List shipping line profiles and their registered BIC prefixes',
+    description: 'Returns the current database directory. The response example shows five profiles from the reference import with illustrative IDs.',
+    responses: {
+      200: {
+        description: 'Shipping line directory',
+        content: { 'application/json': {
+          schema: {
+            type: 'object', required: ['success', 'data', 'timestamp'],
+            properties: {
+              success: { type: 'boolean' },
+              data: { type: 'array', items: { $ref: '#/components/schemas/ShippingLineProfile' } },
+              timestamp: { type: 'string', format: 'date-time' },
+            },
+          },
+          example: {
+            success: true,
+            data: shippingLineReference.map(({ fullName, shortName, prefixes }, index) => ({
+              id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, fullName, shortName, prefixes,
+            })),
+            timestamp: '2026-11-09T00:00:00Z',
+          },
+        } },
+      },
+      401: { description: 'Missing or invalid token' },
+      403: { description: 'Role cannot access the directory' },
+    },
+  },
+  'GET /api/v1/containers/shipping-lines/me': {
+    summary: 'Get the profile assigned to the authenticated shipping line account',
+    responses: {
+      200: { description: 'Assigned profile, or null for an unlinked account' },
+      401: { description: 'Missing or invalid token' },
+      403: { description: 'Shipping Line role required' },
+    },
+  },
   'GET /api/v1/containers/identities': {
     summary: 'Search container equipment by number, BIC prefix, shipping line, type, size or category',
     parameters: ['containerNumber', 'prefix', 'shippingLineId', 'containerTypeId', 'isoSizeType', 'size', 'category']
@@ -257,6 +294,16 @@ export const buildNodeCoreOpenApi = () => {
         BearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
       },
       schemas: {
+        ShippingLineProfile: {
+          type: 'object',
+          required: ['id', 'fullName', 'shortName', 'prefixes'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            fullName: { type: 'string', example: 'Hapag-Lloyd AG' },
+            shortName: { type: 'string', example: 'Hapag-Lloyd' },
+            prefixes: { type: 'array', items: { type: 'string', pattern: '^[A-Z]{3}[UJZ]$' }, example: ['HAMU', 'HLBU'] },
+          },
+        },
         ContainerStatus: { type: 'string', enum: Object.values(ContainerStatus) },
         ContainerStatusTransition: {
           type: 'object',

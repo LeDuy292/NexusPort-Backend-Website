@@ -1,0 +1,32 @@
+[
+  {
+    "fullName": "Hapag-Lloyd AG",
+    "shortName": "Hapag-Lloyd",
+    "seedUsername": "ship-hapag",
+    "prefixes": ["FANU", "HAMU", "HLBU", "HLXU", "UACU"]
+  },
+  {
+    "fullName": "Ocean Network Express Pte. Ltd.",
+    "shortName": "ONE",
+    "seedUsername": "ship-one",
+    "prefixes": ["ONEU"]
+  },
+  {
+    "fullName": "Evergreen Line",
+    "shortName": "Evergreen",
+    "seedUsername": "ship-evergreen",
+    "prefixes": ["EGHU", "EGSU", "EMCU"]
+  },
+  {
+    "fullName": "Yang Ming Marine Transport Corp.",
+    "shortName": "Yang Ming",
+    "seedUsername": "ship-yangming",
+    "prefixes": ["YMLU"]
+  },
+  {
+    "fullName": "MSC Mediterranean Shipping Company S.A.",
+    "shortName": "MSC",
+    "seedUsername": "ship-msc",
+    "prefixes": ["MEDU", "MSBU", "MSCU", "MSDU", "MSMU", "MSNU"]
+  }
+]
