@@ -349,10 +349,16 @@ async function getCarrierStaffs(carrierId) {
  * Tạo và cấp tài khoản đăng nhập cho tài xế (vai trò Driver).
  */
 async function createDriverAccount({ email, username, password, fullName, driverId, carrierId }) {
+  const DEFAULT_SYSTEM_PASS = 'Driver@123';
+  const effectivePassword = password || DEFAULT_SYSTEM_PASS;
   const rawId = (username || email || '').trim();
   const isEmail = rawId.includes('@');
   const normEmail = isEmail ? rawId.toLowerCase() : `${rawId.toLowerCase()}@nexusport.vn`;
-  const normUsername = rawId.toLowerCase();
+  
+  // Format clean base username
+  let baseUsername = isEmail ? rawId.split('@')[0].toLowerCase() : rawId.toLowerCase();
+  baseUsername = baseUsername.replace(/[^a-z0-9._-]/g, '') || `driver_${Date.now().toString().slice(-4)}`;
+
   let finalCarrierId = carrierId;
   let finalDriverId = driverId;
 
@@ -362,7 +368,7 @@ async function createDriverAccount({ email, username, password, fullName, driver
       { replacements: { driverId: finalDriverId }, type: sequelize.QueryTypes.SELECT }
     );
     if (driverRow) {
-      if (!finalCarrierId) finalCarrierId = driverRow.carrier_id;
+      finalCarrierId = driverRow.carrier_id;
       if (!fullName) fullName = driverRow.full_name;
     }
   }
@@ -380,13 +386,14 @@ async function createDriverAccount({ email, username, password, fullName, driver
       [Op.or]: [
         { email: { [Op.iLike]: normEmail } },
         { username: { [Op.iLike]: normEmail } },
+        { username: { [Op.iLike]: baseUsername } },
       ],
     },
   });
 
   if (existingUser) {
     if (existingUser.role === 'Driver') {
-      const hashedPassword = await bcrypt.hash(password, bcryptConfig.saltRounds);
+      const hashedPassword = await bcrypt.hash(effectivePassword, bcryptConfig.saltRounds);
       existingUser.password = hashedPassword;
       existingUser.is_active = true;
       if (fullName) existingUser.full_name = fullName;
@@ -400,14 +407,21 @@ async function createDriverAccount({ email, username, password, fullName, driver
         message: 'Đã kích hoạt và cập nhật tài khoản tài xế thành công!',
       };
     } else {
-      const err = new Error('Email ' + normEmail + ' đã tồn tại cho tài khoản vai trò "' + existingUser.role + '". Vui lòng chọn email khác.');
+      const err = new Error('Email hoặc Tên đăng nhập ' + rawId + ' đã tồn tại cho tài khoản vai trò "' + existingUser.role + '". Vui lòng chọn email khác.');
       err.statusCode = 409;
       throw err;
     }
   }
 
+  // Ensure unique username for new driver user
+  let finalUsername = baseUsername;
+  const usernameTaken = await User.findOne({ where: { username: { [Op.iLike]: finalUsername } } });
+  if (usernameTaken && usernameTaken.email.toLowerCase() !== normEmail.toLowerCase()) {
+    finalUsername = `${baseUsername}_${Math.floor(1000 + Math.random() * 9000)}`;
+  }
+
   const createdUser = await createUser({
-    username: normUsername,
+    username: finalUsername,
     email: normEmail,
     password: effectivePassword,
     role: 'Driver',

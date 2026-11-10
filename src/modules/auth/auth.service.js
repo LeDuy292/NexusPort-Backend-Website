@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
+const { sequelize } = require('../../config/database');
 const { User } = require('../../models/User');
 const { generateToken } = require('../../utils/jwt');
 const { kickUserSockets, hasActiveSockets } = require('../../config/socket');
@@ -49,7 +50,7 @@ const { bcrypt: bcryptConfig } = require('../../config/env');
  */
 async function login(usernameOrEmail, password, rememberMe = false, expectedRole = null) {
   // Tìm user theo username hoặc email (không phân biệt chữ hoa/thường)
-  const user = await User.findOne({
+  let user = await User.findOne({
     where: {
       [Op.or]: [
         { username: { [Op.iLike]: usernameOrEmail } },
@@ -58,10 +59,68 @@ async function login(usernameOrEmail, password, rememberMe = false, expectedRole
     },
   });
 
+  // Hỗ trợ tài xế đăng nhập bằng Số điện thoại hoặc Số bằng lái xe (GPLX)
+  if (!user && usernameOrEmail) {
+    try {
+      const rawInput = usernameOrEmail.trim();
+      const [linkedDriver] = await sequelize.query(`
+        SELECT d.user_id
+        FROM drivers d
+        WHERE (d.phone = :rawInput OR d.license_number ILIKE :rawInput)
+          AND d.user_id IS NOT NULL
+          AND d.status::text NOT IN ('inactive', 'banned')
+        LIMIT 1
+      `, {
+        replacements: { rawInput },
+        type: sequelize.QueryTypes.SELECT,
+      });
+
+      if (linkedDriver && linkedDriver.user_id) {
+        user = await User.findByPk(linkedDriver.user_id);
+      }
+    } catch (_e) {
+      // ignore
+    }
+  }
+
+  // Tự động kích hoạt tài khoản nếu tài xế đã có hồ sơ trong bảng drivers nhưng chưa có trong users
+  if (!user && password && password.length >= 6 && expectedRole && expectedRole.toLowerCase() === 'driver') {
+    try {
+      const rawInput = (usernameOrEmail || '').trim();
+      const [orphanedDriver] = await sequelize.query(`
+        SELECT d.id, d.carrier_id, d.full_name, d.phone, d.license_number
+        FROM drivers d
+        WHERE d.user_id IS NULL AND d.status::text NOT IN ('inactive', 'banned')
+          AND (d.phone = :rawInput OR d.license_number ILIKE :rawInput)
+        LIMIT 1
+      `, {
+        replacements: { rawInput },
+        type: sequelize.QueryTypes.SELECT,
+      });
+
+      if (orphanedDriver) {
+        const usersService = require('../users/users.service');
+        const loginPrefix = orphanedDriver.phone || orphanedDriver.license_number.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+        const provRes = await usersService.createDriverAccount({
+          username: loginPrefix,
+          email: `${loginPrefix}@nexusport.vn`,
+          password,
+          fullName: orphanedDriver.full_name,
+          driverId: orphanedDriver.id,
+          carrierId: orphanedDriver.carrier_id,
+        });
+        user = await User.findByPk(provRes.user.id);
+        console.log(`[AuthService] Tự động khởi tạo và liên kết tài khoản User cho tài xế ${orphanedDriver.full_name} (${orphanedDriver.id})`);
+      }
+    } catch (provErr) {
+      console.warn('[AuthService] Tự động cấp tài khoản cho tài xế lỗi:', provErr.message);
+    }
+  }
+
   if (!user) {
     // Vẫn chạy bcrypt để tránh timing attack
     await bcrypt.compare(password, '$2b$12$invalidhashplaceholderXXXXXXXXXXXXXX');
-    const err = new Error('Tài khoản không tồn tại!');
+    const err = new Error('Tài khoản hoặc mật khẩu không chính xác.');
     err.statusCode = 401;
     throw err;
   }
@@ -76,7 +135,7 @@ async function login(usernameOrEmail, password, rememberMe = false, expectedRole
   // So sánh password
   const isPasswordValid = await bcrypt.compare(password, user.password);
   if (!isPasswordValid) {
-    const err = new Error('Mật khẩu không chính xác!');
+    const err = new Error('Tài khoản hoặc mật khẩu không chính xác.');
     err.statusCode = 401;
     throw err;
   }
