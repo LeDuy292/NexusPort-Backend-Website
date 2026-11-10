@@ -24,14 +24,13 @@ const authenticateDriver = async (req: DriverRequest, _res: Response, next: Next
     const accountId = payload.sub ?? payload.id ?? payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'];
     if (typeof accountId !== 'string' || !uuidPattern.test(accountId)) return next(new UnauthorizedError('Token không chứa tài khoản hợp lệ.'));
 
-    // Kiểm tra tính hợp lệ của phiên đăng nhập duy nhất (Single Active Session)
-    if (process.env.NODE_ENV !== 'test') {
+    // Kiểm tra tính hợp lệ của phiên đăng nhập duy nhất (Single Active Session).
+    // Chỉ enforce khi token có sessionId (token được cấp bởi node-core).
+    // Token từ main backend (port 3001) không có sessionId → bỏ qua check này.
+    if (process.env.NODE_ENV !== 'test' && payload.sessionId) {
       const userRes = await query('SELECT session_id FROM users WHERE id = $1', [accountId]);
       const currentSessionId = userRes.rows[0]?.session_id;
-      if (
-        (currentSessionId && (!payload.sessionId || currentSessionId !== payload.sessionId)) ||
-        (!currentSessionId && payload.sessionId)
-      ) {
+      if (currentSessionId && currentSessionId !== payload.sessionId) {
         return next(new UnauthorizedError('Phiên làm việc đã bị kết thúc do tài khoản vừa đăng nhập ở nơi khác.'));
       }
     }
