@@ -26,4 +26,9 @@ router.get('/documents/:type/:id', authenticate, controller.getDocumentDetail);
 router.get('/unclaimed-consignees', authenticate, controller.getUnclaimedConsignees);
 router.post('/unclaimed-consignees/:id/claim', authenticate, controller.claimConsignee);
 
+// 6. Hành động kèm theo từ thông báo (Mục 3.2: Xác nhận Draft B/L, Nộp VGM, Quét nhắc hẹn)
+router.post('/draft-bl/confirm', authenticate, controller.confirmDraftBL);
+router.post('/vgm/submit', authenticate, controller.submitVGM);
+router.post('/reminders/process', authenticate, controller.processDueReminders);
+
 module.exports = router;

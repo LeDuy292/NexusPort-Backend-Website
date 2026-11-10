@@ -217,6 +217,61 @@ class CargoNotificationController {
       next(err);
     }
   }
+
+  // POST /api/cargo-notifications/draft-bl/confirm (Hành động mục 3.2 #9)
+  async confirmDraftBL(req, res, next) {
+    try {
+      const { bookingNo, blNumber } = req.body;
+      const user = req.user || {};
+      const result = await cargoNotificationService.confirmDraftBL({
+        bookingNo,
+        blNumber,
+        userId: user.id,
+      });
+      res.json({
+        success: true,
+        message: result.message,
+        data: result.booking,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // POST /api/cargo-notifications/vgm/submit (Hành động mục 3.2 #5)
+  async submitVGM(req, res, next) {
+    try {
+      const { bookingNo, containerNo, vgmWeight, authorizedPerson, signatureMethod } = req.body;
+      const result = await cargoNotificationService.submitVGM({
+        bookingNo,
+        containerNo,
+        vgmWeight,
+        authorizedPerson,
+        signatureMethod,
+      });
+      res.json({
+        success: true,
+        message: result.message,
+        data: result.vgmData,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  // POST /api/cargo-notifications/reminders/process (Tự động hóa nhắc việc)
+  async processDueReminders(_req, res, next) {
+    try {
+      const result = await cargoNotificationService.processDueReminders();
+      res.json({
+        success: true,
+        message: `Đã xử lý quét ${result.totalDue} nhắc hẹn, phát sinh ${result.processedCount} thông báo đến hạn.`,
+        data: result,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
 }
 
 module.exports = new CargoNotificationController();

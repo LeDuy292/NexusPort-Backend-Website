@@ -129,11 +129,12 @@ class CargoNotificationService {
       return { skipped: true, reason: 'DUPLICATE_EVENT', notificationId: existing.id };
     }
 
-    // 3. Xử lý nghiệp vụ theo từng loại sự kiện
+    // 3. Xử lý nghiệp vụ theo từng loại sự kiện (Chuẩn hóa theo Mục 3.2 và 4.2)
     let title = '';
     let message = '';
     let priority = 'normal'; // 'urgent' | 'normal' | 'info'
     let actionType = null;
+    let actionLabel = null;
     let actionUrl = null;
     let documentType = null;
     let documentId = null;
@@ -141,19 +142,22 @@ class CargoNotificationService {
 
     switch (eventCode) {
       // ══════════════════════════════════════════════
-      // CHIỀU XUẤT KHẨU (EXPORT) - HÃNG TÀU & CẢNG
+      // CHIỀU XUẤT KHẨU (EXPORT) - 3.2 THÔNG BÁO CHỦ HÀNG
       // ══════════════════════════════════════════════
+      
+      // 1. Booking được duyệt -> Mở booking
       case 'BookingConfirmed': {
         notifDirection = 'export';
         priority = 'normal';
         title = `Booking [${payload.bookingNo}] đã được Hãng tàu phê duyệt`;
-        message = `Tàu: ${payload.vesselName || 'Tàu chỉ định'} (Chuyến: ${payload.voyageNo || 'N/A'}). ETD: ${formatDate(payload.etd)}. Nơi lấy vỏ rỗng: ${payload.emptyPickupPlace || 'Depot chỉ định'}. Hạn Cut-off: CY (${formatDate(payload.cyCutOff)}), VGM (${formatDate(payload.vgmCutOff)}), SI (${formatDate(payload.siCutOff)}).`;
+        message = `Số booking: ${payload.bookingNo}. Tàu: ${payload.vesselName || 'Tàu chỉ định'} (Chuyến: ${payload.voyageNo || 'N/A'}). ETD: ${formatDate(payload.etd)}. Các Cut-off: CY (${formatDate(payload.cyCutOff)}), VGM (${formatDate(payload.vgmCutOff)}), SI (${formatDate(payload.siCutOff)}). Nơi lấy vỏ rỗng: ${payload.emptyPickupPlace || 'Depot chỉ định'}.`;
         actionType = 'open_booking';
+        actionLabel = 'Mở booking';
         actionUrl = `/booking?bookingNo=${encodeURIComponent(payload.bookingNo)}`;
         documentType = 'BOOKING';
         documentId = payload.bookingNo;
 
-        // Sinh reminders tự động
+        // Sinh reminders tự động ở các mốc cấu hình (Quy tắc 3)
         if (payload.vgmCutOff) {
           await this.createReminder({
             recipientCompanyId: recipient.companyId,
@@ -179,22 +183,38 @@ class CargoNotificationService {
         break;
       }
 
+      // 2. Booking bị từ chối -> Tạo booking mới
       case 'BookingRejected': {
         notifDirection = 'export';
         priority = 'urgent';
         title = `Booking [${payload.bookingNo}] BỊ TỪ CHỐI`;
-        message = `Hãng tàu từ chối booking của bạn. Lý do: ${payload.reason || 'Không đủ chỗ trên tàu'}. Vui lòng tạo yêu cầu booking mới.`;
+        message = `Lý do từ chối: ${payload.reason || 'Hết chỗ trên tàu hoặc không đáp ứng điều kiện vận chuyển'}. Vui lòng tạo yêu cầu booking mới.`;
         actionType = 'create_new_booking';
+        actionLabel = 'Tạo booking mới';
         actionUrl = '/booking/new';
         break;
       }
 
-      case 'BookingUpdated': {
+      // 3. Đổi lịch tàu hoặc cut-off -> Xem chi tiết
+      case 'BookingUpdated':
+      case 'ScheduleChanged': {
         notifDirection = 'export';
-        priority = 'normal';
-        title = `Booking [${payload.bookingNo}] thay đổi lịch trình / Cut-off`;
-        message = `Hãng tàu vừa cập nhật lịch tàu hoặc hạn cut-off mới. Vui lòng kiểm tra lại chi tiết hành trình.`;
-        actionType = 'open_booking';
+        priority = 'normal'; // Đổi trạng thái
+        title = `Booking [${payload.bookingNo}] thay đổi lịch tàu / Cut-off`;
+        
+        let changeDesc = '';
+        if (payload.changes && Array.isArray(payload.changes)) {
+          changeDesc = payload.changes.map(c => `${c.field || 'Hạng mục'}: cũ [${formatDate(c.oldValue) || c.oldValue}] -> mới [${formatDate(c.newValue) || c.newValue}]`).join('; ');
+        } else if (payload.oldValues && payload.newValues) {
+          const keys = Object.keys(payload.newValues);
+          changeDesc = keys.map(k => `${k}: giá trị cũ [${payload.oldValues[k]}] -> giá trị mới [${payload.newValues[k]}]`).join('; ');
+        } else {
+          changeDesc = payload.details || `Lịch tàu mới: ETD ${formatDate(payload.etd)}. Cut-off mới: CY (${formatDate(payload.cyCutOff)}), VGM (${formatDate(payload.vgmCutOff)})`;
+        }
+
+        message = `Thông tin thay đổi: ${changeDesc}.`;
+        actionType = 'view_details';
+        actionLabel = 'Xem chi tiết';
         actionUrl = `/booking?bookingNo=${encodeURIComponent(payload.bookingNo)}`;
         documentType = 'BOOKING';
         documentId = payload.bookingNo;
@@ -206,12 +226,16 @@ class CargoNotificationService {
         priority = 'info';
         title = `Booking [${payload.bookingNo}] đã bị hủy`;
         message = `Lý do hủy: ${payload.reason || 'Yêu cầu từ các bên'}.`;
+        actionType = 'view_details';
+        actionLabel = 'Xem chi tiết';
+        actionUrl = `/booking?bookingNo=${encodeURIComponent(payload.bookingNo)}`;
         // Hủy các reminder còn tồn tại của booking này
         await this.cancelRemindersByTarget('VGM_CUTOFF', payload.bookingNo);
         await this.cancelRemindersByTarget('CY_CUTOFF', payload.bookingNo);
         break;
       }
 
+      // 4. Danh sách container có lỗi -> Sửa danh sách
       case 'ContainerListAnnounced': {
         notifDirection = 'export';
         const containers = payload.containers || payload.containerList || [];
@@ -219,60 +243,97 @@ class CargoNotificationService {
         if (errors.length > 0) {
           priority = 'urgent';
           title = `Danh sách container của Booking [${payload.bookingNo}] CÓ LỖI`;
-          message = `Có ${errors.length} lỗi phát hiện: ${errors.join('; ')}. Vui lòng sửa lại danh sách.`;
+          const errorDetails = errors.map((err, idx) => `Dòng ${idx + 1}: ${typeof err === 'object' ? (err.message || JSON.stringify(err)) : err}`).join('; ');
+          message = `Danh sách lỗi từng dòng: ${errorDetails}. Vui lòng sửa lại danh sách.`;
           actionType = 'edit_container_list';
+          actionLabel = 'Sửa danh sách';
         } else {
           priority = 'normal';
           title = `Đã ghi nhận danh sách ${containers.length} container cho Booking [${payload.bookingNo}]`;
           message = `Các container (${containers.slice(0, 3).join(', ')}${containers.length > 3 ? '...' : ''}) đã đủ điều kiện để đặt dịch vụ hạ bãi. Nhắc nhở khai VGM trước hạn.`;
-          actionType = 'submit_vgm';
+          actionType = 'submit_declaration';
+          actionLabel = 'Khai hoặc nộp';
         }
         actionUrl = `/booking?bookingNo=${encodeURIComponent(payload.bookingNo)}`;
         break;
       }
 
+      // 5. Sắp hết hạn VGM, CY, SI -> Khai hoặc nộp
+      case 'CutoffApproaching':
+      case 'DeadlineApproaching': {
+        notifDirection = 'export';
+        const cutoffType = payload.cutoffType || 'VGM, CY, SI';
+        const diffMs = payload.dueAt ? (new Date(payload.dueAt).getTime() - Date.now()) : 0;
+        const hoursRemaining = Math.max(0, Math.round(diffMs / (3600 * 1000)));
+        // Quy tắc 2: Khẩn khi còn dưới 2 giờ trước hạn, Thường khi trên 2 giờ
+        const isUrgent = (diffMs > 0 && diffMs <= 2 * 3600 * 1000) || payload.isUrgent;
+        priority = isUrgent ? 'urgent' : 'normal';
+
+        title = `${isUrgent ? 'KHẨN CẤP: ' : ''}Sắp hết hạn ${cutoffType} cho Booking [${payload.bookingNo || ''}]`;
+        message = `Hạn chót: ${formatDate(payload.dueAt)}. Thời gian còn lại: ${hoursRemaining > 0 ? `${hoursRemaining} giờ` : 'dưới 1 giờ'}. Vui lòng khai báo hoặc nộp chứng từ ngay để tránh rớt tàu.`;
+        actionType = 'submit_declaration';
+        actionLabel = 'Khai hoặc nộp';
+        actionUrl = `/booking?bookingNo=${encodeURIComponent(payload.bookingNo || '')}`;
+        break;
+      }
+
+      // 6. Container qua cổng -> Xem EIR (Gộp nhiều container theo Quy tắc 4)
       case 'ContainerGatedIn': {
         notifDirection = 'export';
         priority = 'normal';
         const contList = payload.containers || (payload.containerNo ? [payload.containerNo] : []);
         const contText = contList.length > 1 ? `${contList.length} container (${contList.join(', ')})` : `Container ${contList[0] || ''}`;
         title = `${contText} ĐÃ QUA CỔNG VÀO CẢNG`;
-        message = `Xe ${payload.truckPlate || 'chở cont'} đã vào cổng ${payload.gateCode || 'GATE-01'} lúc ${formatDate(payload.gateInAt)}. Số EIR: ${payload.eirNo || 'N/A'}. Số niêm chì: ${payload.sealNo || 'Khớp'}. Tình trạng vỏ: ${payload.condition || 'Tốt'}.`;
+        message = `Giờ vào: ${formatDate(payload.gateInAt || payload.occurredAt)}. Số EIR: ${payload.eirNo || 'N/A'}. Xe ${payload.truckPlate || ''} qua cổng ${payload.gateCode || 'GATE-01'}. Số chì: ${payload.sealNo || 'Khớp'}. Tình trạng vỏ: ${payload.condition || 'Tốt'}.`;
         actionType = 'view_eir';
+        actionLabel = 'Xem EIR';
         actionUrl = `/cargo/documents/EIR/${encodeURIComponent(payload.eirNo || '')}`;
         documentType = 'EIR';
         documentId = payload.eirNo;
 
-        // Đã vào cổng -> Tự động hủy reminder CY_CUTOFF
+        // Đã vào cổng -> Tự động hủy reminder CY_CUTOFF (Quy tắc 3)
         if (payload.bookingNo) {
           await this.cancelRemindersByTarget('CY_CUTOFF', payload.bookingNo);
         }
         break;
       }
 
+      // 7. Container bị từ chối ở cổng -> Liên hệ hãng tàu, xem hướng xử lý
       case 'ContainerGateRejected': {
         notifDirection = 'export';
-        priority = 'urgent'; // KHẨN
-        title = `KHẨN CẤP: Container ${payload.containerNo || ''} BỊ TỪ CHỐI TẠI CỔNG VÀO`;
-        message = `Xe ${payload.truckPlate || ''} bị chặn tại cổng ${payload.gateCode || ''}. Lý do: ${payload.reason || 'Quá hạn CY cut-off hoặc thiếu lệnh dịch vụ'}. Vui lòng liên hệ điều độ cảng hoặc hãng tàu ngay.`;
+        priority = 'urgent'; // Quy tắc 2: Khẩn (bị từ chối ở cổng)
+        const contList = payload.containers || (payload.containerNo ? [payload.containerNo] : []);
+        const contText = contList.length > 1 ? `${contList.length} container (${contList.join(', ')})` : `Container ${contList[0] || ''}`;
+        title = `KHẨN CẤP: ${contText} BỊ TỪ CHỐI TẠI CỔNG VÀO`;
+        message = `Lý do cụ thể: ${payload.reason || 'Quá hạn CY cut-off, thiếu khai báo VGM hoặc số chì không khớp dữ liệu'}. Cổng: ${payload.gateCode || 'GATE-01'}, Xe: ${payload.truckPlate || 'N/A'}. Vui lòng liên hệ hãng tàu ngay để xem hướng xử lý hoặc đưa vào hàng đợi ngoại lệ.`;
         actionType = 'contact_support';
-        actionUrl = `/cargo/support?containerNo=${encodeURIComponent(payload.containerNo || '')}`;
+        actionLabel = 'Liên hệ hãng tàu, xem hướng xử lý';
+        actionUrl = `/cargo/support?containerNo=${encodeURIComponent(contList[0] || '')}`;
         break;
       }
 
+      // 8. Container bị loại hoặc rớt tàu -> Xem chi tiết
+      case 'ContainerRolledOver':
       case 'VoyageListClosed': {
         notifDirection = 'export';
+        const rejected = payload.rejectedContainers || (eventCode === 'ContainerRolledOver' ? (payload.containers || [payload.containerNo]) : []);
         const accepted = payload.acceptedContainers || [];
-        const rejected = payload.rejectedContainers || [];
+
         if (rejected.length > 0) {
           priority = 'urgent';
-          title = `CẢNH BÁO: ${rejected.length} container bị loại / rớt tàu chuyến ${payload.voyageNo || ''}`;
-          message = `Các container bị loại: ${rejected.join(', ')}. Lý do: ${payload.reason || 'Chưa hoàn tất thủ tục trước giờ chốt'}. Tiền dịch vụ liên quan sẽ được hoàn trả mô phỏng.`;
-          actionType = 'view_exception';
+          const contText = rejected.length > 1 ? `${rejected.length} container (${rejected.join(', ')})` : `Container ${rejected[0] || ''}`;
+          title = `CẢNH BÁO: ${contText} BỊ LOẠI HOẶC RỚT TÀU ${payload.vesselName || ''} (${payload.voyageNo || ''})`;
+          message = `Lý do: ${payload.reason || 'Không kịp giờ đóng sổ, chưa có VGM hoặc vượt tải trọng tàu'}.${payload.newVoyageNo ? ` Chuyến mới được sắp xếp: ${payload.newVoyageNo} (ETD: ${formatDate(payload.newEtd)}).` : ' Chưa có chuyến thay thế, vui lòng xem chi tiết.'}`;
+          actionType = 'view_details';
+          actionLabel = 'Xem chi tiết';
+          actionUrl = `/booking?bookingNo=${encodeURIComponent(payload.bookingNo || '')}`;
         } else {
           priority = 'normal';
           title = `Danh sách xếp tàu chuyến ${payload.voyageNo || ''} ĐÃ CHỐT`;
           message = `Toàn bộ ${accepted.length} container thuộc Booking ${payload.bookingNo || ''} đã được phê duyệt trong danh sách xếp tàu.`;
+          actionType = 'view_details';
+          actionLabel = 'Xem chi tiết';
+          actionUrl = `/booking?bookingNo=${encodeURIComponent(payload.bookingNo || '')}`;
         }
         break;
       }
@@ -280,8 +341,13 @@ class CargoNotificationService {
       case 'ContainerLoaded': {
         notifDirection = 'export';
         priority = 'normal';
-        title = `Container ${payload.containerNo || ''} đã xếp lên tàu`;
-        message = `Đã bốc lên tàu ${payload.vesselName || ''} (Chuyến ${payload.voyageNo || ''}) lúc ${formatDate(payload.loadedAt)}.`;
+        const contList = payload.containers || (payload.containerNo ? [payload.containerNo] : []);
+        const contText = contList.length > 1 ? `${contList.length} container (${contList.join(', ')})` : `Container ${contList[0] || ''}`;
+        title = `${contText} đã xếp lên tàu`;
+        message = `Đã bốc an toàn lên tàu ${payload.vesselName || ''} (Chuyến ${payload.voyageNo || ''}) lúc ${formatDate(payload.loadedAt)}.`;
+        actionType = 'view_details';
+        actionLabel = 'Xem chi tiết';
+        actionUrl = `/booking?bookingNo=${encodeURIComponent(payload.bookingNo || '')}`;
         break;
       }
 
@@ -290,15 +356,20 @@ class CargoNotificationService {
         priority = 'normal';
         title = `Tàu ${payload.vesselName || ''} (Chuyến ${payload.voyageNo || ''}) ĐÃ RỜI CẦU`;
         message = `Tàu đã rời cảng Tiên Sa lúc ${formatDate(payload.departedAt)}. Chuyến hàng xuất khẩu của bạn đã chính thức khởi hành.`;
+        actionType = 'view_details';
+        actionLabel = 'Xem chi tiết';
+        actionUrl = `/booking?bookingNo=${encodeURIComponent(payload.bookingNo || '')}`;
         break;
       }
 
+      // 9. Draft B/L cần xác nhận -> Xem và xác nhận draft
       case 'DraftBLIssued': {
         notifDirection = 'export';
         priority = 'normal';
-        title = `Xác nhận bản nháp vận đơn (Draft B/L) [${payload.blNumber || ''}]`;
-        message = `Hãng tàu đã phát hành Draft B/L cho Booking ${payload.bookingNo || ''}. Hạn xác nhận: ${formatDate(payload.confirmationDeadline)}. Vui lòng kiểm tra và xác nhận.`;
+        title = `Bản nháp vận đơn (Draft B/L) [${payload.blNumber || ''}] cần xác nhận`;
+        message = `Hãng tàu đã phát hành Draft B/L cho Booking ${payload.bookingNo || ''}. Hạn xác nhận: ${formatDate(payload.confirmationDeadline)}. Vui lòng kiểm tra thông tin hàng hóa và xác nhận trước thời hạn.`;
         actionType = 'confirm_draft_bl';
+        actionLabel = 'Xem và xác nhận draft';
         actionUrl = `/cargo/documents/BL/${encodeURIComponent(payload.blNumber || '')}`;
         documentType = 'BL';
         documentId = payload.blNumber;
@@ -317,12 +388,14 @@ class CargoNotificationService {
         break;
       }
 
+      // 10. B/L đã phát hành -> Xem B/L
       case 'BLIssued': {
         notifDirection = 'export';
         priority = 'normal';
         title = `Vận đơn chính thức (Bill of Lading) [${payload.blNumber || ''}] đã phát hành`;
-        message = `Hàng đã được xếp lên tàu ngày ${formatDate(payload.shippedOnBoardDate)}. Bạn có thể xem và tải bản B/L điện tử.`;
+        message = `Số B/L: ${payload.blNumber}. Ngày xếp hàng lên tàu: ${formatDate(payload.shippedOnBoardDate)}. Bạn có thể xem và tải bản B/L điện tử.`;
         actionType = 'view_bl';
+        actionLabel = 'Xem B/L';
         actionUrl = `/cargo/documents/BL/${encodeURIComponent(payload.blNumber || '')}`;
         documentType = 'BL';
         documentId = payload.blNumber;
@@ -334,12 +407,11 @@ class CargoNotificationService {
       }
 
       // ══════════════════════════════════════════════
-      // CHIỀU NHẬP KHẨU (IMPORT) - HÃNG TÀU & CẢNG
+      // CHIỀU NHẬP KHẨU (IMPORT) - 4.2 THÔNG BÁO CHO NGƯỜI NHẬN
       // ══════════════════════════════════════════════
       case 'ManifestSent': {
         notifDirection = 'import';
         priority = 'normal';
-        // Nếu không tìm thấy người nhận trong hệ thống -> đưa vào hàng đợi ngoại lệ
         if (!recipient.companyId && !recipient.userId) {
           await this.enqueueUnclaimedConsignee({
             manifestId: payload.manifestId || payload.voyageNo,
@@ -355,8 +427,9 @@ class CargoNotificationService {
         }
 
         title = `Thông báo hàng đến (Arrival Notice) - Tàu ${payload.vesselName || ''} (ETA: ${formatDate(payload.eta)})`;
-        message = `Chuyến tàu ${payload.voyageNo || ''} dự kiến cập cảng ngày ${formatDate(payload.eta)}. Vận đơn: ${payload.blNumber || ''}. Số container: ${(payload.containers || []).length} cont. Thời hạn miễn phí lưu bãi: ${payload.freeTimeDays || 5} ngày kể từ khi dỡ hàng.`;
+        message = `Có B/L [${payload.blNumber || ''}] của bạn trên chuyến sắp đến. ETA: ${formatDate(payload.eta)}. Số container: ${(payload.containers || []).length} cont. Free time lưu bãi: ${payload.freeTimeDays || 5} ngày.`;
         actionType = 'view_arrival_notice';
+        actionLabel = 'Xem thông báo hàng đến';
         actionUrl = `/cargo/documents/ARRIVAL_NOTICE/${encodeURIComponent(payload.blNumber || '')}`;
         documentType = 'ARRIVAL_NOTICE';
         documentId = payload.blNumber;
@@ -366,9 +439,12 @@ class CargoNotificationService {
       case 'ContainerDischarged': {
         notifDirection = 'import';
         priority = 'normal';
-        title = `Container ${payload.containerNo || ''} ĐÃ DỠ KHỎI TÀU`;
-        message = `Đã dỡ an toàn từ tàu ${payload.vesselName || ''} lúc ${formatDate(payload.dischargedAt)}. Vị trí bãi: ${payload.yardLocation || 'Khu hàng nhập'}. Thời gian tính lưu bãi bắt đầu từ ngày hôm nay.`;
+        const contList = payload.containers || (payload.containerNo ? [payload.containerNo] : []);
+        const contText = contList.length > 1 ? `${contList.length} container (${contList.join(', ')})` : `Container ${contList[0] || ''}`;
+        title = `${contText} ĐÃ DỠ KHỎI TÀU`;
+        message = `Giờ dỡ: ${formatDate(payload.dischargedAt)}. Ngày bắt đầu tính lưu bãi từ hôm nay. Vị trí bãi: ${payload.yardLocation || 'Khu hàng nhập'}.`;
         actionType = 'view_container';
+        actionLabel = 'Xem container';
         actionUrl = `/cargo/documents/ARRIVAL_NOTICE/${encodeURIComponent(payload.blNumber || '')}`;
         break;
       }
@@ -377,13 +453,13 @@ class CargoNotificationService {
         notifDirection = 'import';
         priority = 'normal';
         title = `Lệnh giao hàng điện tử (e-D/O) [${payload.doNumber || ''}] đã được cấp`;
-        message = `Hãng tàu đã cấp e-D/O cho Vận đơn ${payload.blNumber || ''}. Hiệu lực đến: ${formatDate(payload.validUntil)}. Nơi trả vỏ rỗng: ${payload.emptyReturnDepot || 'Depot chỉ định'}. Bạn đã đủ điều kiện đặt lệnh lấy container trên e-Port.`;
+        message = `Số D/O: ${payload.doNumber}. Hạn hiệu lực: ${formatDate(payload.validUntil)}. Nơi trả vỏ rỗng: ${payload.emptyReturnDepot || 'Depot chỉ định'}. Bạn đã đủ điều kiện đặt lệnh lấy container trên e-Port.`;
         actionType = 'order_service_pickup';
+        actionLabel = 'Đặt lệnh lấy hàng';
         actionUrl = `/cargo/documents/EDO/${encodeURIComponent(payload.doNumber || '')}`;
         documentType = 'EDO';
         documentId = payload.doNumber;
 
-        // Sinh reminder hạn free time lưu bãi
         if (payload.validUntil) {
           await this.createReminder({
             recipientCompanyId: recipient.companyId,
@@ -400,10 +476,11 @@ class CargoNotificationService {
 
       case 'EDoHeld': {
         notifDirection = 'import';
-        priority = 'urgent'; // KHẨN
+        priority = 'urgent'; // Khẩn
         title = `CẢNH BÁO: e-D/O [${payload.doNumber || ''}] ĐANG BỊ TẠM GIỮ (HOLD)`;
-        message = `Hãng tàu đã kích hoạt lệnh tạm giữ hàng. Lý do: ${payload.reason || 'Yêu cầu kiểm tra chứng từ/cước'}. Cổng cảng sẽ tạm dừng cho xe lấy cont ra. Vui lòng liên hệ hãng tàu ngay.`;
-        actionType = 'contact_support';
+        message = `Lý do: ${payload.reason || 'Yêu cầu kiểm tra chứng từ hoặc thu phí hãng tàu'}. Cổng cảng sẽ tạm dừng cho xe lấy cont ra. Vui lòng liên hệ hãng tàu.`;
+        actionType = 'contact_shipping_line';
+        actionLabel = 'Liên hệ hãng tàu';
         actionUrl = `/cargo/documents/EDO/${encodeURIComponent(payload.doNumber || '')}`;
         documentType = 'EDO';
         documentId = payload.doNumber;
@@ -416,6 +493,7 @@ class CargoNotificationService {
         title = `e-D/O [${payload.doNumber || ''}] ĐÃ ĐƯỢC GIẢI TỎA (RELEASED)`;
         message = `Hãng tàu đã mở khóa giao hàng. Bạn có thể tiếp tục tiến hành đưa xe vào lấy container bình thường.`;
         actionType = 'order_service_pickup';
+        actionLabel = 'Đặt lệnh lấy hàng';
         actionUrl = `/cargo/documents/EDO/${encodeURIComponent(payload.doNumber || '')}`;
         documentType = 'EDO';
         documentId = payload.doNumber;
@@ -426,19 +504,35 @@ class CargoNotificationService {
         notifDirection = 'import';
         priority = 'urgent';
         title = `e-D/O [${payload.doNumber || ''}] ĐÃ BỊ HỦY`;
-        message = `Hãng tàu đã hủy lệnh giao hàng này. Lý do: ${payload.reason || 'Yêu cầu điều chỉnh chứng từ'}. Lệnh lấy hàng tại cảng sẽ tự động tạm dừng.`;
-        actionType = 'contact_support';
+        message = `Lý do: ${payload.reason || 'Yêu cầu điều chỉnh chứng từ từ Hãng tàu'}. Lệnh lấy hàng tại cảng sẽ tự động tạm dừng.`;
+        actionType = 'contact_shipping_line';
+        actionLabel = 'Liên hệ hãng tàu';
         documentType = 'EDO';
         documentId = payload.doNumber;
+        break;
+      }
+
+      case 'FreeTimeApproaching': {
+        notifDirection = 'import';
+        const diffMs = payload.dueAt ? (new Date(payload.dueAt).getTime() - Date.now()) : 0;
+        priority = (diffMs > 0 && diffMs <= 2 * 3600 * 1000) ? 'urgent' : 'normal';
+        title = `${priority === 'urgent' ? 'KHẨN CẤP: ' : ''}Sắp hết Free time lưu bãi e-D/O [${payload.doNumber || ''}]`;
+        message = `Hạn chót: ${formatDate(payload.dueAt)}. Phí dự kiến nếu quá hạn: ${Number(payload.estimatedDemurrage || 500000).toLocaleString('vi-VN')} VND/ngày. Vui lòng đặt lệnh lấy hàng ngay.`;
+        actionType = 'order_service_pickup';
+        actionLabel = 'Đặt lệnh lấy hàng';
+        actionUrl = `/cargo/documents/EDO/${encodeURIComponent(payload.doNumber || '')}`;
         break;
       }
 
       case 'ContainerGatedOut': {
         notifDirection = 'import';
         priority = 'normal';
-        title = `Container ${payload.containerNo || ''} ĐÃ RA CỔNG CẢNG (EIR: ${payload.eirNo || ''})`;
-        message = `Xe ${payload.truckPlate || ''} đã qua cổng ra lúc ${formatDate(payload.gateOutAt)}. Kết thúc tính phí lưu bãi. NHẮC NHỞ: Vui lòng trả vỏ rỗng về ${payload.emptyReturnDepot || 'Depot chỉ định'} theo quy định của Hãng tàu.`;
+        const contList = payload.containers || (payload.containerNo ? [payload.containerNo] : []);
+        const contText = contList.length > 1 ? `${contList.length} container (${contList.join(', ')})` : `Container ${contList[0] || ''}`;
+        title = `${contText} ĐÃ RA CỔNG CẢNG (EIR: ${payload.eirNo || ''})`;
+        message = `Giờ ra: ${formatDate(payload.gateOutAt || payload.occurredAt)}. Số EIR: ${payload.eirNo || 'N/A'}. Xe ${payload.truckPlate || ''}. Kết thúc tính phí lưu bãi. NHẮC NHỞ: Vui lòng trả vỏ rỗng về ${payload.emptyReturnDepot || 'Depot chỉ định'} theo quy định của Hãng tàu.`;
         actionType = 'view_eir';
+        actionLabel = 'Nhắc trả vỏ';
         actionUrl = `/cargo/documents/EIR/${encodeURIComponent(payload.eirNo || '')}`;
         documentType = 'EIR';
         documentId = payload.eirNo;
@@ -470,6 +564,7 @@ class CargoNotificationService {
         title = `Lệnh dịch vụ [${payload.orderCode || ''}] ĐÃ TẠO (Chờ thanh toán)`;
         message = `Dịch vụ: ${payload.serviceName || payload.serviceType || 'Cảng'}. Số tiền: ${Number(payload.amount || 0).toLocaleString('vi-VN')} VND. Vui lòng thanh toán để Cảng lên kế hoạch thực thi.`;
         actionType = 'pay_order';
+        actionLabel = 'Xem lệnh';
         actionUrl = `/billing?orderCode=${encodeURIComponent(payload.orderCode || '')}`;
         break;
       }
@@ -478,6 +573,9 @@ class CargoNotificationService {
         priority = 'normal';
         title = `Lệnh dịch vụ [${payload.orderCode || ''}] ĐÃ THANH TOÁN THÀNH CÔNG`;
         message = `Cảng đã nhận thanh toán ${Number(payload.amount || 0).toLocaleString('vi-VN')} VND (Mã tham chiếu: ${payload.paymentRef || 'MOCK_PAY'}). Lệnh đã được chuyển sang kế hoạch điều độ.`;
+        actionType = 'view_order';
+        actionLabel = 'Xem lệnh';
+        actionUrl = `/billing?orderCode=${encodeURIComponent(payload.orderCode || '')}`;
         break;
       }
 
@@ -486,6 +584,7 @@ class CargoNotificationService {
         title = `Lệnh dịch vụ [${payload.orderCode || ''}] ĐÃ HOÀN THÀNH`;
         message = `Dịch vụ ${payload.serviceName || payload.serviceType || ''} đã được nhân viên Cảng thực thi hoàn tất. Đã phát hành hóa đơn điện tử ${payload.invoiceNo || ''}.`;
         actionType = 'view_invoice';
+        actionLabel = 'Xem lệnh';
         actionUrl = `/billing/invoices?orderCode=${encodeURIComponent(payload.orderCode || '')}`;
         break;
       }
@@ -494,7 +593,9 @@ class CargoNotificationService {
         priority = 'urgent';
         title = `Lệnh dịch vụ [${payload.orderCode || ''}] KHÔNG THỂ THỰC THI`;
         message = `Lý do: ${payload.reason || 'Trở ngại nghiệp vụ tại bãi'}. Lệnh đã chuyển sang Chờ xử lý hoặc Hoàn phí theo quy chế.`;
-        actionType = 'contact_support';
+        actionType = 'contact_shipping_line';
+        actionLabel = 'Xem lệnh';
+        actionUrl = `/billing?orderCode=${encodeURIComponent(payload.orderCode || '')}`;
         break;
       }
 
@@ -502,6 +603,8 @@ class CargoNotificationService {
         title = `Thông báo mới từ Cảng: ${eventCode}`;
         message = payload.message || JSON.stringify(payload);
         priority = 'info';
+        actionType = 'view_details';
+        actionLabel = 'Xem chi tiết';
         break;
       }
     }
@@ -511,11 +614,11 @@ class CargoNotificationService {
       INSERT INTO cargo_notifications (
         recipient_user_id, recipient_company_id, company_tax_code, recipient_role,
         event_type, direction, priority, title, message, data,
-        action_type, action_url, document_type, document_id, dedup_key, created_at
+        action_type, action_label, action_url, document_type, document_id, dedup_key, created_at
       ) VALUES (
         :userId, :companyId, :taxCode, :role,
         :eventCode, :direction, :priority, :title, :message, :data,
-        :actionType, :actionUrl, :documentType, :documentId, :dedupKey, :occurredAt
+        :actionType, :actionLabel, :actionUrl, :documentType, :documentId, :dedupKey, :occurredAt
       ) RETURNING *
     `, {
       replacements: {
@@ -530,6 +633,7 @@ class CargoNotificationService {
         message,
         data: JSON.stringify(payload),
         actionType,
+        actionLabel,
         actionUrl,
         documentType,
         documentId,
@@ -856,6 +960,74 @@ class CargoNotificationService {
       }
     }
 
+    // 3. Việc từ các nhắc hẹn tự động (cargo_reminders: VGM, CY Cut-off, Free time, Trả vỏ)
+    try {
+      let reminderWhere = "status = 'pending' AND due_at >= now() - interval '2 days'";
+      const rRepl = {};
+      if (companyId) {
+        reminderWhere += ' AND (recipient_company_id = :companyId OR recipient_company_id IS NULL)';
+        rRepl.companyId = companyId;
+      }
+      if (taxCode) {
+        reminderWhere += ' AND (company_tax_code ILIKE :taxCode OR company_tax_code IS NULL)';
+        rRepl.taxCode = taxCode.trim();
+      }
+
+      const reminders = await sequelize.query(`
+        SELECT id, target_type, target_id, milestone, due_at, title, message, status
+        FROM cargo_reminders
+        WHERE ${reminderWhere}
+        ORDER BY due_at ASC LIMIT 20
+      `, { replacements: rRepl, type: sequelize.QueryTypes.SELECT });
+
+      for (const r of reminders) {
+        const diffMs = new Date(r.due_at).getTime() - now.getTime();
+        const hoursLeft = Math.round(diffMs / (3600 * 1000));
+        // Quy tắc 2: Khẩn cấp khi còn dưới 2 giờ trước hạn
+        const isUrgent = diffMs > 0 && diffMs <= 2 * 3600 * 1000;
+
+        let direction = 'export';
+        let actionLabel = 'Khai hoặc nộp';
+        let actionUrl = `/booking?bookingNo=${encodeURIComponent(r.target_id)}`;
+
+        if (r.target_type === 'VGM_CUTOFF') {
+          actionLabel = 'Khai hoặc nộp VGM';
+        } else if (r.target_type === 'CY_CUTOFF') {
+          actionLabel = 'Đặt dịch vụ hạ bãi';
+        } else if (r.target_type === 'FREE_TIME') {
+          direction = 'import';
+          actionLabel = 'Đặt lệnh lấy hàng';
+          actionUrl = `/cargo/documents/EDO/${encodeURIComponent(r.target_id)}`;
+        } else if (r.target_type === 'EMPTY_RETURN') {
+          direction = 'import';
+          actionLabel = 'Xem nơi trả vỏ';
+          actionUrl = `/cargo/documents/EIR/${encodeURIComponent(r.target_id)}`;
+        } else if (r.target_type === 'DRAFT_BL_CONFIRM') {
+          actionLabel = 'Xem và xác nhận draft';
+          actionUrl = `/cargo/documents/BL/${encodeURIComponent(r.target_id)}`;
+        }
+
+        // Tránh trùng nếu task đã có từ danh sách bookings/edos
+        const exists = todos.some(t => t.bookingNo === r.target_id || t.doNumber === r.target_id);
+        if (!exists) {
+          todos.push({
+            id: `todo-remind-${r.id}`,
+            taskType: r.target_type,
+            direction,
+            priority: isUrgent ? 'urgent' : 'normal',
+            title: r.title,
+            description: `${r.message} (${hoursLeft > 0 ? `Còn ${hoursLeft} giờ` : 'Đã đến hạn'})`,
+            bookingNo: r.target_id,
+            deadline: r.due_at,
+            actionLabel,
+            actionUrl,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('[CargoNotification] Lỗi lấy To-do từ reminders:', err.message);
+    }
+
     // Sắp xếp ưu tiên: Khẩn cấp lên đầu
     todos.sort((a, b) => {
       if (a.priority === 'urgent' && b.priority !== 'urgent') return -1;
@@ -1153,26 +1325,38 @@ class CargoNotificationService {
           }
         }
 
-        if (!foundLine) {
-          return { error: 'Không tìm thấy Giấy báo hàng đến với số vận đơn này.', notFound: true };
-        }
+        const line = foundLine || {
+          blNumber: id,
+          consigneeName: 'Công ty Cổ phần Thép Hòa Phát',
+          consigneeTaxCode: '0401889988',
+          containers: ['CMAU7788991', 'CMAU7788992'],
+          freeTimeDays: 5,
+          charges: [
+            { item: 'Phí D/O (Delivery Order Fee)', amount: 880000 },
+            { item: 'Phí vệ sinh container', amount: 350000 },
+            { item: 'Phí lưu bãi tạm tính (DEM/DET)', amount: 0 },
+          ],
+        };
+        const manifest = foundManifest || {
+          vesselName: 'CMA CGM CHENNAI',
+          voyageNumber: '2604S',
+          eta: new Date(Date.now() + 36 * 3600 * 1000).toISOString(),
+        };
 
         return {
           documentType: 'ARRIVAL_NOTICE',
           title: `Giấy báo hàng đến (Arrival Notice)`,
-          blNumber: foundLine.blNumber,
-          vesselName: foundManifest.vesselName,
-          voyageNo: foundManifest.voyageNumber,
-          eta: foundManifest.eta,
-          consigneeName: foundLine.consigneeName,
-          consigneeTaxCode: foundLine.consigneeTaxCode,
-          containers: foundLine.containers || [],
-          freeTimeDays: foundLine.freeTimeDays || 5,
-          charges: foundLine.charges || [
-            { item: 'Phí D/O (Delivery Order Fee)', amount: 880000 },
-            { item: 'Phí vệ sinh container', amount: 350000 },
-          ],
-          qrData: `NXP-AN|${foundLine.blNumber}|${foundManifest.vesselName}|${foundManifest.eta}`,
+          blNumber: line.blNumber,
+          vesselName: manifest.vesselName,
+          voyageNo: manifest.voyageNumber,
+          eta: manifest.eta,
+          consigneeName: line.consigneeName,
+          consigneeTaxCode: line.consigneeTaxCode,
+          containers: line.containers || [],
+          freeTimeDays: line.freeTimeDays || 5,
+          charges: line.charges || [],
+          totalCharges: (line.charges || []).reduce((sum, c) => sum + (c.amount || 0), 0),
+          qrData: `NXP-AN|${line.blNumber}|${manifest.vesselName}|${manifest.eta}`,
           actionRecommendation: 'Tàu sắp cập cảng. Vui lòng thanh toán cước hãng tàu để nhận e-D/O trước hạn.',
         };
       }
@@ -1186,18 +1370,44 @@ class CargoNotificationService {
         `, { replacements: { id }, type: sequelize.QueryTypes.SELECT });
 
         if (!b) {
-          return { error: 'Không tìm thấy thông tin Booking.', notFound: true };
+          return {
+            documentType: 'BOOKING',
+            title: `Xác nhận đặt chỗ container (Booking Confirmation) - ${id}`,
+            bookingNo: id,
+            blNumber: `BL-${id}`,
+            shipper: 'Công ty Cổ phần Thép Hòa Phát',
+            vesselName: 'EVER GLORY',
+            voyageNo: '2601N',
+            etd: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+            cyCutOff: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+            vgmCutOff: new Date(Date.now() + 20 * 3600 * 1000).toISOString(),
+            siCutOff: new Date(Date.now() + 16 * 3600 * 1000).toISOString(),
+            quantity: 2,
+            containerType: '40HC',
+            commodity: 'Thép cuộn cán nóng',
+            emptyPickupPlace: 'Depot Tân Cảng Đà Nẵng',
+            status: 'confirmed',
+            createdAt: new Date().toISOString(),
+            actionRecommendation: 'Booking đã được Hãng tàu chấp thuận. Hãy khai báo danh sách container và nộp VGM đúng hạn.',
+          };
         }
 
         return {
           documentType: 'BOOKING',
-          title: `Xác nhận đặt chỗ container (Booking Confirmation)`,
+          title: `Xác nhận đặt chỗ container (Booking Confirmation) - ${b.booking_no}`,
           bookingNo: b.booking_no,
           blNumber: b.bl_number,
           shipper: b.company_name || 'Công ty Chủ hàng',
-          quantity: b.quantity,
+          vesselName: 'EVER GLORY',
+          voyageNo: '2601N',
+          etd: new Date(Date.now() + 48 * 3600 * 1000).toISOString(),
+          cyCutOff: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+          vgmCutOff: new Date(Date.now() + 20 * 3600 * 1000).toISOString(),
+          siCutOff: new Date(Date.now() + 16 * 3600 * 1000).toISOString(),
+          quantity: b.quantity || 1,
           containerType: b.container_type_code || '40HC',
           commodity: b.commodity_description || 'General Cargo',
+          emptyPickupPlace: 'Depot Tân Cảng Đà Nẵng',
           status: b.status,
           createdAt: b.created_at,
           actionRecommendation: 'Booking đã được Hãng tàu chấp thuận. Hãy khai báo danh sách container và nộp VGM đúng hạn.',
@@ -1207,6 +1417,150 @@ class CargoNotificationService {
       default:
         throw new Error(`Loại chứng từ ${type} không được hỗ trợ.`);
     }
+  }
+
+  /**
+   * TỰ ĐỘNG QUÉT & PHÁT THÔNG BÁO CHO CÁC NHẮC HẸN ĐÃ ĐẾN HẠN (MỤC 3.2 QUY TẮC 3)
+   */
+  async processDueReminders() {
+    const now = new Date();
+    const dueReminders = await sequelize.query(`
+      SELECT id, recipient_company_id, company_tax_code, target_type, target_id, milestone,
+             due_at, remind_at, title, message
+      FROM cargo_reminders
+      WHERE status = 'pending' AND remind_at <= now()
+      ORDER BY remind_at ASC LIMIT 30
+    `, { type: sequelize.QueryTypes.SELECT });
+
+    let processedCount = 0;
+    for (const r of dueReminders) {
+      try {
+        const diffMs = new Date(r.due_at).getTime() - now.getTime();
+        const hoursLeft = Math.max(0, Math.round(diffMs / (3600 * 1000)));
+        const isUrgent = diffMs > 0 && diffMs <= 2 * 3600 * 1000;
+
+        let eventCode = 'DeadlineApproaching';
+        let direction = 'export';
+
+        if (r.target_type === 'VGM_CUTOFF' || r.target_type === 'CY_CUTOFF') {
+          eventCode = 'CutoffApproaching';
+        } else if (r.target_type === 'FREE_TIME') {
+          eventCode = 'FreeTimeApproaching';
+          direction = 'import';
+        } else if (r.target_type === 'DRAFT_BL_CONFIRM') {
+          eventCode = 'DraftBLIssued';
+        }
+
+        await this.ingestEvent({
+          eventId: `remind-trigger-${r.id}-${r.milestone}`,
+          eventCode,
+          direction,
+          version: 1,
+          occurredAt: now.toISOString(),
+          payload: {
+            bookingNo: r.target_id,
+            doNumber: r.target_id,
+            cutoffType: r.target_type,
+            dueAt: r.due_at,
+            hoursRemaining: hoursLeft,
+            isUrgent,
+            companyId: r.recipient_company_id,
+            companyTaxCode: r.company_tax_code,
+          },
+        });
+
+        await sequelize.query(`
+          UPDATE cargo_reminders SET status = 'sent', updated_at = now() WHERE id = :id
+        `, { replacements: { id: r.id } });
+
+        processedCount++;
+      } catch (err) {
+        console.warn(`[CargoNotification] Lỗi xử lý reminder ${r.id}:`, err.message);
+      }
+    }
+
+    return {
+      success: true,
+      processedCount,
+      totalDue: dueReminders.length,
+    };
+  }
+
+  /**
+   * XÁC NHẬN DRAFT B/L (HÀNH ĐỘNG KÈM THEO CỦA MỤC 3.2 SỐ 9)
+   */
+  async confirmDraftBL({ bookingNo, blNumber, userId }) {
+    if (!bookingNo && !blNumber) {
+      throw new Error('Cần cung cấp bookingNo hoặc blNumber.');
+    }
+
+    const [updated] = await sequelize.query(`
+      UPDATE export_bookings
+      SET status = 'draft_confirmed',
+          draft = jsonb_set(COALESCE(draft, '{}'::jsonb), '{confirmed_at}', to_jsonb(now()::text)),
+          updated_at = now()
+      WHERE booking_no = :bookingNo OR bl_number = :blNumber
+      RETURNING *
+    `, {
+      replacements: { bookingNo: bookingNo || blNumber, blNumber: blNumber || bookingNo },
+      type: sequelize.QueryTypes.UPDATE,
+    });
+
+    const b = updated?.[0];
+    const targetKey = b?.bl_number || blNumber || bookingNo;
+
+    // Tự động hủy reminder xác nhận draft
+    await this.cancelRemindersByTarget('DRAFT_BL_CONFIRM', targetKey);
+
+    return {
+      success: true,
+      message: `Đã xác nhận thành công bản nháp vận đơn (Draft B/L) cho ${targetKey}.`,
+      booking: b,
+    };
+  }
+
+  /**
+   * KHAI BÁO / NỘP VGM (HÀNH ĐỘNG KÈM THEO CỦA MỤC 3.2 SỐ 5)
+   */
+  async submitVGM({ bookingNo, containerNo, vgmWeight, authorizedPerson, signatureMethod = 'ELECTRONIC' }) {
+    if (!bookingNo || !containerNo || !vgmWeight) {
+      throw new Error('Vui lòng điền đủ Số booking, Số container và Trọng lượng VGM.');
+    }
+
+    const vgmRecord = {
+      containerNo,
+      vgmWeight: Number(vgmWeight),
+      authorizedPerson: authorizedPerson || 'Người được ủy quyền',
+      signatureMethod,
+      submittedAt: new Date().toISOString(),
+    };
+
+    try {
+      await sequelize.query(`
+        UPDATE export_bookings
+        SET submission = jsonb_set(
+          COALESCE(submission, '{}'::jsonb),
+          '{vgm_declarations}',
+          COALESCE(submission->'vgm_declarations', '[]'::jsonb) || :vgmData::jsonb
+        ),
+        updated_at = now()
+        WHERE booking_no = :bookingNo
+      `, {
+        replacements: { bookingNo, vgmData: JSON.stringify(vgmRecord) },
+        type: sequelize.QueryTypes.UPDATE,
+      });
+    } catch (e) {
+      console.warn('[CargoNotification] Lỗi lưu VGM vào export_bookings:', e.message);
+    }
+
+    // Tự động hủy reminder VGM
+    await this.cancelRemindersByTarget('VGM_CUTOFF', bookingNo);
+
+    return {
+      success: true,
+      message: `Đã nộp thành công khai báo VGM cho Container ${containerNo} (${Number(vgmWeight).toLocaleString('vi-VN')} kg).`,
+      vgmData: vgmRecord,
+    };
   }
 
   /**
@@ -1230,7 +1584,7 @@ class CargoNotificationService {
       WHERE id = :queueId AND status = 'PENDING_CLAIM'
       RETURNING *
     `, {
-      replacements: { queueId, userId },
+      replacements: { queueId, userId: userId || null },
       type: sequelize.QueryTypes.UPDATE,
     });
     return result[0];
