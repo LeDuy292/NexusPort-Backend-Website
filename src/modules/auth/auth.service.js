@@ -59,6 +59,30 @@ async function login(usernameOrEmail, password, rememberMe = false, expectedRole
     },
   });
 
+  // Hỗ trợ tài xế đăng nhập bằng Số điện thoại hoặc Số bằng lái xe (GPLX)
+  if (!user && usernameOrEmail) {
+    try {
+      const rawInput = usernameOrEmail.trim();
+      const [linkedDriver] = await sequelize.query(`
+        SELECT d.user_id
+        FROM drivers d
+        WHERE (d.phone = :rawInput OR d.license_number ILIKE :rawInput)
+          AND d.user_id IS NOT NULL
+          AND d.status::text NOT IN ('inactive', 'banned')
+        LIMIT 1
+      `, {
+        replacements: { rawInput },
+        type: sequelize.QueryTypes.SELECT,
+      });
+
+      if (linkedDriver && linkedDriver.user_id) {
+        user = await User.findByPk(linkedDriver.user_id);
+      }
+    } catch (_e) {
+      // ignore
+    }
+  }
+
   // Tự động kích hoạt tài khoản nếu tài xế đã có hồ sơ trong bảng drivers nhưng chưa có trong users
   if (!user && password && password.length >= 6 && expectedRole && expectedRole.toLowerCase() === 'driver') {
     try {
