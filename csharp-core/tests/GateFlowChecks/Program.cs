@@ -14,6 +14,12 @@ using System.Security.Claims;
 
 var count=0;
 void Check(bool condition,string name){if(!condition)throw new Exception("FAIL: "+name);count++;}
+if (args.Contains("--container-only"))
+{
+    count += await ContainerInspectionChecks.RunAllAsync();
+    Console.WriteLine($"PASS {count} container.onnx, ISO 6346 & ContainerMatchAndStatusRule checks (filtered run, no database writes)");
+    return;
+}
 var now=DateTime.UtcNow;
 var booking=new NexusPort.Modules.Booking.Domain.Entities.Booking{
     DriverId=Guid.NewGuid(),TruckId=Guid.NewGuid(),Status=BookingStatus.Approved,
@@ -210,4 +216,5 @@ testBooking.UpdateDerivedStatus();
 Check(testBooking.Status == BookingStatus.Completed, "Parent booking completes when all operations complete");
 Check(testBooking.TripStatus == "Completed", "Port visit completes when all operations complete");
 
-Console.WriteLine($"PASS {count} gate and booking operation checks (all 15 scenarios verified, no database writes)");
+count += await ContainerInspectionChecks.RunAllAsync();
+Console.WriteLine($"PASS {count} gate, booking and container.onnx inspection checks (all scenarios verified, no database writes)");

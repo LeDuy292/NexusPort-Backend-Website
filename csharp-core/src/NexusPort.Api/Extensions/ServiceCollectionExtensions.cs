@@ -184,6 +184,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IGateService, GateService>();
         services.AddScoped<IGateVerificationRepository, GateVerificationRepository>();
         services.AddScoped<IGateVerificationService, GateVerificationService>();
+        services.AddHttpClient("ContainerOcr", client => client.Timeout = TimeSpan.FromSeconds(12));
+        services.AddSingleton<IContainerDetectionService, NexusPort.Modules.Gate.Infrastructure.Services.ContainerOnnxDetectionService>();
+        services.AddScoped<IGateContainerInspectionService, GateContainerInspectionService>();
 
         // Gate Rule Engine & Rules (Extensible Pipeline)
         services.AddScoped<IGateRuleEngine, GateRuleEngine>();

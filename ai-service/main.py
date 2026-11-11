@@ -56,8 +56,11 @@ def broadcast_to_gate_officers(result: dict, overview_base64: Optional[str] = No
             "source": "IoT_Camera"
         }
 
-        # Gọi Node.js Express (:3001) để emit Socket.IO
-        requests.post("http://localhost:3001/api/gate/iot-event", json=payload, timeout=1.5)
+        # Gọi Node.js Express (hỗ trợ Railway Private Networking / biến môi trường)
+        express_iot_url = os.getenv("EXPRESS_IOT_EVENT_URL") or (
+            f"{os.getenv('EXPRESS_BASE_URL', 'http://localhost:3001').rstrip('/')}/api/gate/iot-event"
+        )
+        requests.post(express_iot_url, json=payload, timeout=1.5)
     except Exception as e:
         print(f"[WARN] broadcast_to_gate_officers failed: {e}")
 

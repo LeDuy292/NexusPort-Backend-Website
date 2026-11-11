@@ -29,6 +29,11 @@ public class GateValidationContext
 
     // Thông tin Container
     public string? ContainerNumber { get; set; }
+    public string? DetectedContainerType { get; set; }
+    public double? ContainerConfidence { get; set; }
+    public bool StrictContainerIsoCheck { get; set; }
+    public IReadOnlyList<string> ExpectedBookingContainerNumbers { get; set; } = Array.Empty<string>();
+    public IReadOnlyList<string> ExpectedBookingIsoSizes { get; set; } = Array.Empty<string>();
     public Container.Domain.Entities.Container? Container { get; set; }
 
     // Thông tin Booking
