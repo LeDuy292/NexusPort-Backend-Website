@@ -22,6 +22,11 @@ __pycache__/
 *.pyd
 *.onnx
 *.pt
+# Keep deployment inference models tracked for Railway / CI builds
+!csharp-core/src/NexusPort.Api/Models/container.onnx
+!ai-service/models/container.onnx
+!ai-service/models/license_plate.onnx
+!ai-service/models/yolov8n.pt
 
 test_db.js
 init_db.js

@@ -10,6 +10,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.0.8" />
     <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
+    <PackageReference Include="OpenCvSharp4.official.runtime.linux-x64.slim" Version="4.13.0.20260627" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.7.3" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.8">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -33,6 +34,12 @@
     <ProjectReference Include="..\Modules\Equipment\NexusPort.Modules.Equipment.csproj" />
     <ProjectReference Include="..\Modules\Carrier\NexusPort.Modules.Carrier.csproj" />
     <ProjectReference Include="..\Modules\ServiceCatalog\NexusPort.Modules.ServiceCatalog.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Models\container.onnx">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>

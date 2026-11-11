@@ -14,14 +14,16 @@ const cargoNotificationRoutes = require('./modules/cargo-notifications/cargoNoti
 const { nodeEnv } = require('./config/env');
 
 const systemRoutes = Router();
-systemRoutes.get('/api/health', (_req, res) => {
+const healthHandler = (_req, res) => {
   res.status(200).json({
     success: true,
     message: 'NexusPort API đang hoạt động.',
     timestamp: new Date().toISOString(),
     environment: nodeEnv,
   });
-});
+};
+systemRoutes.get('/health', healthHandler);
+systemRoutes.get('/api/health', healthHandler);
 
 /** This catalog is the single source used by Express and OpenAPI discovery. */
 const mountedRouters = [

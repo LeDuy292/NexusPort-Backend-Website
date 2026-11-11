@@ -112,8 +112,26 @@ public class GateVerificationService : IGateVerificationService
             }
         }
 
-        // 4. Khởi tạo GateValidationContext và ủy quyền kiểm tra cho Rule Engine
-        var gateType = request.VerificationType?.Contains("OUT", StringComparison.OrdinalIgnoreCase) == true ? "GateOut" : "GateIn";
+        // 4. Chuẩn bị danh sách container dự kiến, kiểm tra ISO 6346 & ủy quyền Rule Engine
+        var gateType = GateBookingContainerHelper.NormalizeGateType(request.VerificationType);
+        var (expectedContainerNumbers, expectedIsoSizes) = booking != null
+            ? GateBookingContainerHelper.ExtractExpectations(
+                await GateBookingContainerHelper.LoadExpectedBookingContainersAsync(_context, booking.Id, gateType, cancellationToken))
+            : (Array.Empty<string>(), Array.Empty<string>());
+
+        var normalizedContainerNo = Domain.Validation.Iso6346Validator.Normalize(request.ContainerNumber);
+        var containerIsoCheck = !string.IsNullOrEmpty(normalizedContainerNo)
+            ? Domain.Validation.Iso6346Validator.Validate(normalizedContainerNo)
+            : null;
+
+        request.OcrRawData = GateBookingContainerHelper.EnrichOcrRawData(
+            request.OcrRawData,
+            normalizedContainerNo,
+            request.DetectedContainerType,
+            request.ContainerConfidence,
+            containerIsoCheck?.IsValid,
+            request.FromContainerOnnx);
+
         var validationContext = new GateValidationContext
         {
             GateType = gateType,
@@ -126,7 +144,12 @@ public class GateVerificationService : IGateVerificationService
             Vehicle = matchedVehicle,
             DriverName = driverName,
             Driver = driver,
-            ContainerNumber = request.ContainerNumber,
+            ContainerNumber = string.IsNullOrEmpty(normalizedContainerNo) ? request.ContainerNumber : normalizedContainerNo,
+            DetectedContainerType = request.DetectedContainerType,
+            ContainerConfidence = request.ContainerConfidence,
+            StrictContainerIsoCheck = request.FromContainerOnnx,
+            ExpectedBookingContainerNumbers = expectedContainerNumbers,
+            ExpectedBookingIsoSizes = expectedIsoSizes,
             Container = container,
             BookingNumber = request.BookingNumber,
             Booking = booking,
@@ -196,6 +219,11 @@ public class GateVerificationService : IGateVerificationService
             PlateConfidence = record.PlateConfidence,
             RfidTag = record.RfidTag,
             VehicleDetected = record.VehicleDetected,
+            DetectedContainerNumber = string.IsNullOrEmpty(normalizedContainerNo) ? container?.ContainerNumber : normalizedContainerNo,
+            DetectedContainerType = request.DetectedContainerType,
+            ContainerConfidence = request.ContainerConfidence,
+            ContainerIso6346Valid = containerIsoCheck?.IsValid,
+            ContainerImageUrl = request.ContainerImageUrl,
             Booking = booking == null ? null : new GateVerificationBookingInfo
             {
                 BookingId = booking.Id,
@@ -206,7 +234,7 @@ public class GateVerificationService : IGateVerificationService
                 DriverLicenseNumber = driver?.LicenseNumber ?? "B2-998877",
                 DriverPhone = driver?.Phone ?? "0901 234 567",
                 CarrierName = "Công ty CP Vận tải Quốc tế Nexus",
-                ContainerNumber = container?.ContainerNumber ?? "MSCU1234567",
+                ContainerNumber = container?.ContainerNumber ?? expectedContainerNumbers.FirstOrDefault(),
                 ValidFrom = GateEntryAccess.Utc(entryOrder?.ValidFrom ?? booking.AppointmentStart),
                 ValidTo = GateEntryAccess.Utc(entryOrder?.ValidUntil ?? booking.AppointmentEnd),
                 GateType = gateType
@@ -305,9 +333,19 @@ public class GateVerificationService : IGateVerificationService
         }
 
         // 5. Chuẩn bị Context và Đánh giá
+        var preCheckGateType = string.IsNullOrWhiteSpace(request.GateType) ? "GateIn" : request.GateType;
+        var (preCheckExpectedNumbers, preCheckExpectedIsoSizes) = booking != null
+            ? GateBookingContainerHelper.ExtractExpectations(
+                await GateBookingContainerHelper.LoadExpectedBookingContainersAsync(
+                    _context,
+                    booking.Id,
+                    GateBookingContainerHelper.NormalizeGateType(preCheckGateType),
+                    cancellationToken))
+            : (Array.Empty<string>(), Array.Empty<string>());
+
         var context = new GateValidationContext
         {
-            GateType = string.IsNullOrWhiteSpace(request.GateType) ? "GateIn" : request.GateType,
+            GateType = preCheckGateType,
             GateCode = request.GateCode?.Trim().ToUpper() ?? "GATE-01",
             LaneCode = request.LaneCode?.Trim().ToUpper(),
             VerificationTime = verificationTime,
@@ -318,6 +356,8 @@ public class GateVerificationService : IGateVerificationService
             DriverName = request.DriverName ?? driver?.FullName ?? booking?.DriverName,
             Driver = driver,
             ContainerNumber = request.ContainerNumber,
+            ExpectedBookingContainerNumbers = preCheckExpectedNumbers,
+            ExpectedBookingIsoSizes = preCheckExpectedIsoSizes,
             Container = container,
             BookingNumber = request.BookingNumber ?? booking?.BookingNumber,
             Booking = booking,

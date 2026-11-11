@@ -115,6 +115,18 @@ public class GateRecognitionEventDto
         set => ContainerNumber = value;
     }
 
+    [JsonPropertyName("containerType")]
+    public string? DetectedContainerType { get; set; }
+
+    [JsonPropertyName("containerConfidence")]
+    public double? ContainerConfidence { get; set; }
+
+    [JsonPropertyName("containerImageUrl")]
+    public string? ContainerImageUrl { get; set; }
+
+    [JsonPropertyName("fromContainerOnnx")]
+    public bool FromContainerOnnx { get; set; }
+
     [JsonPropertyName("operationType")]
     public string? OperationType { get; set; }
 
@@ -155,6 +167,12 @@ public class GateVerificationResultDto
     public double? PlateConfidence { get; set; }
     public string? RfidTag { get; set; }
     public bool VehicleDetected { get; set; }
+
+    public string? DetectedContainerNumber { get; set; }
+    public string? DetectedContainerType { get; set; }
+    public double? ContainerConfidence { get; set; }
+    public bool? ContainerIso6346Valid { get; set; }
+    public string? ContainerImageUrl { get; set; }
 
     public GateVerificationBookingInfo? Booking { get; set; }
     public GateVerificationDriverInfo? Driver { get; set; }

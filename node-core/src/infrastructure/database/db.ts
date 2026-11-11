@@ -1,14 +1,31 @@
 import { Pool } from 'pg';
 import { logger } from '../../shared/utils/logger';
 
-const connectionString = process.env.DATABASE_URL || 'postgresql://postgres:11223344@localhost:5432/nexusport';
+function resolveConnectionString(): string {
+  if (process.env.DATABASE_URL) {
+    return process.env.DATABASE_URL;
+  }
+
+  const aivenHost = process.env.AIVEN_DB_HOST;
+  const aivenUser = process.env.AIVEN_DB_USER;
+  const aivenPass = process.env.AIVEN_DB_PASSWORD;
+  if (aivenHost && aivenUser && aivenPass) {
+    const aivenPort = process.env.AIVEN_DB_PORT || '20134';
+    const aivenDb = process.env.AIVEN_DB_NAME || 'defaultdb';
+    return `postgresql://${encodeURIComponent(aivenUser)}:${encodeURIComponent(aivenPass)}@${aivenHost}:${aivenPort}/${aivenDb}?sslmode=${process.env.AIVEN_DB_SSLMODE || 'require'}`;
+  }
+
+  return 'postgresql://postgres:120104@localhost:5432/nexusport';
+}
+
+const connectionString = resolveConnectionString();
 const isSslRequired =
   process.env.DB_SSL === 'true' ||
   process.env.DB_TARGET === 'aiven' ||
-  connectionString.includes('sslmode=require');
+  (connectionString.includes('sslmode=') && !connectionString.includes('sslmode=disable'));
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:120104@localhost:5432/nexusport',
+  connectionString,
   max: Number(process.env.DB_POOL_MAX || 2),
   idleTimeoutMillis: 10000,
   connectionTimeoutMillis: 10000,
