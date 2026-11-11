@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Npgsql;
 using NpgsqlTypes;
 using NexusPort.Infrastructure.Authentication;
@@ -10,7 +11,7 @@ using NexusPort.Modules.ServiceCatalog.Domain;
 namespace NexusPort.Modules.ServiceCatalog.Application;
 
 /// <summary>Company-private drafts and service confirmations. Source workflows remain read-only.</summary>
-public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser user)
+public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser user, IServiceWorkflowEmail? workflowEmail = null, IHostEnvironment? environment = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static object[] Args(params object?[] args) => args.Select((value, i) => (object)(value == null
@@ -40,6 +41,10 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
     private const string ExportEligible = """
         b.port_status='Accepted' AND b.status IN ('ContainersDeclared','GateIn')
         AND v.status='Scheduled' AND e.status='Expected' AND e.active AND d.load_status='full'
+        AND v.cy_cutoff>now() AND v.receive_from IS NOT NULL
+        AND e.vgm_kg>0 AND NULLIF(trim(e.seal_number),'') IS NOT NULL
+        AND regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g')
+            NOT IN ('hold','customshold','inactive','blocked','damagedunsafe','cancelled','archived')
         """;
     private const string ExportJoins = """
         FROM export_bookings b JOIN export_voyages v ON v.id=b.voyage_id
@@ -113,14 +118,16 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
             var filter = ids == null ? " AND e.container_no ILIKE @p2" : " AND e.id=ANY(@p2)";
             return await Rows("""
                 SELECT e.id AS "sourceContainerId",e.container_id AS "containerId",e.container_no AS "containerNumber",
+                    'EXPORT'::text AS flow,b.id AS "bookingId",
                     e.type_code AS "typeCode",'full'::text AS "loadStatus",e.cargo_type::text AS "cargoType",
-                    e.seal_number AS "sealNumber",e.vgm_kg AS "vgmKg",e.target_temperature AS "targetTemperature"
+                    e.seal_number AS "sealNumber",e.vgm_kg AS "vgmKg",e.target_temperature AS "targetTemperature",e.un_number AS "unNumber",e.dg_class AS "dgClass"
                 """ + ExportJoins + " WHERE b.id=@p0 AND b.carrier_id=@p1 AND " + ExportEligible + filter +
                 " ORDER BY e.container_no,e.id LIMIT 50", ct, sourceId.Value, company, ids == null ? "%" + search + "%" : ids);
         }
         var importFilter = ids == null ? " AND c.container_no ILIKE @p1" : " AND v.id=ANY(@p1)";
         return await Rows("""
             SELECT v.id AS "sourceContainerId",c.id AS "containerId",c.container_no AS "containerNumber",t.code AS "typeCode",
+                'IMPORT'::text AS flow,v.movement_type AS "movementType",v.visit_status AS "visitStatus",
                 'full'::text AS "loadStatus",
                 CASE WHEN d.carrier_id=@p0 THEN d.cargo_type::text ELSE NULL END AS "cargoType",
                 CASE WHEN d.carrier_id=@p0 THEN d.seal_number ELSE NULL END AS "sealNumber",
@@ -128,7 +135,14 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
             FROM container_visits v JOIN containers c ON c.id=v.container_id
             JOIN container_types t ON t.id=c.container_type_id
             JOIN container_declarations d ON d.id=v.declaration_id AND d.container_id=v.container_id
-            WHERE v.load_status='full' AND v.visit_status IN ('planned','active')
+            WHERE v.load_status='full' AND d.load_status='full' AND v.visit_status='active'
+                AND v.movement_type='vessel_discharge' AND v.data_status='verified'
+                AND (to_jsonb(v)->>'source_type' IS NULL OR to_jsonb(v)->>'source_type'='port_vessel')
+                AND v.started_at IS NOT NULL AND v.completed_at IS NULL
+                AND (v.valid_to IS NULL OR v.valid_to>=now())
+                AND (to_jsonb(v)->>'expected_available_at' IS NULL OR (to_jsonb(v)->>'expected_available_at')::timestamptz<=now())
+                AND regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g')
+                    NOT IN ('hold','customshold','inactive','blocked','damagedunsafe','cancelled','archived','gateout','departed','outside','outofyard')
                 AND (d.carrier_id=@p0 OR EXISTS(SELECT 1 FROM container_visit_access a WHERE a.container_visit_id=v.id AND a.carrier_id=@p0))
             """ + importFilter + " ORDER BY c.container_no,v.id LIMIT 50", ct, company, ids == null ? "%" + search + "%" : ids);
     }
@@ -139,7 +153,7 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         flow = ServiceDraftRules.Flow(flow);
         Require(flow != "IMPORT" || sourceId == null, "Luồng nhập không dùng Booking xuất.");
         var items = await ContainerRows(company, flow, sourceId, ServiceDraftRules.Search(search), null, ct);
-        return new { items, limit = 50 };
+        return new { flow, sourceId, items, limit = 50 };
     }
 
     private const string DraftFields = """
@@ -166,6 +180,7 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         var detail = Detail(row!);
         var registration = await FindRegistration(id, ct);
         if (registration != null) AddRegistrationMetadata(detail, registration);
+        await ApplyWorkflow(detail, id, ct);
         return detail;
     }
 
@@ -191,13 +206,14 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                     d.source_snapshot->>'bookingNumber',NULLIF(d.content->'source'->>'referenceNumber',''),'Chưa chọn hồ sơ') AS "sourceLabel",
                 jsonb_array_length(d.container_snapshots) AS "containerCount",COALESCE(r.confirmed_at,d.updated_at) AS "updatedAt"
             """ + filter + " ORDER BY COALESCE(r.confirmed_at,d.updated_at) DESC,d.id LIMIT @p2 OFFSET @p3", ct, company, "%" + term + "%", pageSize, (page - 1) * pageSize);
+        await ApplyWorkflowRows(rows, ct);
         return new { items = rows, page, pageSize, total = count };
     }
 
     private static JsonObject Content(ServiceDraftInput input) => JsonSerializer.SerializeToNode(new
     {
         input.Flow, input.MainServiceId, input.Source, input.PlannedAt,
-        input.ContactName, input.ContactPhone, input.Note, input.Lines
+        input.ContactName, input.ContactPhone, input.Note, input.Lines, input.WorkflowVersion, input.Delivery, input.InvoiceBuyer
     }, Json)!.AsObject();
 
     private static bool ClearlyNonReefer(JsonObject container)
@@ -257,14 +273,16 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
     {
         Require(id != Guid.Empty, "Mã bản nháp không hợp lệ.");
         var company = await Company(ct);
-        var input = ServiceDraftRules.Normalize(request);
+        var input = await DeliveryDefaults(ServiceDraftRules.Normalize(request), ct);
         var content = Content(input);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await Exec("SELECT pg_advisory_xact_lock(hashtext(@p0))", ct, "eport-service-draft:" + id.ToString("N"));
+        await Exec("SELECT set_config('nexusport.service_actor',@p0,true)", ct, Actor.ToString());
         var existing = await Find(id, ct, true);
         if (existing != null)
         {
             Require(G(existing, "carrierId") == company, "Không tìm thấy bản nháp dịch vụ.", 404, "SERVICE_DRAFT_NOT_FOUND");
+            await EnsureDraftWorkflowOpen(id, ct);
             Require(await FindRegistration(id, ct) == null, "Hồ sơ đã xác nhận và được khóa đơn giá; không thể ghi đè bản nháp.", 409, "SERVICE_REGISTRATION_LOCKED");
             if (input.ExpectedVersion == 0 && JsonNode.DeepEquals(existing["content"], content))
             {

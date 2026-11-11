@@ -37,6 +37,9 @@ builder.Services.AddNexusPortInfrastructure(builder.Configuration);
 builder.Services.AddNexusPortModules();
 builder.Services.AddScoped<NexusPort.Modules.ServiceCatalog.Application.CatalogService>();
 builder.Services.AddScoped<NexusPort.Modules.ServiceCatalog.Application.ServiceDraftService>();
+builder.Services.AddScoped<NexusPort.Modules.ServiceCatalog.Application.IServiceWorkflowEmail, NexusPort.Modules.ServiceCatalog.Application.ServiceWorkflowEmail>();
+builder.Services.AddScoped<NexusPort.Modules.ServiceCatalog.Application.ServiceOrderService>();
+builder.Services.AddHttpClient<NexusPort.Modules.ServiceCatalog.Application.IPayOsGateway, NexusPort.Modules.ServiceCatalog.Application.PayOsGateway>(http => http.Timeout = TimeSpan.FromSeconds(12));
 builder.Services.AddCarrierModule(builder.Configuration.GetConnectionString("DefaultConnection") ?? "Host=localhost;Port=5432;Database=NexusPort;Username=postgres;Password=pgadmin4");
 builder.Services.AddSwaggerDocumentation();
 
