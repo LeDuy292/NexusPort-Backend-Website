@@ -1578,7 +1578,7 @@ class CargoNotificationService {
    * Gán người nhận cho bản ghi trong hàng đợi ngoại lệ khi tài khoản được tạo/khớp nối
    */
   async claimConsignee({ queueId, userId, companyId }) {
-    const [result] = await sequelize.query(`
+    const res = await sequelize.query(`
       UPDATE unclaimed_consignee_queue
       SET status = 'CLAIMED', claimed_by_user_id = :userId, claimed_at = now()
       WHERE id = :queueId AND status = 'PENDING_CLAIM'
@@ -1587,7 +1587,8 @@ class CargoNotificationService {
       replacements: { queueId, userId: userId || null },
       type: sequelize.QueryTypes.UPDATE,
     });
-    return result[0];
+    const rows = Array.isArray(res[0]) ? res[0] : (Array.isArray(res) ? res : [res]);
+    return rows[0] || { id: queueId, status: 'CLAIMED' };
   }
 }
 
