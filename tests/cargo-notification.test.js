@@ -540,17 +540,21 @@ describe('Người 1: Cargo Notification & Document Tracking Module Tests', () =
     });
 
     it('Xử lý claimConsignee gán người nhận thành công', async () => {
+      const claimBl = `TEST_BL_CLAIM_${Date.now()}`;
       // Đưa một item vào hàng đợi
       await sequelize.query(`
         INSERT INTO unclaimed_consignee_queue (
           manifest_id, bl_number, consignee_name, container_count, status
         ) VALUES (
-          'MNF-CLAIM-TEST', 'BL-CLAIM-TEST', 'Công ty Test Claim', 1, 'PENDING_CLAIM'
+          'TEST_MNF_CLAIM', :claimBl, 'Công ty Test Claim', 1, 'PENDING_CLAIM'
         )
-      `);
+      `, { replacements: { claimBl } });
+
       const [item] = await sequelize.query(`
-        SELECT id FROM unclaimed_consignee_queue WHERE bl_number = 'BL-CLAIM-TEST' LIMIT 1
-      `, { type: sequelize.QueryTypes.SELECT });
+        SELECT id FROM unclaimed_consignee_queue
+        WHERE bl_number = :claimBl AND status = 'PENDING_CLAIM'
+        ORDER BY created_at DESC LIMIT 1
+      `, { replacements: { claimBl }, type: sequelize.QueryTypes.SELECT });
 
       const claimRes = await cargoNotificationService.claimConsignee({
         queueId: item.id,
