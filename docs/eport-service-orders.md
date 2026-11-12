@@ -1,29 +1,20 @@
-# Quản lý đơn dịch vụ
+# Theo dõi đơn dịch vụ
 
-Trang `/service-orders`: danh sách, tìm/lọc, chi tiết, lịch sử, thanh toán và phiếu đăng ký. Backend C#; migration `20261109_040_eport_service_order_management.sql`.
+Trang `/service-orders`: khách tra cứu đơn công ty mình, xem trạng thái, kết quả trả về, thanh toán và email chứng từ.
 
-## Phân quyền
-
-- Khách: chỉ xem đơn công ty mình, sửa nháp và hủy khi còn được phép.
-- Administrator/Admin/Dispatcher: xem đơn đã đăng ký, tiếp nhận, duyệt/từ chối theo trạng thái.
-- Đơn nhập cần đối chiếu DO/eDO và quyền nhận hàng, lưu căn cứ trước khi duyệt.
-
-| Trạng thái | Thao tác chính |
+| Trạng thái | Ý nghĩa |
 | --- | --- |
-| DRAFT | Sửa, kiểm tra, xác nhận hoặc hủy |
-| CONFIRMED | Có thể thanh toán; cảng có thể tiếp nhận |
-| PENDING_APPROVAL | Chờ cảng tiếp nhận và duyệt trước thanh toán |
-| RECEIVED | Khách không tự hủy; cảng duyệt/từ chối nếu còn hợp lệ |
-| APPROVED | Có thể thanh toán |
-| REJECTED / CANCELLED | Đóng đơn, không mở lại hoặc sửa nội dung |
+| DRAFT | Có thể sửa và gửi đăng ký |
+| PENDING_APPROVAL / RECEIVED | Đang chờ Dispatcher, chưa được thanh toán |
+| APPROVED + PUBLISHED | Đã nhận kết quả và số tiền, có thể thanh toán |
+| REJECTED / CANCELLED | Hồ sơ đã đóng; xem lý do trong lịch sử |
 
-## Quy tắc và API
+- Khách không tính phí hoặc tự đặt số tiền; giao diện đăng ký không có bảng phí dự tính.
+- Tài khoản công ty chỉ xem đơn của mình. Phía Dispatcher dùng quyền riêng để đọc hồ sơ đã gửi và trả kết quả.
+- Khi nhận số tiền hợp lệ, hệ thống gửi thông báo email. Khi PayOS xác minh trả tiền, gửi biên lai/biểu mẫu.
+- Đang thanh toán hoặc đã trả tiền thì chặn hủy; số tiền 0 đã được phía xử lý xác nhận thì không tạo giao dịch.
+- Đơn cũ giữ lịch sử/giá cũ, không tự chuyển đổi sang luồng mới.
 
-- Hủy/từ chối phải có lý do; đang thanh toán hoặc đã trả tiền thì chặn hủy/từ chối.
-- Đơn 0 đồng dùng `NOT_REQUIRED`, không tạo giao dịch.
-- Giá/nội dung đã xác nhận và lịch sử được giữ nguyên.
-- Prefix `/api/v1/ServiceOrders`: `GET /`, `GET /{id}`, `GET /{id}/history`, `POST /{id}/actions`.
-- Action gồm `CANCEL`, `RECEIVE`, `APPROVE`, `REJECT`; gửi `expectedVersion`, UUID `requestId` và lý do khi cần.
-- Duyệt nhập thêm `sourceDocumentsChecked:true` và `sourceEvidenceReference`. Phiên bản workflow độc lập phiên bản nháp.
+API: `GET /api/v1/ServiceOrders`, `GET /{id}`, `GET /{id}/history`. Điểm nhận kết quả: `POST /{id}/billing-result`, khách không có quyền gọi.
 
-Xem [PayOS](eport-service-payments.md) và [phiếu](eport-service-receipts.md).
+Xem [hợp đồng kết nối](eport-dispatcher-integration.md) và [PayOS](eport-service-payments.md).

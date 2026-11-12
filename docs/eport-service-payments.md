@@ -1,6 +1,6 @@
 # Thanh toán PayOS
 
-Chỉ thanh toán tổng phí đã xác nhận; đơn cần duyệt phải được cảng duyệt trước. Số tiền nguyên VND, chưa gồm thuế.
+Chỉ thanh toán số tiền do phần Dispatcher trả về sau xác nhận. Phía khách không tính phí; PayOS nhận đúng số tiền VND đã lưu từ kết quả đó.
 
 ## Cấu hình
 

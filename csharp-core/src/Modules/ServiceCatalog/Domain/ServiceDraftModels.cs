@@ -70,7 +70,7 @@ public static class ServiceDraftRules
 
     public static string Search(string? search) => Text(search, 100, "Từ khóa");
 
-    private static string? Instant(string? value, string label)
+    internal static string? Instant(string? value, string label)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
         Require(value.Length <= 45 && Regex.IsMatch(value, @"^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$"), $"{label} phải có múi giờ (Z hoặc +07:00).");

@@ -9,6 +9,7 @@ public sealed record ServiceDeliveryInput
     public string TruckPlate { get; init; } = "";
     public string DriverName { get; init; } = "";
     public string DriverPhone { get; init; } = "";
+    public ServiceDeliveryTrip[] Trips { get; init; } = [];
     public string BargeName { get; init; } = "";
     public int? BargeYear { get; init; }
     public string BargeVoyage { get; init; } = "";
@@ -51,6 +52,15 @@ public static class ServiceDeliveryRules
     public static ServiceDeliveryInput Normalize(ServiceDeliveryInput? value)
     {
         value ??= new();
+        var trips = value.Trips ?? [];
+        ServiceDraftRules.Require(trips.Length <= 50 && trips.All(t => t != null && t.SourceContainerId != Guid.Empty)
+            && trips.Select(t => t.SourceContainerId).Distinct().Count() == trips.Length, "Danh sách chuyến phải gắn với từng container, không trùng lặp.");
+        trips = trips.Select(t => t with {
+            AppointmentStart = ServiceDraftRules.Instant(t.AppointmentStart, "Bắt đầu chuyến"),
+            AppointmentEnd = ServiceDraftRules.Instant(t.AppointmentEnd, "Kết thúc chuyến"),
+            Vehicle = null, Driver = null
+        }).ToArray();
+        ServiceDraftRules.Require(trips.All(t => t.TruckId != Guid.Empty && t.DriverId != Guid.Empty), "Mã xe hoặc tài xế không hợp lệ.");
         ServiceDraftRules.Require(string.IsNullOrEmpty(value.CustomsConfirmationScope) || Regex.IsMatch(value.CustomsConfirmationScope, "^[A-F0-9]{64}$"), "Xác nhận thông quan không hợp lệ. Vui lòng xác nhận lại.");
         ServiceDraftRules.Require(value.TransportMode is "TRUCK" or "BARGE", "Chọn phương tiện xe hoặc sà lan.");
         ServiceDraftRules.Require(value.BargeYear == null || value.BargeYear is >= 1900 and <= 2200, "Năm sà lan không hợp lệ.");
@@ -60,7 +70,7 @@ public static class ServiceDeliveryRules
             ServiceDraftRules.Require(DateOnly.TryParseExact(value.OrderValidUntil, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed), "Hạn lệnh không hợp lệ.");
             until = parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
-        return value with { TruckPlate = Text(value.TruckPlate, 20, "Biển số xe").ToUpperInvariant(), DriverName = Text(value.DriverName, 120, "Tài xế"),
+        return value with { Trips = value.TransportMode == "TRUCK" ? trips : [], TruckPlate = Text(value.TruckPlate, 20, "Biển số xe").ToUpperInvariant(), DriverName = Text(value.DriverName, 120, "Tài xế"),
             DriverPhone = Text(value.DriverPhone, 30, "Điện thoại tài xế"), BargeName = Text(value.BargeName, 150, "Tên sà lan"),
             BargeVoyage = Text(value.BargeVoyage, 80, "Chuyến sà lan"), OrderValidUntil = until };
     }

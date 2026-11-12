@@ -38,6 +38,10 @@ public sealed class ServiceOrdersController(ServiceOrderService service) : Contr
     }
     [HttpGet("{id:guid}/history")]
     public Task<IActionResult> History(Guid id, CancellationToken ct) => Run(() => service.OrderHistory(id, ct));
+    [HttpPost("{id:guid}/billing-result")]
+    [Authorize(Roles="Dispatcher,Administrator,Admin")]
+    [RequestSizeLimit(256*1024)]
+    public Task<IActionResult> BillingResult(Guid id,ServiceBillingResultInput input,CancellationToken ct)=>Run(async()=>await service.ReceiveBillingResult(id,input,ct));
     [HttpPost("{id:guid}/actions")]
     [RequestSizeLimit(16 * 1024)]
     public Task<IActionResult> Action(Guid id, ServiceOrderActionInput input, CancellationToken ct)

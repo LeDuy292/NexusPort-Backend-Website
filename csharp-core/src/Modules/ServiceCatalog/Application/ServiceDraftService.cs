@@ -11,7 +11,8 @@ using NexusPort.Modules.ServiceCatalog.Domain;
 namespace NexusPort.Modules.ServiceCatalog.Application;
 
 /// <summary>Company-private drafts and service confirmations. Source workflows remain read-only.</summary>
-public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser user, IServiceWorkflowEmail? workflowEmail = null, IHostEnvironment? environment = null)
+public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser user, IServiceWorkflowEmail? workflowEmail = null, IHostEnvironment? environment = null,
+    NexusPort.Modules.Booking.Application.Services.IBookingFleetAvailability? fleetAvailability = null)
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static object[] Args(params object?[] args) => args.Select((value, i) => (object)(value == null
@@ -274,6 +275,7 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         Require(id != Guid.Empty, "Mã bản nháp không hợp lệ.");
         var company = await Company(ct);
         var input = await DeliveryDefaults(ServiceDraftRules.Normalize(request), ct);
+        input = await CaptureFleet(company, input, ct);
         var content = Content(input);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await Exec("SELECT pg_advisory_xact_lock(hashtext(@p0))", ct, "eport-service-draft:" + id.ToString("N"));

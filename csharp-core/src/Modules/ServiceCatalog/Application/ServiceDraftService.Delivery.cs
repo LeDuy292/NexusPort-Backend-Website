@@ -87,9 +87,7 @@ public sealed partial class ServiceDraftService
         var delivery = input.Delivery;
         if (delivery.TransportMode == "TRUCK")
         {
-            if (!System.Text.RegularExpressions.Regex.IsMatch(delivery.TruckPlate, "^[A-Z0-9 .-]{5,20}$") || delivery.TruckPlate.Count(char.IsDigit) < 3) Add("TRUCK_PLATE_REQUIRED", "Bổ sung biển số xe giao nhận hợp lệ.", "delivery.truckPlate");
-            if (delivery.DriverName == "") Add("DRIVER_REQUIRED", "Bổ sung tên tài xế.", "delivery.driverName");
-            if (!System.Text.RegularExpressions.Regex.IsMatch(delivery.DriverPhone, @"^\+?[0-9 ().-]{7,30}$") || delivery.DriverPhone.Count(char.IsDigit) < 7) Add("DRIVER_PHONE_REQUIRED", "Bổ sung số điện thoại tài xế hợp lệ.", "delivery.driverPhone");
+            // Per-container fleet validation is shared by review and final submission.
         }
         else if (delivery.BargeName == "" || delivery.BargeYear == null || delivery.BargeVoyage == "")
             Add("BARGE_REQUIRED", "Bổ sung tên sà lan, năm và số chuyến.", "delivery");
