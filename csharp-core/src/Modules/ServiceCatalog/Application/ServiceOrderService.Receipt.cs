@@ -15,6 +15,8 @@ public sealed partial class ServiceOrderService
         var company = await OrderAccess(ct);
         var order = await OrderRow(id, company, ct);
         Require(order["registrationId"] != null, "Chỉ hồ sơ đã xác nhận mới có phiếu đăng ký dịch vụ.", 409, "SERVICE_RECEIPT_NOT_CONFIRMED");
+        Require(!company.HasValue || S(order,"pricingMode")!="DISPATCHER" || S(order,"paymentStatus")=="PAID" || S(order,"pricingStatus")=="PUBLISHED"&&S(order,"paymentStatus")=="NOT_REQUIRED",
+            "Chứng từ sẽ có sau thanh toán hoặc sau khi Dispatcher xác nhận không phát sinh tiền.",409,"SERVICE_RECEIPT_PAYMENT_REQUIRED");
         Require(!expectedVersion.HasValue || expectedVersion > 0 && expectedVersion == order["version"]!.GetValue<int>(),
             "Trạng thái đơn đã thay đổi sau khi mở phiếu. Tải lại bản xem trước trước khi xuất PDF.", 409, "SERVICE_RECEIPT_CHANGED");
         var receipt = new JsonObject
@@ -59,7 +61,7 @@ public sealed partial class ServiceOrderService
             receipt["containers"] = new JsonArray(selected.DeepClone());
             var selectedFees = receipt["fees"]!.AsArray().Where(row =>
                 Guid.TryParse(row?["sourceContainerId"]?.ToString(), out var containerId) && containerId == sourceContainerId.Value).ToArray();
-            receipt["total"] = selectedFees.Sum(row => row!["amount"]!.GetValue<decimal>());
+            receipt["total"] = S(order,"pricingMode")=="DISPATCHER"&&selectedFees.Length==0 ? null : JsonValue.Create(selectedFees.Sum(row => row!["amount"]!.GetValue<decimal>()));
             receipt["fees"] = new JsonArray(selectedFees.Select(row => row!.DeepClone()).ToArray());
         }
         var reasons = await Rows("""

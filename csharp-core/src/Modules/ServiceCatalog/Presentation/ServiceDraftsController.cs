@@ -36,6 +36,10 @@ public sealed class ServiceDraftsController(ServiceDraftService service) : Contr
         => Run(() => service.Sources(flow, search, ct));
     [HttpGet("delivery-profile")]
     public Task<IActionResult> DeliveryProfile(CancellationToken ct) => Run(() => service.DeliveryProfile(ct));
+    [HttpPost("fleet-options")]
+    [RequestSizeLimit(256 * 1024)]
+    public Task<IActionResult> FleetOptions(ServiceDraftInput input, CancellationToken ct)
+        => Run(() => service.RecommendServiceFleet(input, ct));
     [HttpGet("containers")]
     public Task<IActionResult> Containers([FromQuery] string flow = "EXPORT", [FromQuery] Guid? sourceId = null,
         [FromQuery] string? search = null, CancellationToken ct = default)

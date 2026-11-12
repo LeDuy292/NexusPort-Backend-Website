@@ -49,6 +49,7 @@ public sealed partial class ServiceOrderService(AppDbContext db, ICurrentUser us
         JOIN eport_service_order_states o ON o.draft_id=d.id
         JOIN carriers c ON c.id=d.carrier_id
         LEFT JOIN eport_service_registrations r ON r.draft_id=d.id
+        LEFT JOIN eport_service_bills bill ON bill.draft_id=d.id
         LEFT JOIN eport_services s ON s.id=d.main_service_id
         """;
     private const string OrderFields = """
@@ -59,7 +60,13 @@ public sealed partial class ServiceOrderService(AppDbContext db, ICurrentUser us
         COALESCE(r.snapshot->'sourceSnapshot'->>'bookingNumber',r.snapshot->'content'->'source'->>'referenceNumber',
           d.source_snapshot->>'bookingNumber',NULLIF(d.content->'source'->>'referenceNumber',''),'Chưa chọn hồ sơ') AS "sourceLabel",
         COALESCE(to_jsonb(c)->>'company_name',to_jsonb(c)->>'name','Doanh nghiệp') AS "companyName",
-        jsonb_array_length(d.container_snapshots) AS "containerCount",r.total,r.currency,
+        jsonb_array_length(d.container_snapshots) AS "containerCount",
+        CASE WHEN r.snapshot->>'pricingMode'='DISPATCHER' THEN bill.total ELSE r.total END AS total,r.currency,
+        COALESCE(r.snapshot->>'pricingMode','LEGACY') AS "pricingMode",
+        CASE WHEN r.snapshot->>'pricingMode'='DISPATCHER' THEN CASE WHEN o.status IN ('CANCELLED','REJECTED') THEN o.status WHEN bill.id IS NULL THEN 'AWAITING' ELSE 'PUBLISHED' END ELSE 'LEGACY' END AS "pricingStatus",
+        (SELECT COALESCE(jsonb_agg(jsonb_build_object('kind',m.kind,'status',m.status,'sentAt',m.sent_at)),'[]'::jsonb) FROM eport_service_mail_queue m WHERE m.draft_id=d.id) AS "emailNotifications",
+        bill.created_at AS "feesPublishedAt",
+        bill.external_reference AS "billingReference",
         r.confirmed_at AS "confirmedAt",d.created_at AS "createdAt",o.updated_at AS "updatedAt",
         EXISTS(SELECT 1 FROM eport_service_order_events review WHERE review.draft_id=d.id AND review.action='PAYMENT_REVIEW_REQUIRED') AS "paymentReviewRequired",
         CASE WHEN NULLIF(r.snapshot->'content'->'delivery'->>'customsConfirmationScope','') IS NOT NULL THEN 'CUSTOMER_CONFIRMED'
@@ -79,7 +86,8 @@ public sealed partial class ServiceOrderService(AppDbContext db, ICurrentUser us
             ,COALESCE(r.snapshot->'content',d.content) AS content,
              COALESCE(r.snapshot->'sourceSnapshot',d.source_snapshot) AS "sourceSnapshot",
              COALESCE(r.snapshot->'containers',d.container_snapshots) AS containers,
-             COALESCE(r.snapshot->'fees','[]'::jsonb) AS fees
+             COALESCE(bill.fees,r.snapshot->'fees','[]'::jsonb) AS fees,
+             COALESCE(r.snapshot->'serviceSnapshots','[]'::jsonb) AS services
             """ + "\n" + OrderJoins + " WHERE d.id=@p0 AND (@p1 OR d.carrier_id=@p2) AND (NOT @p1 OR r.id IS NOT NULL)" +
             (locked ? " FOR UPDATE OF o" : ""), ct, id, !company.HasValue, company ?? Guid.Empty);
         Require(rows.Count == 1, "Không tìm thấy đơn dịch vụ.", 404, "SERVICE_ORDER_NOT_FOUND");
@@ -98,10 +106,10 @@ public sealed partial class ServiceOrderService(AppDbContext db, ICurrentUser us
         if (!company.HasValue)
         {
             if (status is "CONFIRMED" or "PENDING_APPROVAL") result.Add("RECEIVE");
-            if (status == "RECEIVED" && S(row, "approvalStatus") == "PENDING") result.Add("APPROVE");
+            if (status == "RECEIVED" && S(row, "approvalStatus") == "PENDING" && S(row,"pricingStatus") != "AWAITING") result.Add("APPROVE");
             if (status == "RECEIVED" && unsettled) result.Add("REJECT");
         }
-        if (!reviewRequired && company.HasValue && row["registrationId"] != null &&
+        if (!reviewRequired && S(row,"pricingStatus") != "AWAITING" && company.HasValue && row["registrationId"] != null &&
             status is "CONFIRMED" or "RECEIVED" or "APPROVED" &&
             S(row, "approvalStatus") is "NOT_REQUIRED" or "APPROVED" &&
             payment is "UNPAID" or "FAILED" && (row["total"]?.GetValue<decimal>() ?? 0) > 0)
@@ -113,6 +121,7 @@ public sealed partial class ServiceOrderService(AppDbContext db, ICurrentUser us
     {
         var result = row.DeepClone().AsObject();
         result["staff"] = !company.HasValue;
+        if (company.HasValue) result["fees"] = new JsonArray();
         result["allowedActions"] = new JsonArray(AllowedActions(row, company).Select(action => (JsonNode?)JsonValue.Create(action)).ToArray());
         return result;
     }

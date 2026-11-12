@@ -217,6 +217,7 @@ public sealed partial class ServiceOrderService
             await AddEvent(id, S(saved, "status") == "SUCCEEDED" ? "PAYMENT_SUCCEEDED" : operation == "CANCEL" ? "PAYMENT_CANCELLED" : "PAYMENT_SYNCED",
                 S(order, "status"), S(order, "status"), reason ?? "Đã xác minh phản hồi từ payOS.", ct, requestId, fingerprint, data);
             var current = await OrderRow(id, company, ct);
+            if(S(saved,"status")=="SUCCEEDED")await QueueServiceMail(current,"PAYMENT_RECEIPT",ct);
             await tx.CommitAsync(ct);
             return PaymentResult(saved, current, company);
         }
@@ -311,6 +312,7 @@ public sealed partial class ServiceOrderService
             INSERT INTO eport_service_order_events(id,draft_id,actor_id,action,from_status,to_status,reason,data)
             VALUES(@p0,@p1,NULL,'PAYMENT_SUCCEEDED',@p2,@p2,'Webhook payOS đã được xác minh.',CAST(@p3 AS jsonb))
             """, ct, Guid.NewGuid(), id, S(order, "status"), data.ToJsonString());
+        await QueueServiceMail(await OrderRow(id,null,ct),"PAYMENT_RECEIPT",ct);
         await tx.CommitAsync(ct);
         return new { received = true };
     }

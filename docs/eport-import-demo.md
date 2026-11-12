@@ -15,8 +15,8 @@ Hai bộ riêng cho `dauboquay` và `carrier01`, chỉ dùng Development. Hạn 
 2. Dùng DO `DEMO-DO-IMPORT-20261111`, Bill `DEMO-BL-IMPORT-20261111`; với `carrier01` thêm `-CARRIER01` vào hai mã.
 3. Tàu `DEMO IMPORT VESSEL`, chuyến `DEMO-I-001`; chọn hạn lệnh còn hiệu lực và xác thực email.
 4. Chọn container, dịch vụ kèm; 20RF cần cắm điện. Bấm **Xác nhận thông quan**.
-5. Khai báo giao nhận, giờ dự kiến trong tương lai; tính phí, tích đồng ý và xác nhận đăng ký.
-6. Cảng tiếp nhận/duyệt, khách thanh toán PayOS rồi in/tải phiếu.
+5. Khai báo giao nhận, giờ dự kiến trong tương lai; tích xác nhận thông tin và gửi đăng ký cho Dispatcher.
+6. Chờ phần Dispatcher trả kết quả và số tiền; sau đó thanh toán PayOS, nhận thông báo/biên lai qua email.
 
 ## Nạp mẫu
 

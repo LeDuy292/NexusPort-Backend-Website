@@ -11,13 +11,16 @@ public sealed partial class ServiceDraftService
         if (!available[0]["available"]!.GetValue<bool>()) return;
         var states = await Rows("""
             SELECT o.draft_id AS id,o.status,o.approval_status AS "approvalStatus",o.payment_status AS "paymentStatus",o.version AS "orderVersion",
-             EXISTS(SELECT 1 FROM eport_service_order_events e WHERE e.draft_id=o.draft_id AND e.action='PAYMENT_REVIEW_REQUIRED') AS "paymentReviewRequired"
-            FROM eport_service_order_states o WHERE o.draft_id=ANY(@p0)
+             EXISTS(SELECT 1 FROM eport_service_order_events e WHERE e.draft_id=o.draft_id AND e.action='PAYMENT_REVIEW_REQUIRED') AS "paymentReviewRequired",
+             CASE WHEN r.snapshot->>'pricingMode'='DISPATCHER' THEN bill.total ELSE r.total END AS total,
+             CASE WHEN r.snapshot->>'pricingMode'='DISPATCHER' THEN CASE WHEN o.status IN ('CANCELLED','REJECTED') THEN o.status WHEN bill.id IS NULL THEN 'AWAITING' ELSE 'PUBLISHED' END ELSE 'LEGACY' END AS "pricingStatus"
+            FROM eport_service_order_states o LEFT JOIN eport_service_registrations r ON r.draft_id=o.draft_id
+             LEFT JOIN eport_service_bills bill ON bill.draft_id=o.draft_id WHERE o.draft_id=ANY(@p0)
             """, ct, rows.Select(row => G(row, "id")).ToArray());
         var indexed = states.ToDictionary(row => G(row, "id"));
         foreach (var row in rows)
             if (indexed.TryGetValue(G(row, "id"), out var state))
-                foreach (var key in new[] { "status", "approvalStatus", "paymentStatus", "orderVersion", "paymentReviewRequired" })
+                foreach (var key in new[] { "status", "approvalStatus", "paymentStatus", "orderVersion", "paymentReviewRequired", "total", "pricingStatus" })
                     row[key] = state[key]?.DeepClone();
     }
 
@@ -52,5 +55,11 @@ public sealed partial class ServiceDraftService
         if (workflow == null) return;
         foreach (var key in new[] { "status", "approvalStatus", "paymentStatus", "orderVersion", "workflowUpdatedAt", "paymentReviewRequired" })
             row[key] = workflow[key]?.DeepClone();
+        if (row["snapshot"]?["pricingMode"]?.ToString() == "DISPATCHER")
+        {
+            var bill = (await Rows("SELECT total FROM eport_service_bills WHERE draft_id=@p0", ct, id)).SingleOrDefault();
+            row["total"] = bill?["total"]?.DeepClone();
+            row["pricingStatus"] = S(row,"status") is "CANCELLED" or "REJECTED" ? S(row,"status") : bill == null ? "AWAITING" : "PUBLISHED";
+        }
     }
 }
