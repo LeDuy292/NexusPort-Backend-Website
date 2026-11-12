@@ -47,23 +47,45 @@ Node `/containers/lookup?containerNumber=...` returns identity/type only.
 `/containers/journeys` requires explicit search; pagination is bounded to 50 rows.
 Carriers may filter only by number and receive identity fields only. Staff search
 visits by number, normalized truck plate, customer or time range. Generic rich
-container/detail/status endpoints are staff-only. No list loads on page entry.
+container/detail/status endpoints are staff-only.
 
-`/containers/intake/transport/manual` and `/import` are carrier-only. The authenticated
-user must have one unambiguous company membership. Manual and the single-sheet
-empty Excel template share eight input fields. Seal is optional; frozen cargo
-requires positive kW and refrigerated equipment. IDs returned include
-`declarationId`, not a fabricated `visitId`.
+`GET /containers/yard-visits` is the shared yard visit search. It requires a filter
+and returns planned appointments, actual entry/exit times and issued EIRs.
+Carriers see visits linked to their bookings or explicitly granted to their company.
+Drivers see visits linked to bookings assigned to them, shipping lines see visits
+for their own equipment, and berth staff see visits linked to a vessel call.
+Vehicle and customer filters are available to port yard visit operators.
 
-C# Dropoff requires `containerSelections` with `containerId` and the exact `declarationId` passed from the declaration page. Pickup requires `containerId` and private `yardCode`; the server resolves the stay and copies the inbound cargo snapshot into the receiving company scope in the same transaction. Client-supplied visit/declaration IDs cannot replace the code for Pickup. Tenant is resolved from authenticated DB
+`GET /containers/identities` searches physical equipment by number, BIC prefix,
+shipping line, catalog type, ISO size/type, size, category, manufacturer or minimum
+payload. Supply at least one filter. `GET /containers/identities/mine` is the
+paginated default list for Shipping Line accounts. It uses the active account's
+linked profile and optionally accepts equipment filters. Both responses contain
+technical equipment data and exclude cargo or booking data.
+`POST /containers/intake/shipping-line/manual` lets an active Shipping Line account
+register a container whose BIC prefix belongs to its profile. It requires the
+container number, an ISO size/type from `GET /containers/intake/shipping-line/iso-types`,
+tare and maximum gross mass in kg. The server derives the catalog type and nominal
+external dimensions in mm from the selected code. If a caller sends those fields,
+they must match the code. The list covers ISO markings mapped to the NexusPort
+equipment catalog. Description, manufacturer and internal capacity in m³ are optional.
+Payload is maximum gross mass minus tare. A duplicate returns a conflict.
+Registration creates no declaration or visit. Transport intake writes and the old Excel template are retired.
+Transport companies can still search their existing declarations and use them in Booking.
+Set Node Core's `JWT_SECRET` to the key used by the login service.
+
+C# Dropoff requires `containerSelections` with `containerId` and the exact `declarationId`
+from an existing declaration in the transport company's scope. A newly registered
+identity alone cannot satisfy this requirement. Pickup requires `containerId` and
+private `yardCode`; the server resolves the stay and copies the inbound cargo snapshot into the receiving company scope in the same transaction. Client-supplied visit/declaration IDs cannot replace the code for Pickup. Tenant is resolved from authenticated DB
 membership; client carrier IDs cannot override it. C# returns the visit assigned
 by the DB trigger. Changing dates/assignments revalidates the whole schedule.
 Physical status is updated by actual gate/yard actions, not booking creation or
 cancellation. Passed physical GateOut completes the Pickup stay and creates its
 receipt; completing a Dropoff exchange retains an active stay.
 
-The declaration screen passes the selected identity/declaration into Booking; the
-Booking wizard has no declaration or stay dropdown. Its original two-step layout,
+The transport search screen passes a selected existing identity/declaration into Booking.
+Its original two-step layout,
 fleet recommendation, payload gauge, shift presets and e-Pass preview are retained.
 `POST /Booking/recommend-selection` accepts the exact private declaration for Dropoff
 or the pickup code for Pickup; the original matching algorithm uses this cargo and
@@ -81,6 +103,45 @@ and recommendation requests have a per-authenticated-user rate limit (15/minute)
 Times use local UI time and UTC API values; booking creation remains Pending.
 
 ## Migration and deployment
+
+Apply `20261109_034_shipping_line_directory.sql` before deploying the shipping
+line directory. Administrators maintain full and short names, unique BIC prefixes,
+and links to existing Shipping Line accounts. Export booking still uses account
+IDs. Existing accounts can be linked from the directory once the profile is set up.
+Apply `20261109_035_container_equipment_specs.sql` after 034 before deploying
+equipment registration and search. Legacy containers retain their type and history
+with unknown technical values displayed as missing.
+Apply `20261109_039_shipping_line_account_membership.sql` before deploying Node
+Core. It moves account links to `shipping_line_accounts`, which is independent of
+Express development sync on `users`. It preserves links from the old column when
+available and recovers the five known import links if the column was removed.
+Other missing assignments can be set again in the admin directory.
+
+### Import five shipping lines and login accounts
+
+Build Node Core first, then pass a text file with one container number per line.
+The first command previews the import. Add `--allow-remote` only when targeting
+the configured shared database. The apply command requires a new private path for
+the initial passwords. Keep that file outside the repo and Swagger.
+
+```powershell
+npm --prefix node-core run build
+node database/scripts/import-shipping-lines.cjs --containers <container-numbers.txt>
+node database/scripts/import-shipping-lines.cjs --containers <container-numbers.txt> --apply --credentials-file <private-path> --report <new-report-path>
+```
+
+Each imported line gets one active Shipping Line account. The script preserves
+existing credentials and aborts on conflicting profiles, prefixes or accounts.
+It deduplicates and validates the supplied numbers. A verified number is linked
+only when its physical record already exists with no assigned line. Other numbers
+appear in the report. Registration still requires the technical equipment data.
+Evergreen Line represents verified Evergreen member prefixes as a single operating
+profile. See the [BIC register](https://www.bic-code.org/bic-codes/) and
+[Evergreen joint service agreement](https://www2.fmc.gov/FMC.Agreements.Web/Public/Document/61650).
+Express Swagger at `http://localhost:3001/api-docs` lists the five imported account
+names and BIC prefixes under the default seed accounts. Node Core Swagger at
+`http://localhost:4000/api-docs` documents the live
+`GET /api/v1/containers/shipping-lines` directory.
 
 Dispatcher-to-gate entry and simulated barrier commands use additive migration
 `20261018_018_dispatch_gate_entry_orders.sql`, evidence migration 019 and single

@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.13.0.20260627" />
     <ProjectReference Include="../../src/Modules/Gate/NexusPort.Modules.Gate.csproj" />
     <ProjectReference Include="../../src/Modules/Booking/NexusPort.Modules.Booking.csproj" />
   </ItemGroup>

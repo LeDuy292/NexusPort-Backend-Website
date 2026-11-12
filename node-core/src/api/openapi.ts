@@ -1,4 +1,5 @@
 import { ContainerStatus } from '../modules/container/domain/container.entity';
+import shippingLineReference from '../modules/container/domain/shipping-line-reference.json';
 import { NodeCoreRouteModule, nodeCoreRouteModules } from './routes';
 
 type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
@@ -35,6 +36,100 @@ const parameterSchema = (path: string) => [...path.matchAll(/\{([A-Za-z0-9_]+)\}
 }));
 
 const operationOverrides: Record<string, Record<string, unknown>> = {
+  'GET /api/v1/containers/shipping-lines': {
+    summary: 'List shipping line profiles and their registered BIC prefixes',
+    description: 'Returns the current database directory. The response example shows five profiles from the reference import with illustrative IDs.',
+    responses: {
+      200: {
+        description: 'Shipping line directory',
+        content: { 'application/json': {
+          schema: {
+            type: 'object', required: ['success', 'data', 'timestamp'],
+            properties: {
+              success: { type: 'boolean' },
+              data: { type: 'array', items: { $ref: '#/components/schemas/ShippingLineProfile' } },
+              timestamp: { type: 'string', format: 'date-time' },
+            },
+          },
+          example: {
+            success: true,
+            data: shippingLineReference.map(({ fullName, shortName, prefixes }, index) => ({
+              id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, fullName, shortName, prefixes,
+            })),
+            timestamp: '2026-11-09T00:00:00Z',
+          },
+        } },
+      },
+      401: { description: 'Missing or invalid token' },
+      403: { description: 'Role cannot access the directory' },
+    },
+  },
+  'GET /api/v1/containers/shipping-lines/me': {
+    summary: 'Get the profile assigned to the authenticated shipping line account',
+    responses: {
+      200: { description: 'Assigned profile, or null for an unlinked account' },
+      401: { description: 'Missing or invalid token' },
+      403: { description: 'Shipping Line role required' },
+    },
+  },
+  'GET /api/v1/containers/identities': {
+    summary: 'Search registered containers using at least one equipment filter',
+    parameters: [
+      ...['containerNumber', 'prefix', 'shippingLineId', 'containerTypeId', 'isoSizeType', 'size', 'category', 'manufacturer']
+        .map(name => ({ name, in: 'query', schema: { type: 'string' } })),
+      { name: 'minPayloadKg', in: 'query', schema: { type: 'number', minimum: 0, exclusiveMinimum: true } },
+    ],
+  },
+  'GET /api/v1/containers/identities/mine': {
+    summary: 'List registered containers for the signed-in Shipping Line',
+    description: 'The service resolves the shipping line from the active account. No search filter is required.',
+    parameters: [
+      { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 10000, default: 1 } },
+      { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
+      ...['containerNumber', 'prefix', 'containerTypeId', 'isoSizeType', 'size', 'category', 'manufacturer']
+        .map(name => ({ name, in: 'query', schema: { type: 'string' } })),
+      { name: 'minPayloadKg', in: 'query', schema: { type: 'number', minimum: 0, exclusiveMinimum: true } },
+    ],
+  },
+  'GET /api/v1/containers/yard-visits': {
+    summary: 'Search yard visits, planned appointments and issued EIRs',
+    description: 'Requires a filter. Visits and linked details are scoped to the authenticated role and account. Date filters match actual gate events or scheduled appointments.',
+    parameters: [
+      { name: 'containerNumber', in: 'query', schema: { type: 'string', minLength: 4, maxLength: 11 } },
+      { name: 'visitStatus', in: 'query', schema: { type: 'string', enum: ['planned', 'active', 'completed', 'canceled'] } },
+      ...['dateFrom', 'dateTo'].map(name => ({ name, in: 'query', schema: { type: 'string', format: 'date-time' } })),
+      ...['plateNumber', 'customerName'].map(name => ({ name, in: 'query', description: 'Yard visit operators only', schema: { type: 'string' } })),
+      { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 10000, default: 1 } },
+      { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
+    ],
+  },
+  'GET /api/v1/containers/intake/shipping-line/iso-types': {
+    summary: 'List ISO markings supported for registration with their catalog types and nominal dimensions',
+  },
+  'POST /api/v1/containers/intake/shipping-line/manual': {
+    summary: 'Register a physical container (Shipping Line only)',
+    requestBody: { required: true, content: { 'application/json': { schema: {
+      type: 'object', additionalProperties: false,
+      required: ['containerNumber', 'isoSizeType', 'tareWeightKg', 'maxGrossMassKg'],
+      properties: {
+        containerNumber: { type: 'string', description: 'ISO 6346 equipment number' },
+        containerTypeId: { type: 'string', format: 'uuid', description: 'Optional. Must match the selected ISO code.' },
+        isoSizeType: { type: 'string', description: 'Use a code returned by the shipping-line ISO types endpoint.' },
+        equipmentDescription: { type: 'string' }, manufacturer: { type: 'string' },
+        externalLengthMm: { type: 'integer', description: 'Optional. Must match the nominal length.' },
+        externalWidthMm: { type: 'integer', description: 'Optional. Must match the nominal width.' },
+        externalHeightMm: { type: 'integer', description: 'Optional. Must match the nominal height.' },
+        tareWeightKg: { type: 'number' }, maxGrossMassKg: { type: 'number' }, capacityM3: { type: 'number' },
+      },
+    } } } },
+    responses: {
+      201: { description: 'Container registered' },
+      401: { description: 'Missing or invalid token' },
+      403: { description: 'Shipping Line role required' },
+      409: { description: 'Container number already registered' },
+      422: { description: 'Invalid container identity' },
+    },
+  },
   'GET /api/v1/drivers/me/yard-map': {
     summary: 'Read the approved 2D yard layout before Gate In without granting entry permission',
     security: [{ BearerAuth: [] }],
@@ -225,6 +320,16 @@ export const buildNodeCoreOpenApi = () => {
         BearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
       },
       schemas: {
+        ShippingLineProfile: {
+          type: 'object',
+          required: ['id', 'fullName', 'shortName', 'prefixes'],
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            fullName: { type: 'string', example: 'Hapag-Lloyd AG' },
+            shortName: { type: 'string', example: 'Hapag-Lloyd' },
+            prefixes: { type: 'array', items: { type: 'string', pattern: '^[A-Z]{3}[UJZ]$' }, example: ['HAMU', 'HLBU'] },
+          },
+        },
         ContainerStatus: { type: 'string', enum: Object.values(ContainerStatus) },
         ContainerStatusTransition: {
           type: 'object',

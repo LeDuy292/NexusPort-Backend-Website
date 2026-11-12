@@ -12,11 +12,16 @@ public class GateController : ControllerBase
 {
     private readonly IGateService _service;
     private readonly IGateVerificationService _verificationService;
+    private readonly IGateContainerInspectionService _containerInspectionService;
 
-    public GateController(IGateService service, IGateVerificationService verificationService)
+    public GateController(
+        IGateService service,
+        IGateVerificationService verificationService,
+        IGateContainerInspectionService containerInspectionService)
     {
         _service = service;
         _verificationService = verificationService;
+        _containerInspectionService = containerInspectionService;
     }
 
     /// <summary>
@@ -166,5 +171,122 @@ public class GateController : ControllerBase
     {
         var item = await _service.CreateAsync(dto, cancellationToken);
         return CreatedAtAction(nameof(GetById), new { id = item.Id }, item);
+    }
+
+    /// <summary>
+    /// Kiểm tra trạng thái mô hình AI ONNX nhận diện container (container.onnx) và cấu hình OCR.
+    /// </summary>
+    [HttpGet("containers/model-status")]
+    [AllowAnonymous]
+    public ActionResult<ContainerModelStatusDto> GetContainerModelStatus()
+    {
+        return Ok(_containerInspectionService.GetModelStatus());
+    }
+
+    /// <summary>
+    /// Nhận diện và kiểm duyệt container từ ảnh chụp cổng Gate bằng model container.onnx + OCR + ISO 6346 + đối chiếu Booking.
+    /// </summary>
+    [HttpPost("containers/inspect")]
+    [HttpPost("inspect-container")]
+    [Authorize(Roles = "Administrator,Admin,Gate Officer,Gate")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<ContainerInspectionResultDto>> InspectContainerImage(
+        IFormFile file,
+        [FromForm] string? bookingNumber = null,
+        [FromForm] string? vehiclePlate = null,
+        [FromForm] string? gateCode = "GATE-01",
+        [FromForm] string? laneCode = "LANE_01",
+        [FromForm] string? gateType = "GateIn",
+        [FromForm] bool autoVerify = false,
+        [FromForm] string? overviewImageUrl = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (file == null || file.Length == 0)
+        {
+            throw new NexusPort.Shared.Exceptions.ValidationException("File", "Vui lòng tải lên tệp ảnh container hợp lệ.");
+        }
+
+        if (file.Length > 20 * 1024 * 1024)
+        {
+            throw new NexusPort.Shared.Exceptions.ValidationException("File", "Kích thước ảnh container vượt quá giới hạn 20MB.");
+        }
+
+        await using var ms = new MemoryStream();
+        await file.CopyToAsync(ms, cancellationToken);
+
+        var query = new ContainerInspectionQuery
+        {
+            BookingNumber = bookingNumber,
+            VehiclePlate = vehiclePlate,
+            GateCode = gateCode,
+            LaneCode = laneCode,
+            GateType = gateType,
+            AutoVerify = autoVerify,
+            OverviewImageUrl = overviewImageUrl
+        };
+
+        var result = await _containerInspectionService.InspectImageAsync(ms.ToArray(), query, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Nhận diện và kiểm duyệt container từ chuỗi ảnh Base64 bằng model container.onnx + ISO 6346.
+    /// </summary>
+    [HttpPost("containers/inspect-base64")]
+    [Authorize(Roles = "Administrator,Admin,Gate Officer,Gate")]
+    public async Task<ActionResult<ContainerInspectionResultDto>> InspectContainerBase64(
+        [FromBody] ContainerInspectImageBase64RequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        var imageBytes = DecodeBase64Image(request.ImageBase64);
+        var query = new ContainerInspectionQuery
+        {
+            BookingNumber = request.BookingNumber,
+            VehiclePlate = request.VehiclePlate,
+            GateCode = request.GateCode,
+            LaneCode = request.LaneCode,
+            GateType = request.GateType,
+            AutoVerify = request.AutoVerify
+        };
+
+        var result = await _containerInspectionService.InspectImageAsync(imageBytes, query, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Gate Officer xác nhận Đạt hoặc Từ chối kiểm duyệt container, đồng thời ghi log GateVerificationRecord & BookingOperation.
+    /// </summary>
+    [HttpPost("containers/verify-decision")]
+    [Authorize(Roles = "Administrator,Admin,Gate Officer,Gate")]
+    public async Task<ActionResult<ContainerVerifyDecisionResultDto>> RecordContainerDecision(
+        [FromBody] ContainerVerifyDecisionRequestDto request,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await _containerInspectionService.RecordContainerDecisionAsync(request, cancellationToken);
+        return Ok(result);
+    }
+
+    private static byte[] DecodeBase64Image(string? rawBase64)
+    {
+        if (string.IsNullOrWhiteSpace(rawBase64))
+        {
+            throw new NexusPort.Shared.Exceptions.ValidationException("ImageBase64", "Chuỗi ảnh imageBase64 không được để trống.");
+        }
+
+        var commaIndex = rawBase64.IndexOf(',');
+        var payload = commaIndex >= 0 ? rawBase64[(commaIndex + 1)..] : rawBase64;
+        try
+        {
+            var bytes = Convert.FromBase64String(payload.Trim());
+            if (bytes.Length == 0)
+            {
+                throw new NexusPort.Shared.Exceptions.ValidationException("ImageBase64", "Dữ liệu ảnh Base64 rỗng.");
+            }
+            return bytes;
+        }
+        catch (FormatException)
+        {
+            throw new NexusPort.Shared.Exceptions.ValidationException("ImageBase64", "Định dạng chuỗi Base64 của ảnh container không hợp lệ.");
+        }
     }
 }

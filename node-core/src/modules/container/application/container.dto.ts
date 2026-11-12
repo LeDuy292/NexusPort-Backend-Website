@@ -15,6 +15,42 @@ export interface CreateContainerDto {
   expectedGateOutAt?: string | null;
 }
 
+interface ContainerRegistrationEquipment {
+  containerTypeId: string;
+  externalLengthMm: number;
+  externalWidthMm: number;
+  externalHeightMm: number;
+}
+
+export interface RegisterContainerIdentityDto extends Partial<ContainerRegistrationEquipment> {
+  containerNumber: string;
+  isoSizeType: string;
+  equipmentDescription?: string;
+  tareWeightKg: number;
+  maxGrossMassKg: number;
+  capacityM3?: number;
+  manufacturer?: string;
+}
+
+export type ResolvedContainerIdentityDto = RegisterContainerIdentityDto & ContainerRegistrationEquipment;
+
+export interface ContainerIdentityPageDto {
+  page: number;
+  limit: number;
+}
+
+export interface ContainerIdentitySearchDto extends ContainerIdentityPageDto {
+  containerNumber?: string;
+  prefix?: string;
+  shippingLineId?: string;
+  containerTypeId?: string;
+  isoSizeType?: string;
+  size?: ContainerSize;
+  category?: ContainerCategory;
+  manufacturer?: string;
+  minPayloadKg?: number;
+}
+
 export type UpdateContainerDto = Partial<Omit<CreateContainerDto, 'containerNumber'>> & {
   containerNumber?: string;
   arrivedAt?: string | null;

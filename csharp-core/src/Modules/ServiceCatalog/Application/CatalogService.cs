@@ -36,8 +36,8 @@ public sealed class CatalogService(AppDbContext db, ICurrentUser user)
         await Authorize(false, ct);
         var admin = user.Role is "Administrator" or "Admin";
         var services = await Rows($"SELECT {ServiceFields} FROM eport_services ORDER BY CASE code WHEN 'EXPORT_DROPOFF' THEN 1 WHEN 'IMPORT_PICKUP' THEN 2 WHEN 'REEFER_POWER' THEN 3 WHEN 'YARD_RELOCATION' THEN 4 WHEN 'STORAGE_EXTENSION' THEN 5 WHEN 'CONTAINER_WEIGH' THEN 6 ELSE 7 END,created_at,code", ct);
-        var prices = await Rows($"SELECT {PriceFields} FROM eport_tariffs" + (admin ? "" : " WHERE is_active") + " ORDER BY effective_from DESC,created_at DESC", ct);
-        foreach (var service in services) service["tariffs"] = new JsonArray(prices.Where(r => r["serviceId"]!.ToString() == service["id"]!.ToString()).Select(r => (JsonNode)r.DeepClone()).ToArray());
+        var prices = admin ? await Rows($"SELECT {PriceFields} FROM eport_tariffs ORDER BY effective_from DESC,created_at DESC", ct) : [];
+        foreach (var service in services) { service["tariffs"] = new JsonArray(prices.Where(r => r["serviceId"]!.ToString() == service["id"]!.ToString()).Select(r => (JsonNode)r.DeepClone()).ToArray()); service["pricingManagedByDispatcher"] = !admin; }
         return new { asOf = CatalogRules.Today, services, metadata = new { directions = CatalogRules.Directions, units = CatalogRules.Units, sizes = CatalogRules.Sizes, equipment = CatalogRules.Equipment, icons = CatalogRules.Icons } };
     }
     public async Task<JsonObject> Save(Guid? id, ServiceInput request, CancellationToken ct)
@@ -86,7 +86,7 @@ public sealed class CatalogService(AppDbContext db, ICurrentUser user)
     }
     public async Task<CatalogQuote> Quote(Guid id, QuoteInput input, CancellationToken ct)
     {
-        await Authorize(false, ct);
+        await Authorize(true, ct);
         var service = await Find(id, ct);
         var prices = await Rows($"SELECT {PriceFields} FROM eport_tariffs WHERE service_id=@p0 AND is_active", ct, id);
         return CatalogRules.Quote(service["isActive"]!.GetValue<bool>(), service["unit"]!.ToString(), prices.Select(r => new PriceOption(Guid.Parse(r["id"]!.ToString()), r["size"]!.ToString(), r["equipment"]!.ToString(), r["amount"]!.GetValue<decimal>(), r["effectiveFrom"]!.ToString(), r["effectiveTo"]?.ToString(), true)), input);

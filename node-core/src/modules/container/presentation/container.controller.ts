@@ -1,16 +1,15 @@
-import { ContainerJourneyRepository } from '../infrastructure/container-journey.repository';
+import { ContainerJourneyRepository, ContainerRole } from '../infrastructure/container-journey.repository';
 import { NextFunction, Request, Response, Router } from 'express';
 import jwt, { JwtPayload } from 'jsonwebtoken';
-import multer from 'multer';
-import { ZodError, ZodSchema } from 'zod';
+import { z, ZodError, ZodSchema, ZodTypeDef } from 'zod';
 import { ForbiddenError, UnauthorizedError, ValidationError } from '../../../shared/errors/app-error';
 import { sendCreated, sendSuccess } from '../../../shared/utils/response';
 import { ContainerService } from '../application/container.service';
 import { ContainerStatusService } from '../application/container-status.service';
 import { ContainerIntakeService } from '../application/container-intake.service';
+import { ShippingLineDirectoryRepository } from '../infrastructure/shipping-line-directory.repository';
 import { ContainerSearchDto } from '../application/container.dto';
-import { containerSearchSchema, idSchema, transitionContainerStatusSchema, } from '../application/container.validator';
-type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier';
+import { ownContainerIdentitySearchSchema, containerIdentitySearchSchema, containerSearchSchema, idSchema, registerContainerIdentitySchema, transitionContainerStatusSchema } from '../application/container.validator';
 interface AuthorizedRequest extends Request {
     containerUser?: {
         id: string;
@@ -21,9 +20,17 @@ const roleAliases: Record<string, ContainerRole> = {
     administrator: 'Administrator', admin: 'Administrator', dispatcher: 'Dispatcher', operation: 'Dispatcher',
     'yard staff': 'Yard Staff', 'yard operator': 'Yard Staff', yard: 'Yard Staff',
     'gate officer': 'Gate Officer', gate: 'Gate Officer', carrier: 'Carrier',
-    'carrier staff': 'Carrier', 'transport company': 'Carrier', 'transportcompany': 'Carrier'
+    'carrier staff': 'Carrier', 'transport company': 'Carrier', 'transportcompany': 'Carrier',
+    'shipping line': 'Shipping Line', shippingline: 'Shipping Line', driver: 'Driver', 'berth staff': 'Berth Staff',
 };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const shippingLineSchema = z.object({
+    fullName: z.string().trim().min(1, 'Nhập tên đầy đủ của hãng tàu.').max(250),
+    shortName: z.string().trim().min(1, 'Nhập tên viết tắt của hãng tàu.').max(80),
+    prefixes: z.array(z.string().trim().toUpperCase().regex(/^[A-Z]{3}[UJZ]$/, 'Tiền tố BIC gồm 3 chữ cái và ký tự U, J hoặc Z.'))
+        .min(1, 'Nhập ít nhất một tiền tố BIC.').max(100).transform(values => [...new Set(values)]),
+    userIds: z.array(z.string().uuid().toLowerCase()).max(100).transform(values => [...new Set(values)]),
+}).strict();
 const vietnameseValidationMessage = (issue: ZodError['issues'][number]): string => {
     if (issue.message !== 'Invalid input' && !issue.message.startsWith('Invalid'))
         return issue.message;
@@ -35,7 +42,7 @@ const vietnameseValidationMessage = (issue: ZodError['issues'][number]): string 
         return 'Giá trị không đúng định dạng yêu cầu.';
     return 'Giá trị không hợp lệ.';
 };
-const parse = <T>(schema: ZodSchema<T>, value: unknown): T => {
+const parse = <T>(schema: ZodSchema<T, ZodTypeDef, unknown>, value: unknown): T => {
     try {
         return schema.parse(value);
     }
@@ -56,9 +63,11 @@ const authenticateContainerUser = (req: AuthorizedRequest, _res: Response, next:
     if (!token)
         return next(new UnauthorizedError('Vui lòng đăng nhập để sử dụng chức năng quản lý Container.'));
     try {
-        const payload = jwt.verify(token, process.env.JWT_SECRET || 'NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!', { algorithms: ['HS256'] }) as JwtPayload;
-        const rawRole = String(payload.role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? '').toLowerCase();
-        const role = roleAliases[rawRole];
+        const secret = process.env.JWT_SECRET;
+        if (!secret) return next(new UnauthorizedError('Dịch vụ chưa cấu hình xác thực Container.'));
+        const payload = jwt.verify(token, secret, { algorithms: ['HS256'] }) as JwtPayload;
+        const rawRole = String(payload.role ?? payload['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] ?? '').trim().toLowerCase();
+        const role = Object.hasOwn(roleAliases, rawRole) ? roleAliases[rawRole] : undefined;
         if (!role)
             return next(new ForbiddenError('Vai trò của bạn không có quyền truy cập chức năng quản lý Container.'));
         const userId = String(payload.sub ?? payload.id ?? '');
@@ -79,17 +88,13 @@ const allowRoles = (...roles: ContainerRole[]) => (req: AuthorizedRequest, _res:
 };
 export class ContainerController {
     constructor(private readonly service = new ContainerService(), private readonly statusService = new ContainerStatusService(), private readonly intakeService = new ContainerIntakeService()) { }
-    createTransportIntake = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
-        try {
-            sendCreated(res, await this.intakeService.createManual(req.body, 'transport_company', req.containerUser!.id));
-        }
-        catch (error) {
-            next(error);
-        }
+    getRegistrationIsoTypes = async (_req: Request, res: Response, next: NextFunction) => {
+        try { sendSuccess(res, await this.service.getRegistrationIsoTypes()); } catch (error) { next(error); }
     };
-    importTransportExcel = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
+    registerIdentity = async (req: AuthorizedRequest, res: Response, next: NextFunction) => {
         try {
-            sendSuccess(res, await this.intakeService.importExcel(req.file, 'transport_company', req.containerUser!.id));
+            const dto = parse(registerContainerIdentitySchema, req.body);
+            sendCreated(res, await this.service.registerIdentity(dto, req.containerUser!.id));
         }
         catch (error) {
             next(error);
@@ -137,15 +142,6 @@ export class ContainerController {
             next(error);
         }
     };
-    downloadTemplate = async (_req: Request, res: Response, next: NextFunction) => {
-        try {
-            res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-                .attachment('Mau_Khai_Bao_Container.xlsx').send(await this.intakeService.buildTemplate());
-        }
-        catch (error) {
-            next(error);
-        }
-    };
     getById = async (req: Request, res: Response, next: NextFunction) => {
         try {
             sendSuccess(res, await this.service.getById(parse(idSchema, req.params.id)));
@@ -185,26 +181,57 @@ export class ContainerController {
 export const createContainerRouter = (): Router => {
     const router = Router();
     const controller = new ContainerController();
-    const upload = multer({
-        storage: multer.memoryStorage(),
-        limits: { fileSize: 5 * 1024 * 1024, files: 1 },
-    });
     const readers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer', 'Carrier'];
+    const identityReaders: ContainerRole[] = [...readers, 'Shipping Line', 'Driver', 'Berth Staff'];
     const writers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Gate Officer'];
     router.use(authenticateContainerUser);
-    router.get('/types', allowRoles(...readers), controller.getTypes);
+    router.get('/types', allowRoles(...identityReaders), controller.getTypes);
     router.get('/cargo-types', allowRoles(...readers), controller.getCargoTypes);
     router.get('/intake/imports', allowRoles('Administrator', 'Dispatcher'), controller.listImports);
     router.get('/intake/transport/declarations', allowRoles('Carrier'), controller.listTransportDeclarations);
-    router.get('/intake/transport/template', allowRoles('Carrier'), controller.downloadTemplate);
-    router.post('/intake/transport/manual', allowRoles('Carrier'), controller.createTransportIntake);
-    router.post('/intake/transport/import', allowRoles('Carrier'), upload.single('file'), controller.importTransportExcel);
+    router.get('/intake/shipping-line/iso-types', allowRoles('Shipping Line'), controller.getRegistrationIsoTypes);
+    router.post('/intake/shipping-line/manual', allowRoles('Shipping Line'), controller.registerIdentity);
+    const shippingLines = new ShippingLineDirectoryRepository();
+    router.get('/shipping-lines', allowRoles(...identityReaders), async (_req, res, next) => {
+        try { sendSuccess(res, await shippingLines.list()); } catch (error) { next(error); }
+    });
+    router.get('/shipping-lines/me', allowRoles('Shipping Line'), async (req: AuthorizedRequest, res, next) => {
+        try { sendSuccess(res, await shippingLines.own(req.containerUser!.id)); } catch (error) { next(error); }
+    });
+    router.get('/shipping-lines/accounts', allowRoles('Administrator'), async (req: AuthorizedRequest, res, next) => {
+        try { sendSuccess(res, await shippingLines.accounts(req.containerUser!.id)); } catch (error) { next(error); }
+    });
+    router.post('/shipping-lines', allowRoles('Administrator'), async (req: AuthorizedRequest, res, next) => {
+        try { sendCreated(res, await shippingLines.save(parse(shippingLineSchema, req.body), req.containerUser!.id)); }
+        catch (error) { next(error); }
+    });
+    router.put('/shipping-lines/:id', allowRoles('Administrator'), async (req: AuthorizedRequest, res, next) => {
+        try { sendSuccess(res, await shippingLines.save(parse(shippingLineSchema, req.body), req.containerUser!.id, parse(idSchema, req.params.id))); }
+        catch (error) { next(error); }
+    });
     const journeys = new ContainerJourneyRepository();
-    router.get('/lookup', allowRoles(...readers), async (req,res,next) => {
+    router.get('/identities/mine', allowRoles('Shipping Line'), async (req: AuthorizedRequest, res, next) => {
+        try {
+            sendSuccess(res, await journeys.listOwnIdentities(req.containerUser!.id, parse(ownContainerIdentitySearchSchema, req.query)));
+        } catch (error) {
+            next(error);
+        }
+    });
+    router.get('/identities', allowRoles(...identityReaders), async (req, res, next) => {
+        try {
+            sendSuccess(res, await journeys.searchIdentities(parse(containerIdentitySearchSchema, req.query)));
+        } catch (error) {
+            next(error);
+        }
+    });
+    router.get('/lookup', allowRoles(...identityReaders), async (req,res,next) => {
       try { sendSuccess(res,await journeys.lookup(String(req.query.containerNumber??'').trim().toUpperCase())); } catch(e){next(e);}
     });
     router.get('/journeys', allowRoles(...readers), async (req: AuthorizedRequest,res,next) => {
-      try { sendSuccess(res,await journeys.search(req.query,req.containerUser!.role==='Carrier'?req.containerUser!.id:undefined)); } catch(e){next(e);}
+      try { sendSuccess(res,await journeys.search(req.query,req.containerUser!.role==='Carrier')); } catch(e){next(e);}
+    });
+    router.get('/yard-visits', allowRoles(...identityReaders), async (req: AuthorizedRequest, res, next) => {
+      try { sendSuccess(res, await journeys.searchYardVisits(req.query, req.containerUser!)); } catch (e) { next(e); }
     });
     router.get('/own-visits/:id', allowRoles('Carrier'), async (req: AuthorizedRequest,res,next) => {
       try { sendSuccess(res,await journeys.ownVisits(parse(idSchema,req.params.id),req.containerUser!.id)); } catch(e){next(e);}

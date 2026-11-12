@@ -186,11 +186,12 @@ async function googleLoginController(req, res, next) {
       });
     }
 
-    const { credential, idToken, email, expectedRole, rememberMe } = req.body;
+    const { credential, idToken, accessToken, email, expectedRole, rememberMe } = req.body;
 
     const { token, user } = await authService.loginWithGoogle({
       credential,
       idToken,
+      accessToken,
       email,
       expectedRole,
       rememberMe: !!rememberMe,

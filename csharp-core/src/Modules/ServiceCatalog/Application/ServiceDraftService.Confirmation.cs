@@ -12,7 +12,6 @@ namespace NexusPort.Modules.ServiceCatalog.Application;
 
 public sealed partial class ServiceDraftService
 {
-    private const decimal MaxBrowserInteger = 9007199254740991m;
     private static readonly TimeZoneInfo PortZone = TimeZoneInfo.FindSystemTimeZoneById("Asia/Ho_Chi_Minh");
     private static readonly Dictionary<string, string[]> StandardConditions = new()
     {
@@ -28,17 +27,21 @@ public sealed partial class ServiceDraftService
         => FindRegistrationRow(draftId, ct);
 
     private async Task<JsonObject?> FindRegistrationRow(Guid draftId, CancellationToken ct)
-        => (await Rows("""
+    {
+        var row = (await Rows("""
             SELECT id,draft_id AS "draftId",carrier_id AS "carrierId",number,draft_version AS "draftVersion",
                 quote_token AS "quoteToken",status,payment_status AS "paymentStatus",currency,total,snapshot,
                 confirmed_at AS "confirmedAt"
             FROM eport_service_registrations WHERE draft_id=@p0
             """, ct, draftId)).SingleOrDefault();
+        if (row != null) await ApplyWorkflow(row, draftId, ct);
+        return row;
+    }
 
     private static JsonObject RegistrationDetail(JsonObject row)
     {
         var result = row["snapshot"]!.DeepClone().AsObject();
-        foreach (var key in new[] { "id", "draftId", "number", "draftVersion", "status", "paymentStatus", "currency", "total", "confirmedAt" })
+        foreach (var key in new[] { "id", "draftId", "number", "draftVersion", "status", "paymentStatus", "currency", "total", "confirmedAt", "approvalStatus", "orderVersion", "paymentReviewRequired", "pricingStatus" })
             result[key] = row[key]?.DeepClone();
         return result;
     }
@@ -47,7 +50,7 @@ public sealed partial class ServiceDraftService
     {
         detail["registrationId"] = row["id"]!.DeepClone();
         detail["registrationNumber"] = row["number"]!.DeepClone();
-        foreach (var key in new[] { "status", "total", "currency", "paymentStatus", "confirmedAt" })
+        foreach (var key in new[] { "status", "total", "currency", "paymentStatus", "confirmedAt", "approvalStatus", "orderVersion", "paymentReviewRequired", "pricingStatus" })
             detail[key] = row[key]?.DeepClone();
     }
 
@@ -74,6 +77,7 @@ public sealed partial class ServiceDraftService
     {
         var row = await Find(id, ct, locked);
         Require(row != null && G(row, "carrierId") == company, "Không tìm thấy hồ sơ dịch vụ.", 404, "SERVICE_DRAFT_NOT_FOUND");
+        await EnsureWorkflowNotCancelled(id, ct);
         Require(version > 0 && row!["version"]!.GetValue<int>() == version,
             "Hồ sơ vừa thay đổi. Tải lại trước khi kiểm tra hoặc xác nhận.", 409, "SERVICE_DRAFT_VERSION_CONFLICT");
         return row!;
@@ -84,7 +88,7 @@ public sealed partial class ServiceDraftService
         ["draftId"] = draft["id"]!.DeepClone(), ["draftVersion"] = draft["version"]!.DeepClone(),
         ["status"] = row["status"]!.DeepClone(), ["canConfirm"] = false,
         ["checkedAt"] = DateTimeOffset.UtcNow, ["currency"] = "VND", ["taxIncluded"] = false,
-        ["total"] = row["total"]!.DeepClone(), ["subtotal"] = row["total"]!.DeepClone(),
+        ["total"] = row["total"]?.DeepClone(), ["subtotal"] = row["total"]?.DeepClone(),
         ["fees"] = row["snapshot"]!["fees"]!.DeepClone(), ["issues"] = row["snapshot"]!["issues"]!.DeepClone(),
         ["quoteToken"] = null, ["registration"] = RegistrationDetail(row)
     };
@@ -93,19 +97,22 @@ public sealed partial class ServiceDraftService
     {
         var ids = input.Lines.Select(line => line.SourceContainerId).ToArray();
         if (ids.Length == 0) return [];
-        if (input.Flow == "EXPORT") return await Rows("""
+        if (input.Flow == "EXPORT") return DemoCustoms(await Rows("""
             SELECT e.id AS "sourceContainerId",c.status::text AS "physicalStatus",t.size::text AS "typeSize",
                 t.category::text AS "typeCategory",e.customs_cleared AS "customsCleared",e.un_number AS "unNumber",e.dg_class AS "dgClass",
+                (e.id::text LIKE '03810000-%' AND b.booking_no LIKE 'DEMO-EPORT-%' AND e.container_no LIKE 'NXPU%') AS "isDemoSource",
                 EXISTS(SELECT 1 FROM container_visits y WHERE y.container_id=e.container_id AND y.declaration_id=e.declaration_id
                        AND y.visit_status='active' AND y.started_at IS NOT NULL AND y.completed_at IS NULL) AS "hasYardStay"
             FROM export_booking_containers e JOIN export_bookings b ON b.id=e.export_booking_id
             JOIN containers c ON c.id=e.container_id JOIN container_types t ON t.id=c.container_type_id
             WHERE e.id=ANY(@p0) AND b.carrier_id=@p1 AND b.id=@p2
             ORDER BY e.id
-            """, ct, ids, company, input.Source.BookingId);
-        return await Rows("""
+            """, ct, ids, company, input.Source.BookingId));
+        return DemoCustoms(await Rows("""
             SELECT v.id AS "sourceContainerId",c.status::text AS "physicalStatus",t.size::text AS "typeSize",
                 t.category::text AS "typeCategory",NULL::boolean AS "customsCleared",
+                (v.id::text ~ '^e911110[01]-' AND c.container_no LIKE 'DEMU%'
+                 AND to_jsonb(v)->>'source_reference' IN ('DEMO-EPORT-IMPORT-20261111','DEMO-EPORT-IMPORT-20261111-CARRIER01')) AS "isDemoSource",
                 (v.visit_status='active' AND v.started_at IS NOT NULL AND v.completed_at IS NULL) AS "hasYardStay"
             FROM container_visits v JOIN containers c ON c.id=v.container_id
             JOIN container_types t ON t.id=c.container_type_id
@@ -113,7 +120,7 @@ public sealed partial class ServiceDraftService
             WHERE v.id=ANY(@p0) AND (d.carrier_id=@p1 OR EXISTS(
                 SELECT 1 FROM container_visit_access a WHERE a.container_visit_id=v.id AND a.carrier_id=@p1))
             ORDER BY v.id
-            """, ct, ids, company);
+            """, ct, ids, company));
     }
 
     private static DateTimeOffset? At(string? value) => DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed) ? parsed : null;
@@ -147,7 +154,10 @@ public sealed partial class ServiceDraftService
         var input = draft["content"]!.Deserialize<ServiceDraftInput>(Json)!;
         var issues = new JsonArray();
         var fees = new JsonArray();
-        var needsApproval = false;
+        var needsApproval = true;
+        Require((await Rows("SELECT to_regclass('eport_service_bills') IS NOT NULL AS ready", ct))[0]["ready"]!.GetValue<bool>(), "Cần áp dụng migration 20261112_042 cho luồng Dispatcher lập phí.", 503, "SERVICE_BILLING_SCHEMA_REQUIRED");
+        var deliverySchema = await DeliverySchema(ct);
+        var newDelivery = deliverySchema && input.WorkflowVersion == 2;
         void Issue(string code, string message, string field, Guid? container = null, Guid? service = null, bool warning = false)
             => issues.Add(new JsonObject { ["code"] = code, ["message"] = message, ["field"] = field,
                 ["sourceContainerId"] = container?.ToString(), ["serviceId"] = service?.ToString(), ["severity"] = warning ? "WARNING" : "ERROR" });
@@ -180,7 +190,9 @@ public sealed partial class ServiceDraftService
         else
         {
             source = new JsonObject { ["documentType"] = input.Source.DocumentType, ["referenceNumber"] = input.Source.ReferenceNumber, ["verificationStatus"] = "UNVERIFIED" };
-            Issue("EDO_UNVERIFIED", "DO/eDO mới là thông tin khai báo, chưa có nguồn cấp lệnh được xác minh và liên kết đúng container. Chưa thể xác nhận đăng ký hàng nhập.", "source.referenceNumber");
+            source["vesselName"] = input.Source.VesselName; source["voyageNumber"] = input.Source.VoyageNumber;
+            if (newDelivery) { source["verificationStatus"] = "PORT_DOCUMENT_REVIEW_REQUIRED"; needsApproval = true; }
+            Issue("EDO_UNVERIFIED", newDelivery ? "DO/eDO cần được nhân viên cảng đối chiếu chứng từ và quyền nhận hàng trước khi duyệt, thanh toán. Email OTP không xác nhận hiệu lực lệnh." : "DO/eDO mới là thông tin khai báo, chưa có nguồn cấp lệnh được xác minh và liên kết đúng container. Chưa thể xác nhận đăng ký hàng nhập.", "source.referenceNumber", warning: newDelivery);
             if (string.IsNullOrWhiteSpace(input.Source.ReferenceNumber)) Issue("EDO_REFERENCE_REQUIRED", "Bổ sung số DO/eDO.", "source.referenceNumber");
             if (string.IsNullOrWhiteSpace(input.Source.BlNumber)) Issue("BL_REQUIRED", "Bổ sung số vận đơn.", "source.blNumber");
             if (input.Source.ValidUntil == null) Issue("EDO_EXPIRY_REQUIRED", "Bổ sung hạn hiệu lực DO/eDO.", "source.validUntil");
@@ -197,11 +209,6 @@ public sealed partial class ServiceDraftService
         var services = serviceIds.Length == 0 ? [] : await Rows("""
             SELECT id,code,name,direction,unit,is_active AS "isActive",requires_approval AS "requiresApproval",conditions,version
             FROM eport_services WHERE id=ANY(@p0) ORDER BY id
-            """, ct, serviceIds);
-        var tariffs = serviceIds.Length == 0 ? [] : await Rows("""
-            SELECT id,service_id AS "serviceId",size,equipment,amount,currency,unit,effective_from::text AS "effectiveFrom",
-                effective_to::text AS "effectiveTo",note
-            FROM eport_tariffs WHERE service_id=ANY(@p0) AND is_active ORDER BY service_id,size,equipment,effective_from,id
             """, ct, serviceIds);
         var byService = services.ToDictionary(row => G(row, "id"));
         var byContainer = containers.ToDictionary(row => G(row, "sourceContainerId"));
@@ -237,7 +244,7 @@ public sealed partial class ServiceDraftService
             {
                 if (!(container["vgmKg"]?.GetValue<decimal>() > 0)) Issue("VGM_REQUIRED", $"{number}: thiếu VGM hợp lệ từ hồ sơ nguồn.", "lines", line.SourceContainerId);
                 if (string.IsNullOrWhiteSpace(S(container, "sealNumber"))) Issue("SEAL_REQUIRED", $"{number}: thiếu seal từ hồ sơ nguồn.", "lines", line.SourceContainerId);
-                if (state?["customsCleared"]?.GetValue<bool>() != true)
+                if (state?["customsCleared"]?.GetValue<bool>() != true && !HasCustomsConfirmation(G(draft, "id"), input))
                     Issue("CUSTOMS_BEFORE_GATE", $"{number}: chưa ghi nhận thông quan; bắt buộc kiểm tra lại trước khi qua cổng/xếp tàu.", "lines", line.SourceContainerId, warning: true);
             }
             var size = Size(container, state);
@@ -270,12 +277,10 @@ public sealed partial class ServiceDraftService
                         Issue("USAGE_BEFORE_PLANNED", $"{number}: thời gian dịch vụ không được trước thời gian thực hiện dự kiến.", "lines.services.startsAt", line.SourceContainerId, usage.ServiceId);
                 }
                 decimal? quantity = usage.Quantity;
-                var billingNote = "Theo số lượt đã đăng ký.";
-                if (unit == "CONTAINER") { quantity = 1; billingNote = "Một đơn vị cho mỗi container được chọn."; }
+                if (unit == "CONTAINER") quantity = 1;
                 if (unit is "HOUR" or "DAY")
                 {
                     quantity = null;
-                    billingNote = unit == "HOUR" ? "Thời lượng thực đăng ký; làm tròn lên 0,01 giờ." : "Mỗi 24 giờ hoặc phần lẻ được tính một ngày.";
                     if (start == null || end == null || end <= start) Issue("USAGE_TIME_REQUIRED", $"{number} — {S(service, "name")}: bổ sung giờ bắt đầu và kết thúc hợp lệ.", "lines.services", line.SourceContainerId, usage.ServiceId);
                     else
                     {
@@ -286,51 +291,21 @@ public sealed partial class ServiceDraftService
                 if (start != null && start < now) Issue("USAGE_TIME_PAST", $"{number}: thời gian bắt đầu dịch vụ đã qua.", "lines.services.startsAt", line.SourceContainerId, usage.ServiceId);
                 if (quantity == null || quantity <= 0 || quantity > 10000 || (unit != "HOUR" && quantity != decimal.Truncate(quantity.Value)))
                     Issue("QUANTITY_REQUIRED", $"{number} — {S(service, "name")}: cần số đơn vị hợp lệ, tối đa 10.000.", "lines.services.quantity", line.SourceContainerId, usage.ServiceId);
-                // Non-duration services use the validated appointment date. A
-                // client timestamp on a container/move cannot select another rate.
-                var pricingInstant = unit is "HOUR" or "DAY" ? start ?? planned ?? now : planned ?? now;
-                var pricingDate = TimeZoneInfo.ConvertTime(pricingInstant, PortZone).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                var candidates = tariffs.Where(rate => G(rate, "serviceId") == usage.ServiceId && S(rate, "unit") == unit && S(rate, "currency") == "VND"
-                    && string.CompareOrdinal(S(rate, "effectiveFrom"), pricingDate) <= 0 && (rate["effectiveTo"] == null || string.CompareOrdinal(S(rate, "effectiveTo"), pricingDate) >= 0)
-                    && (S(rate, "size") == "ALL" || S(rate, "size") == size) && (S(rate, "equipment") == "ALL" || S(rate, "equipment") == equipment))
-                    .OrderByDescending(rate => (S(rate, "size") == size ? 10 : 0) + (S(rate, "equipment") == equipment ? 1 : 0)).ToArray();
-                var rate = candidates.FirstOrDefault();
-                if (size == "" || equipment == "") rate = null;
-                if (rate == null) Issue("TARIFF_MISSING", $"{number} — {S(service, "name")}: chưa có biểu phí phù hợp ngày {pricingDate}.", "lines.services", line.SourceContainerId, usage.ServiceId);
-                else if (candidates.Length > 1 && S(candidates[0], "size") == S(candidates[1], "size") && S(candidates[0], "equipment") == S(candidates[1], "equipment"))
-                    Issue("TARIFF_AMBIGUOUS", "Có nhiều biểu phí cùng mức ưu tiên đang chồng hiệu lực; cần quản trị viên kiểm tra.", "lines.services", line.SourceContainerId, usage.ServiceId);
-                var price = rate?["amount"]?.GetValue<decimal>();
-                decimal? amount = price.HasValue && quantity.HasValue && quantity > 0 && quantity <= 10000
-                    ? decimal.Round(price.Value * quantity.Value, 0, MidpointRounding.AwayFromZero) : null;
-                if (amount > MaxBrowserInteger)
-                {
-                    Issue("AMOUNT_TOO_LARGE", $"{number} — {S(service, "name")}: số tiền vượt giới hạn hiển thị chính xác. Kiểm tra lại số lượng và biểu phí.", "lines.services", line.SourceContainerId, usage.ServiceId);
-                    amount = null;
-                }
-                fees.Add(new JsonObject
-                {
-                    ["sourceContainerId"] = line.SourceContainerId, ["containerNumber"] = number,
-                    ["serviceId"] = usage.ServiceId, ["serviceName"] = S(service, "name"), ["serviceCode"] = code,
-                    ["unit"] = unit, ["quantity"] = quantity, ["unitPrice"] = price,
-                    ["amount"] = amount,
-                    ["tariffId"] = rate?["id"]?.DeepClone(), ["size"] = size, ["equipment"] = equipment,
-                    ["pricingDate"] = pricingDate, ["startsAt"] = usage.StartsAt, ["endsAt"] = usage.EndsAt,
-                    ["billingNote"] = billingNote, ["requiresApproval"] = service["requiresApproval"]!.GetValue<bool>() || code is "REEFER_POWER" or "YARD_RELOCATION" or "STORAGE_EXTENSION" or "CONTAINER_WEIGH",
-                    ["tariffSnapshot"] = rate?.DeepClone()
-                });
+
             }
         }
-        var subtotal = fees.Sum(fee => fee?["amount"]?.GetValue<decimal>() ?? 0);
-        if (subtotal > MaxBrowserInteger)
-            Issue("AMOUNT_TOO_LARGE", "Tổng số tiền vượt giới hạn hiển thị chính xác. Cần kiểm tra lại số lượng và biểu phí.", "fees");
+        if (deliverySchema)
+            foreach (var issue in await DeliveryIssues(G(draft, "id"), input, company, byContainer, byService, byOperational, ct)) issues.Add(issue!.DeepClone());
+        else if (input.WorkflowVersion == 2) Issue("DELIVERY_SCHEMA_REQUIRED", "Cần triển khai migration 20261110_041 để xác thực email và đăng ký giao nhận.", "workflowVersion");
+        foreach (var issue in await FleetIssues(input, company, source, ct)) issues.Add(issue!.DeepClone());
         var canConfirm = !issues.Any(issue => S(issue, "severity") == "ERROR");
-        var allPriced = fees.Count > 0 && fees.All(fee => fee?["amount"] != null) && fees.Count == input.Lines.Sum(line => line.Services.Length);
         var validation = new JsonObject
         {
             ["draftId"] = draft["id"]!.DeepClone(), ["draftVersion"] = draft["version"]!.DeepClone(),
             ["status"] = canConfirm ? "READY" : "INCOMPLETE", ["canConfirm"] = canConfirm,
-            ["currency"] = "VND", ["taxIncluded"] = false, ["subtotal"] = subtotal <= MaxBrowserInteger ? subtotal : null,
-            ["total"] = allPriced && subtotal <= MaxBrowserInteger ? subtotal : null,
+            ["pricingMode"] = "DISPATCHER", ["pricingStatus"] = "AWAITING",
+            ["currency"] = "VND", ["taxIncluded"] = false, ["subtotal"] = null,
+            ["total"] = null,
             ["issues"] = issues, ["fees"] = fees, ["requiresApproval"] = needsApproval,
             ["content"] = draft["content"]!.DeepClone(), ["sourceSnapshot"] = source,
             ["mainServiceName"] = input.MainServiceId.HasValue && byService.TryGetValue(input.MainServiceId.Value, out var selectedMain) ? S(selectedMain, "name") : null,
@@ -338,8 +313,7 @@ public sealed partial class ServiceDraftService
             ["serviceSnapshots"] = new JsonArray(services.Select(row => (JsonNode)row.DeepClone()).ToArray()),
             ["operationalSnapshots"] = new JsonArray(operational.Select(row => (JsonNode)row.DeepClone()).ToArray())
         };
-        // The token binds the reviewed content, latest source state, service rules,
-        // exact selected tariffs and computed charges. No client price is accepted.
+        // This token binds the reviewed submission and source conditions, not a price.
         var token = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(validation.ToJsonString())));
         validation["quoteToken"] = canConfirm ? token : null;
         validation["checkedAt"] = now;
@@ -357,7 +331,6 @@ public sealed partial class ServiceDraftService
         if (serviceIds.Length > 0)
         {
             await Rows("SELECT id FROM eport_services WHERE id=ANY(@p0) ORDER BY id FOR SHARE", ct, serviceIds);
-            await Rows("SELECT id FROM eport_tariffs WHERE service_id=ANY(@p0) ORDER BY id FOR SHARE", ct, serviceIds);
         }
         if (ids.Length == 0) return;
         if (input.Flow == "EXPORT")
@@ -382,7 +355,7 @@ public sealed partial class ServiceDraftService
     public async Task<JsonObject> ConfirmRegistration(Guid id, ServiceConfirmationInput request, CancellationToken ct)
     {
         Require(!string.IsNullOrWhiteSpace(request.QuoteToken) && Regex.IsMatch(request.QuoteToken, "^[A-Fa-f0-9]{64}$"),
-            "Kiểm tra hồ sơ và xem phí trước khi xác nhận.", 422, "SERVICE_QUOTE_REQUIRED");
+            "Kiểm tra hồ sơ trước khi gửi Dispatcher.", 422, "SERVICE_QUOTE_REQUIRED");
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await Rows("SELECT id FROM users WHERE id=@p0 FOR SHARE", ct, Actor);
         await Rows("SELECT carrier_id FROM carrier_users WHERE user_id=@p0 FOR SHARE", ct, Actor);
@@ -402,16 +375,18 @@ public sealed partial class ServiceDraftService
         Require(validation["canConfirm"]!.GetValue<bool>(), "Hồ sơ chưa đủ điều kiện. Kiểm tra lại các thông tin còn thiếu.", 422, "SERVICE_REGISTRATION_INCOMPLETE");
         Require(string.Equals(S(validation, "quoteToken"), request.QuoteToken, StringComparison.OrdinalIgnoreCase),
             "Hồ sơ nguồn, điều kiện hoặc biểu phí đã thay đổi. Kiểm tra lại và xem số tiền mới trước khi xác nhận.", 409, "SERVICE_QUOTE_CHANGED");
-        var total = validation["total"]!.GetValue<decimal>();
+        // Registration contains no charge. The separate, immutable dispatcher bill
+        // is the only payment authority for this workflow (migration 042).
+        decimal? total = null;
         var snapshot = validation.DeepClone().AsObject();
         foreach (var key in new[] { "canConfirm", "quoteToken", "registration", "checkedAt", "status" }) snapshot.Remove(key);
         snapshot["draftNumber"] = draft["number"]!.DeepClone();
-        var status = validation["requiresApproval"]!.GetValue<bool>() ? "PENDING_APPROVAL" : "CONFIRMED";
+        var status = "PENDING_APPROVAL";
         await Exec("""
             INSERT INTO eport_service_registrations(id,draft_id,carrier_id,confirmed_by,number,draft_version,quote_token,status,payment_status,total,snapshot)
             VALUES(@p0,@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,CAST(@p9 AS jsonb))
             """, ct, id, company, Actor, "DV-" + id.ToString("N").ToUpperInvariant(), request.ExpectedVersion, S(validation, "quoteToken"),
-            status, total == 0 ? "NOT_REQUIRED" : "UNPAID", total, snapshot.ToJsonString());
+            status, "UNPAID", total, snapshot.ToJsonString());
         var saved = await FindRegistration(id, ct);
         await tx.CommitAsync(ct);
         return RegistrationDetail(saved!);

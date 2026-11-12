@@ -39,6 +39,50 @@ export const createContainerSchema = z.object({
   expectedGateOutAt: nullableDateTime,
 });
 
+const isoSizeType = z.string().trim().toUpperCase().regex(/^[A-Z0-9]{2}[A-Z][A-Z0-9]$/, 'Nhập mã ISO kích thước và loại gồm 4 ký tự.');
+const dimension = z.number().int().positive().max(99999);
+const mass = z.number().positive().max(999999.99).multipleOf(0.01);
+
+export const registerContainerIdentitySchema = createContainerSchema.pick({
+  containerNumber: true,
+  containerTypeId: true,
+}).partial({ containerTypeId: true }).extend({
+  isoSizeType,
+  equipmentDescription: z.string().trim().min(1).max(250).optional(),
+  externalLengthMm: dimension.optional(),
+  externalWidthMm: dimension.optional(),
+  externalHeightMm: dimension.optional(),
+  tareWeightKg: mass,
+  maxGrossMassKg: mass,
+  capacityM3: z.number().positive().max(9999.999).multipleOf(0.001).optional(),
+  manufacturer: z.string().trim().min(1).max(150).optional(),
+}).strict().refine(input => input.maxGrossMassKg > input.tareWeightKg, {
+  path: ['maxGrossMassKg'],
+  message: 'Khối lượng toàn bộ tối đa phải lớn hơn khối lượng vỏ.',
+});
+
+export const containerIdentityPageSchema = z.object({
+  page: z.coerce.number().int().min(1).max(10000).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+}).strict();
+
+export const ownContainerIdentitySearchSchema = containerIdentityPageSchema.extend({
+  containerNumber: z.string().transform(normalizeContainerNumber).refine(number => /^[A-Z0-9]{4,11}$/.test(number),
+    'Nhập số Container từ 4 đến 11 ký tự để tìm kiếm.').optional(),
+  prefix: z.string().trim().toUpperCase().regex(/^[A-Z]{3}[UJZ]$/, 'Tiền tố BIC không hợp lệ.').optional(),
+  containerTypeId: z.string().uuid().optional(),
+  isoSizeType: isoSizeType.optional(),
+  size: z.enum(CONTAINER_SIZES).optional(),
+  category: z.enum(CONTAINER_CATEGORIES).optional(),
+  manufacturer: z.string().trim().min(1).max(150).optional(),
+  minPayloadKg: z.coerce.number().positive().max(999999.99).optional(),
+});
+
+export const containerIdentitySearchSchema = ownContainerIdentitySearchSchema.strip().extend({
+  shippingLineId: z.string().uuid().optional(),
+}).refine(({ page, limit, ...filters }) => Object.values(filters).some(Boolean),
+  'Nhập số container hoặc chọn ít nhất một bộ lọc.');
+
 export const updateContainerSchema = createContainerSchema.partial().extend({
   arrivedAt: nullableDateTime,
   leftAt: nullableDateTime,

@@ -1,9 +1,13 @@
 'use strict';
 
 const { Router } = require('express');
+const { ROLES } = require('../../config/rbac');
+const { authenticate } = require('../../middlewares/authenticate');
+const { authorize } = require('../../middlewares/authorize');
 const shippingLineService = require('./shippingLine.service');
 
 const router = Router();
+const manifestWriter = [authenticate, authorize(ROLES.SHIPPING_LINE)];
 
 // Wrapper async handler
 const asyncHandler = (fn) => (req, res, next) => {
@@ -11,7 +15,7 @@ const asyncHandler = (fn) => (req, res, next) => {
 };
 
 // 0. Seed / Reset dữ liệu mẫu
-router.post('/seed/reset', asyncHandler(async (_req, res) => {
+router.post('/seed/reset', ...manifestWriter, asyncHandler(async (_req, res) => {
   const data = await shippingLineService.resetSeedData();
   res.json({
     success: true,
@@ -70,20 +74,20 @@ router.get('/manifests/:id', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
-router.post('/manifests', asyncHandler(async (req, res) => {
-  const user = req.user ? req.user.username : 'shipping01';
+router.post('/manifests', ...manifestWriter, asyncHandler(async (req, res) => {
+  const user = req.user.username;
   const data = await shippingLineService.createManifest(req.body, user);
   res.status(201).json({ success: true, message: 'Lưu bản khai Manifest thành công', data });
 }));
 
-router.post('/manifests/:id/resolve-exception', asyncHandler(async (req, res) => {
-  const user = req.user ? req.user.username : 'shipping01';
+router.post('/manifests/:id/resolve-exception', ...manifestWriter, asyncHandler(async (req, res) => {
+  const user = req.user.username;
   const { recordId, ...updatedData } = req.body;
   const data = await shippingLineService.resolveManifestException(req.params.id, recordId, updatedData, user);
   res.json({ success: true, message: 'Xử lý ngoại lệ container thành công', data });
 }));
 
-router.post('/manifests/:id/reconcile', asyncHandler(async (req, res) => {
+router.post('/manifests/:id/reconcile', ...manifestWriter, asyncHandler(async (req, res) => {
   const data = await shippingLineService.reconcileManifest(req.params.id);
   res.json({ success: true, message: 'Đối soát Manifest với dữ liệu cảng thành công', data });
 }));

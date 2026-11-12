@@ -42,6 +42,7 @@ export interface TransportContainerDeclaration {
     }[];
     containerId: string;
     containerNumber: string;
+    containerTypeId: string;
     containerTypeCode: string;
     containerTypeDescription: string | null;
     sealNumber: string | null;

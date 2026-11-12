@@ -91,7 +91,7 @@ export class ContainerIntakeRepository {
     }
     async listTransportDeclarations(userId: string, containerNumber = ''): Promise<TransportContainerDeclaration[]> {
         const result = await query(`SELECT cv.id, EXISTS(SELECT 1 FROM booking_containers bc WHERE bc.declaration_id=cv.id) AS "isBooked", c.id AS "containerId", c.container_no AS "containerNumber",
-              ct.code AS "containerTypeCode", ct.description AS "containerTypeDescription",
+              ct.id AS "containerTypeId", ct.code AS "containerTypeCode", ct.description AS "containerTypeDescription",
               cv.seal_number AS "sealNumber", cv.load_status AS "loadStatus", cv.cargo_type AS "cargoType", cargo.name_vi AS "cargoTypeName",
               cv.gross_weight_kg::float8 AS "grossWeightKg", cv.required_power_kw::float8 AS "requiredPowerKw",
               cv.customer_name AS "customerName",
