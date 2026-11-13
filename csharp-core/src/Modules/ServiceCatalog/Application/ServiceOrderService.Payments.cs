@@ -83,7 +83,30 @@ public sealed partial class ServiceOrderService
         => new { payment = PaymentView(payment, order, company), orderVersion = order["version"]!.GetValue<int>(), paymentStatus = S(order, "paymentStatus"), paymentReviewRequired = PaymentReviewRequired(order) };
 
     private async Task PaymentState(Guid id, string paymentStatus, CancellationToken ct)
-        => await Exec("UPDATE eport_service_order_states SET payment_status=@p1,version=version+1,updated_at=now() WHERE draft_id=@p0", ct, id, paymentStatus);
+    {
+        await Exec("UPDATE eport_service_order_states SET payment_status=@p1,version=version+1,updated_at=now() WHERE draft_id=@p0", ct, id, paymentStatus);
+        await Exec("UPDATE eport_service_registrations SET payment_status=@p1 WHERE draft_id=@p0", ct, id, paymentStatus);
+        if (paymentStatus == "PAID" && (await Rows("SELECT to_regclass('port.event_outbox') IS NOT NULL AS ready", ct))[0]["ready"]!.GetValue<bool>())
+        {
+            var info = (await Rows("SELECT d.flow, d.carrier_id AS \"carrierId\", COALESCE(r.number, d.number) AS number, COALESCE(d.source_snapshot->>'bookingNumber', d.content->'source'->>'referenceNumber', '') AS ref FROM eport_service_drafts d LEFT JOIN eport_service_registrations r ON r.draft_id=d.id WHERE d.id=@p0", ct, id)).FirstOrDefault();
+            var bookingRef = S(info, "ref");
+            var payload = new JsonObject
+            {
+                ["eventId"] = Guid.NewGuid().ToString(),
+                ["eventType"] = "ServiceOrderPaid",
+                ["orderId"] = id.ToString(),
+                ["registrationNumber"] = S(info, "number"),
+                ["carrierId"] = S(info, "carrierId"),
+                ["flow"] = S(info, "flow"),
+                ["bookingOrEdo"] = bookingRef,
+                ["paidAt"] = DateTimeOffset.UtcNow
+            };
+            await Exec("""
+                INSERT INTO port.event_outbox("Id","EventType","BookingNo","PayloadJson","Status","Attempts","CreatedAt")
+                VALUES(@p0,'ServiceOrderPaid',@p1,@p2,0,0,now())
+                """, ct, Guid.NewGuid(), bookingRef, payload.ToJsonString());
+        }
+    }
 
     private static JsonObject PaymentEventData(JsonObject payment) => new()
     {

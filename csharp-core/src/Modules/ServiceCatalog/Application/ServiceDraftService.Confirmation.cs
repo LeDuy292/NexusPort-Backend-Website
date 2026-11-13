@@ -240,6 +240,8 @@ public sealed partial class ServiceDraftService
             if (state == null || string.IsNullOrEmpty(physical)) Issue("CONTAINER_STATE_UNKNOWN", $"{number}: chưa xác định được trạng thái container.", "lines", line.SourceContainerId);
             else if (physical is "hold" or "customshold" or "inactive" or "blocked" or "damagedunsafe")
                 Issue("CONTAINER_ON_HOLD", $"{number}: container đang bị giữ, khóa hoặc không an toàn.", "lines", line.SourceContainerId);
+            if (container["hasActiveOrder"]?.GetValue<bool>() == true)
+                Issue("CONTAINER_ACTIVE_ORDER", $"{number}: container đang có một lệnh dịch vụ mở. Mỗi container chỉ có một lệnh đang mở.", "lines", line.SourceContainerId);
             if (input.Flow == "EXPORT")
             {
                 if (!(container["vgmKg"]?.GetValue<decimal>() > 0)) Issue("VGM_REQUIRED", $"{number}: thiếu VGM hợp lệ từ hồ sơ nguồn.", "lines", line.SourceContainerId);
@@ -382,11 +384,33 @@ public sealed partial class ServiceDraftService
         foreach (var key in new[] { "canConfirm", "quoteToken", "registration", "checkedAt", "status" }) snapshot.Remove(key);
         snapshot["draftNumber"] = draft["number"]!.DeepClone();
         var status = "PENDING_APPROVAL";
+        var regNumber = "DV-" + id.ToString("N").ToUpperInvariant();
         await Exec("""
             INSERT INTO eport_service_registrations(id,draft_id,carrier_id,confirmed_by,number,draft_version,quote_token,status,payment_status,total,snapshot)
             VALUES(@p0,@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,CAST(@p9 AS jsonb))
-            """, ct, id, company, Actor, "DV-" + id.ToString("N").ToUpperInvariant(), request.ExpectedVersion, S(validation, "quoteToken"),
+            """, ct, id, company, Actor, regNumber, request.ExpectedVersion, S(validation, "quoteToken"),
             status, "UNPAID", total, snapshot.ToJsonString());
+        if ((await Rows("SELECT to_regclass('port.event_outbox') IS NOT NULL AS ready", ct))[0]["ready"]!.GetValue<bool>())
+        {
+            var bookingRef = S(snapshot["sourceSnapshot"], "bookingNumber");
+            if (string.IsNullOrEmpty(bookingRef)) bookingRef = S(snapshot["content"]?["source"], "referenceNumber");
+            var outboxPayload = new JsonObject
+            {
+                ["eventId"] = Guid.NewGuid().ToString(),
+                ["eventType"] = "ServiceOrderSubmitted",
+                ["version"] = request.ExpectedVersion,
+                ["orderId"] = id.ToString(),
+                ["registrationNumber"] = regNumber,
+                ["carrierId"] = company.ToString(),
+                ["flow"] = S(draft, "flow"),
+                ["bookingOrEdo"] = bookingRef,
+                ["submittedAt"] = DateTimeOffset.UtcNow
+            };
+            await Exec("""
+                INSERT INTO port.event_outbox("Id","EventType","BookingNo","PayloadJson","Status","Attempts","CreatedAt")
+                VALUES(@p0,'ServiceOrderSubmitted',@p1,@p2,0,0,now())
+                """, ct, Guid.NewGuid(), bookingRef, outboxPayload.ToJsonString());
+        }
         var saved = await FindRegistration(id, ct);
         await tx.CommitAsync(ct);
         return RegistrationDetail(saved!);
