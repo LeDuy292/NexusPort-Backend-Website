@@ -12,21 +12,29 @@ function resolveConnectionString(): string {
   if (aivenHost && aivenUser && aivenPass) {
     const aivenPort = process.env.AIVEN_DB_PORT || '20134';
     const aivenDb = process.env.AIVEN_DB_NAME || 'defaultdb';
-    return `postgresql://${encodeURIComponent(aivenUser)}:${encodeURIComponent(aivenPass)}@${aivenHost}:${aivenPort}/${aivenDb}?sslmode=${process.env.AIVEN_DB_SSLMODE || 'require'}`;
+    return `postgresql://${encodeURIComponent(aivenUser)}:${encodeURIComponent(aivenPass)}@${aivenHost}:${aivenPort}/${aivenDb}`;
   }
 
   return 'postgresql://postgres:120104@localhost:5432/nexusport';
 }
 
-const connectionString = resolveConnectionString();
+const rawConnectionString = resolveConnectionString();
+// Strip sslmode from query string to prevent pg-connection-string from forcing strict SSL verification
+const connectionString = rawConnectionString
+  .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
+  .replace(/([?&])uselibpqcompat=[^&]+(&|$)/, '$1')
+  .replace(/[?&]$/, '');
+
 const isSslRequired =
   process.env.DB_SSL === 'true' ||
   process.env.DB_TARGET === 'aiven' ||
-  (connectionString.includes('sslmode=') && !connectionString.includes('sslmode=disable'));
+  Boolean(process.env.AIVEN_DB_HOST) ||
+  rawConnectionString.includes('aivencloud.com') ||
+  (rawConnectionString.includes('sslmode=') && !rawConnectionString.includes('sslmode=disable'));
 
 const pool = new Pool({
   connectionString,
-  max: Number(process.env.DB_POOL_MAX || 2),
+  max: Number(process.env.DB_POOL_MAX || 5),
   idleTimeoutMillis: 10000,
   connectionTimeoutMillis: 10000,
   ...(isSslRequired ? { ssl: { rejectUnauthorized: false } } : {}),
