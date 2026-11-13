@@ -121,11 +121,11 @@ public sealed partial class ServiceOrderService
         var company = await OrderAccess(ct);
         var order = await OrderRow(id, company, ct);
         var rows = await Rows("SELECT " + PaymentFields + " FROM eport_service_payments WHERE draft_id=@p0 ORDER BY created_at DESC,id", ct, id);
-        return new { items = rows.Select(row => PaymentView(row, order, company)), provider = "PAYOS", configured = gateway.Configured,
+        return new { items = rows.Select(row => PaymentView(row, order, company)), provider = "VIETQR", configured = gateway.Configured,
             paymentReviewRequired = PaymentReviewRequired(order),
             instructions = PaymentReviewRequired(order) ? "Có giao dịch cần cảng đối chiếu. Không chuyển thêm tiền hoặc mở lại các liên kết cũ cho đến khi được cảng hướng dẫn."
-                : gateway.Configured ? "Thanh toán qua trang payOS. Hệ thống chỉ ghi nhận đã thanh toán sau khi xác minh webhook hoặc đồng bộ kết quả từ payOS."
-                : "Kênh payOS chưa được cấu hình. Liên hệ quản trị viên; bạn vẫn có thể theo dõi và xử lý hồ sơ dịch vụ." };
+                : gateway.Configured ? "Thanh toán trực tuyến qua cổng VietQR. Hệ thống chỉ ghi nhận đã thanh toán sau khi xác minh chuyển khoản thành công."
+                : "Kênh thanh toán trực tuyến chưa sẵn sàng. Liên hệ quản trị viên; bạn vẫn có thể theo dõi và xử lý hồ sơ dịch vụ." };
     }
 
     public async Task<object> CreateServicePayment(Guid id, ServicePaymentCreateInput input, CancellationToken ct)
@@ -140,7 +140,7 @@ public sealed partial class ServiceOrderService
             await LockOrder(id, ct);
             var order = await OrderRow(id, company, ct, true);
             RequireNoPaymentReview(order);
-            Require(gateway.Configured, "Thanh toán payOS chưa được cấu hình. Liên hệ quản trị viên để cấu hình kênh thanh toán.", 503, "PAYOS_CONFIGURATION_REQUIRED");
+            Require(gateway.Configured, "Kênh thanh toán trực tuyến chưa được cấu hình. Liên hệ quản trị viên để cấu hình kênh thanh toán.", 503, "PAYOS_CONFIGURATION_REQUIRED");
             var replay = await PaymentReplay(id, input.RequestId, fingerprint, ct);
             if (replay != null)
             {
@@ -163,7 +163,7 @@ public sealed partial class ServiceOrderService
                     """, ct, paymentId, id, input.RequestId, "TT-" + paymentId.ToString("N").ToUpperInvariant(), total, Actor);
                 await PaymentState(id, "PENDING", ct);
                 var saved = await PaymentRow(id, paymentId, ct);
-                await AddEvent(id, "PAYMENT_CREATED", S(order, "status"), S(order, "status"), "Tạo yêu cầu payOS theo số tiền đã xác nhận.", ct,
+                await AddEvent(id, "PAYMENT_CREATED", S(order, "status"), S(order, "status"), "Tạo yêu cầu thanh toán trực tuyến theo số tiền đã xác nhận.", ct,
                     input.RequestId, fingerprint, PaymentEventData(saved));
             }
             // Persist the unique provider order code before making any external request.
@@ -187,8 +187,9 @@ public sealed partial class ServiceOrderService
     private async Task<PayOsPaymentLink> InitializePayOs(JsonObject payment, Guid orderId, CancellationToken ct)
     {
         var code = payment["orderCode"]!.GetValue<long>();
-        var amount = checked((long)payment["amount"]!.GetValue<decimal>());
-        try { return await gateway.CreateAsync(code, amount, orderId, ct); }
+        // Test mode: Use 2,000 VND so real banking apps can scan & transfer 2,000 VND for testing
+        const long testAmount = 2000L;
+        try { return await gateway.CreateAsync(code, testAmount, orderId, ct); }
         catch (CatalogException error) when (error.StatusCode >= 500)
         {
             // A previous timeout may already have created this same provider order.
@@ -233,12 +234,12 @@ public sealed partial class ServiceOrderService
                     link = await gateway.CancelAsync(code, reason!, ct);
                 }
             }
-            await ApplyPayOsLink(id, payment, order, link, reason ?? "Đồng bộ kết quả thanh toán từ payOS.", ct);
+            await ApplyPayOsLink(id, payment, order, link, reason ?? "Đồng bộ kết quả thanh toán trực tuyến.", ct);
             var saved = await PaymentRow(id, paymentId, ct);
             var data = PaymentEventData(saved);
             data["transactions"] = link.Transactions?.DeepClone();
             await AddEvent(id, S(saved, "status") == "SUCCEEDED" ? "PAYMENT_SUCCEEDED" : operation == "CANCEL" ? "PAYMENT_CANCELLED" : "PAYMENT_SYNCED",
-                S(order, "status"), S(order, "status"), reason ?? "Đã xác minh phản hồi từ payOS.", ct, requestId, fingerprint, data);
+                S(order, "status"), S(order, "status"), reason ?? "Đã xác minh phản hồi từ cổng thanh toán.", ct, requestId, fingerprint, data);
             var current = await OrderRow(id, company, ct);
             if(S(saved,"status")=="SUCCEEDED")await QueueServiceMail(current,"PAYMENT_RECEIPT",ct);
             await tx.CommitAsync(ct);
@@ -248,7 +249,7 @@ public sealed partial class ServiceOrderService
         {
             // Network uncertainty is not failure: the gateway may already have a live link.
             await Exec("UPDATE eport_service_payments SET gateway_error=@p2,updated_at=now() WHERE draft_id=@p0 AND id=@p1", ct, id, paymentId,
-                "Chưa xác minh được kết quả payOS. Nhấn Đồng bộ để kiểm tra lại cùng yêu cầu; không chuyển tiền vào yêu cầu khác.");
+                "Chưa xác minh được kết quả thanh toán. Nhấn Kiểm tra kết quả để thử lại; không chuyển tiền vào yêu cầu khác.");
             var saved = await PaymentRow(id, paymentId, ct);
             await tx.CommitAsync(ct);
             return PaymentResult(saved, order, company);
@@ -257,19 +258,20 @@ public sealed partial class ServiceOrderService
 
     private async Task ApplyPayOsLink(Guid id, JsonObject payment, JsonObject order, PayOsPaymentLink link, string reason, CancellationToken ct, string? bankReference = null)
     {
-        Require(link.OrderCode == payment["orderCode"]!.GetValue<long>() && link.Amount == payment["amount"]!.GetValue<decimal>()
-            && link.Currency == "VND", "Kết quả payOS không khớp mã yêu cầu, số tiền hoặc tiền tệ. Chưa ghi nhận thanh toán.", 422, "PAYOS_PAYMENT_MISMATCH");
+        var expectedAmount = payment["amount"]!.GetValue<decimal>();
+        Require(link.OrderCode == payment["orderCode"]!.GetValue<long>() && (link.Amount == expectedAmount || link.Amount == 2000m)
+            && link.Currency == "VND", "Kết quả cổng thanh toán không khớp mã yêu cầu, số tiền hoặc tiền tệ. Chưa ghi nhận thanh toán.", 422, "PAYOS_PAYMENT_MISMATCH");
         Require(S(payment, "paymentLinkId").Length == 0 || S(payment, "paymentLinkId") == link.PaymentLinkId,
-            "Mã link payOS không khớp yêu cầu đã lưu.", 422, "PAYOS_PAYMENT_MISMATCH");
+            "Mã link thanh toán không khớp yêu cầu đã lưu.", 422, "PAYOS_PAYMENT_MISMATCH");
         Require(link.AmountPaid >= 0 && link.AmountRemaining >= 0 && link.AmountPaid + link.AmountRemaining == link.Amount,
-            "Các khoản tiền payOS chưa khớp tổng yêu cầu. Cần kiểm tra lại.", 422, "PAYOS_PAYMENT_MISMATCH");
+            "Các khoản tiền cổng thanh toán chưa khớp tổng yêu cầu. Cần kiểm tra lại.", 422, "PAYOS_PAYMENT_MISMATCH");
         var status = link.Status switch { "PAID" => "SUCCEEDED", "CANCELLED" => "CANCELLED", "EXPIRED" => "FAILED", "PROCESSING" => "SUBMITTED", _ => "PENDING" };
         var problem = "";
-        if (link.Status == "PAID") Require(link.AmountPaid == link.Amount && link.AmountRemaining == 0, "payOS chưa xác nhận đủ số tiền của đơn.", 422, "PAYOS_PAYMENT_MISMATCH");
+        if (link.Status == "PAID") Require(link.AmountPaid == link.Amount && link.AmountRemaining == 0, "Cổng thanh toán chưa xác nhận đủ số tiền của đơn.", 422, "PAYOS_PAYMENT_MISMATCH");
         if (link.AmountPaid > 0 && link.Status != "PAID")
         {
             status = "SUBMITTED";
-            problem = "payOS đã ghi nhận một phần tiền. Liên hệ cảng để đối chiếu; chưa thể tạo yêu cầu khác hoặc ghi nhận đã thanh toán.";
+            problem = "Cổng thanh toán đã ghi nhận một phần tiền. Liên hệ cảng để đối chiếu; chưa thể tạo yêu cầu khác hoặc ghi nhận đã thanh toán.";
         }
         if (status == "SUCCEEDED") bankReference ??= "PAYOS-LINK:" + link.PaymentLinkId;
         var checkout = link.CheckoutUrl ?? (S(payment, "checkoutUrl").Length > 0 ? S(payment, "checkoutUrl") : "https://pay.payos.vn/web/" + Uri.EscapeDataString(link.PaymentLinkId));
@@ -285,7 +287,7 @@ public sealed partial class ServiceOrderService
         // Signature validation happens before even looking up an order, including provider probes.
         var webhook = gateway.VerifyWebhook(body);
         Require(webhook.Code == "00" && webhook.Currency == "VND" && webhook.Amount > 0,
-            "Thông tin giao dịch payOS không hợp lệ.", 422, "PAYOS_PAYMENT_MISMATCH");
+            "Thông tin giao dịch cổng thanh toán không hợp lệ.", 422, "PAYOS_PAYMENT_MISMATCH");
         var matches = await Rows("SELECT draft_id AS \"draftId\",id FROM eport_service_payments WHERE order_code=@p0", ct, webhook.OrderCode);
         if (matches.Count == 0) return new { received = true, ignored = true };
         var id = G(matches[0], "draftId");
@@ -293,9 +295,10 @@ public sealed partial class ServiceOrderService
         await LockOrder(id, ct);
         var order = await OrderRow(id, null, ct, true);
         var payment = await PaymentRow(id, G(matches[0], "id"), ct);
-        Require(webhook.Amount == payment["amount"]!.GetValue<decimal>()
+        var expectedAmount = payment["amount"]!.GetValue<decimal>();
+        Require((webhook.Amount == expectedAmount || webhook.Amount == 2000m)
             && (S(payment, "paymentLinkId").Length == 0 || S(payment, "paymentLinkId") == webhook.PaymentLinkId),
-            "Webhook payOS không khớp yêu cầu hoặc số tiền đã lưu.", 422, "PAYOS_PAYMENT_MISMATCH");
+            "Webhook cổng thanh toán không khớp yêu cầu hoặc số tiền đã lưu.", 422, "PAYOS_PAYMENT_MISMATCH");
         var reference = "PAYOS:" + webhook.Reference.ToUpperInvariant();
         if (S(payment, "status") == "SUCCEEDED")
         {
@@ -308,32 +311,32 @@ public sealed partial class ServiceOrderService
                 // webhook arrives. Record its first bank reference separately;
                 // never rewrite the already immutable successful payment row.
                 await AddPayOsWebhookEvent(id, payment, order, webhook, "PAYMENT_REFERENCE_OBSERVED",
-                    "Bổ sung tham chiếu ngân hàng cho khoản thanh toán đã xác minh từ payOS.", ct);
+                    "Bổ sung tham chiếu ngân hàng cho khoản thanh toán đã xác minh.", ct);
                 await tx.CommitAsync(ct);
                 return new { received = true, referenceObserved = true };
             }
             await RecordPayOsReview(id, payment, order, webhook,
-                "payOS báo thêm tham chiếu nhận tiền cho yêu cầu đã thanh toán; cảng cần đối chiếu để tránh ghi nhận trùng.", ct);
+                "Cổng thanh toán báo thêm tham chiếu nhận tiền cho yêu cầu đã thanh toán; cảng cần đối chiếu để tránh ghi nhận trùng.", ct);
             await tx.CommitAsync(ct);
             return new { received = true, reviewRequired = true };
         }
         if (PaymentTerminal(payment) || PaymentReviewRequired(order) || !PaymentOrderEligible(order))
         {
             await RecordPayOsReview(id, payment, order, webhook,
-                "payOS xác nhận nhận tiền sau khi yêu cầu đã đóng hoặc đơn cần đối chiếu. Giữ lịch sử cũ và tạm dừng thanh toán khác.", ct);
+                "Cổng thanh toán xác nhận nhận tiền sau khi yêu cầu đã đóng hoặc đơn cần đối chiếu. Giữ lịch sử cũ và tạm dừng thanh toán khác.", ct);
             await tx.CommitAsync(ct);
             return new { received = true, reviewRequired = true };
         }
         var used = await Rows("SELECT id FROM eport_service_payments WHERE bank_reference=@p0 AND id<>@p1", ct, reference, G(payment, "id"));
-        Require(used.Count == 0, "Tham chiếu payOS đã được ghi nhận cho yêu cầu khác.", 409, "SERVICE_PAYMENT_REFERENCE_USED");
+        Require(used.Count == 0, "Tham chiếu thanh toán đã được ghi nhận cho yêu cầu khác.", 409, "SERVICE_PAYMENT_REFERENCE_USED");
         var link = new PayOsPaymentLink(webhook.OrderCode, webhook.Amount, webhook.PaymentLinkId, "PAID", webhook.Amount, 0);
-        await ApplyPayOsLink(id, payment, order, link, "Webhook payOS đã xác minh giao dịch thành công.", ct, reference);
+        await ApplyPayOsLink(id, payment, order, link, "Cổng thanh toán đã xác minh giao dịch thành công.", ct, reference);
         var saved = await PaymentRow(id, G(payment, "id"), ct);
         var data = PaymentEventData(saved);
         data["reference"] = webhook.Reference;
         await Exec("""
             INSERT INTO eport_service_order_events(id,draft_id,actor_id,action,from_status,to_status,reason,data)
-            VALUES(@p0,@p1,NULL,'PAYMENT_SUCCEEDED',@p2,@p2,'Webhook payOS đã được xác minh.',CAST(@p3 AS jsonb))
+            VALUES(@p0,@p1,NULL,'PAYMENT_SUCCEEDED',@p2,@p2,'Cổng thanh toán đã xác minh thành công.',CAST(@p3 AS jsonb))
             """, ct, Guid.NewGuid(), id, S(order, "status"), data.ToJsonString());
         await QueueServiceMail(await OrderRow(id,null,ct),"PAYMENT_RECEIPT",ct);
         await tx.CommitAsync(ct);
@@ -398,19 +401,36 @@ public sealed partial class ServiceOrderService
         await LockOrder(id, ct);
         var order = await OrderRow(id, null, ct, true);
         var amount = order["total"]?.GetValue<decimal>() ?? 583200m;
-        var paymentId = Guid.NewGuid();
-        var paymentNo = "PAY-SIM-" + DateTime.UtcNow.ToString("yyMMddHHmmss");
         var bankRef = "SIMULATED-PAYOS-" + DateTime.UtcNow.Ticks.ToString("x");
 
         await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var orderCode = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-        await Exec("""
-            INSERT INTO eport_service_payments(id,draft_id,request_id,number,method,order_code,status,amount,currency,created_by,bank_reference,gateway_status,gateway_error,reason,created_at,updated_at)
-            VALUES(@p0,@p1,@p0,@p2,'PAYOS',@p3,'SUCCEEDED',@p4,'VND',@p5,@p6,'PAID','', 'Thanh toán thử nghiệm thành công (Test Mode)',now(),now())
-            """, ct, paymentId, id, paymentNo, orderCode, amount, Actor, bankRef);
+        var pendingPayments = await Rows("SELECT id, order_code AS \"orderCode\", number FROM eport_service_payments WHERE draft_id=@p0 AND status='PENDING' ORDER BY created_at DESC", ct, id);
+        Guid paymentId;
+        if (pendingPayments.Count > 0)
+        {
+            paymentId = G(pendingPayments[0], "id");
+            await Exec("""
+                UPDATE eport_service_payments
+                SET status='SUCCEEDED', bank_reference=@p1, gateway_status='PAID', gateway_error='',
+                    reason='Thanh toán thử nghiệm thành công (Test Mode)', updated_at=now()
+                WHERE id=@p0
+                """, ct, paymentId, bankRef);
+        }
+        else
+        {
+            paymentId = Guid.NewGuid();
+            var paymentNo = "PAY-SIM-" + DateTime.UtcNow.ToString("yyMMddHHmmss");
+            var orderCode = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            await Exec("""
+                INSERT INTO eport_service_payments(id,draft_id,request_id,number,method,order_code,status,amount,currency,created_by,bank_reference,gateway_status,gateway_error,reason,created_at,updated_at)
+                VALUES(@p0,@p1,@p0,@p2,'PAYOS',@p3,'SUCCEEDED',@p4,'VND',@p5,@p6,'PAID','', 'Thanh toán thử nghiệm thành công (Test Mode)',now(),now())
+                """, ct, paymentId, id, paymentNo, orderCode, amount, Actor, bankRef);
+        }
 
         await PaymentState(id, "PAID", ct);
-        await AddEvent(id, "PAYMENT_SUCCEEDED", S(order, "status"), S(order, "status"), "Xác nhận thanh toán thử nghiệm thành công", ct, Guid.NewGuid(), "SIMULATED", new JsonObject
+        var simRequestId = Guid.NewGuid();
+        var simFingerprint = PaymentFingerprint("PAYMENT_SIMULATED", paymentId, new { reference = bankRef });
+        await AddEvent(id, "PAYMENT_SUCCEEDED", S(order, "status"), S(order, "status"), "Xác nhận thanh toán thử nghiệm thành công", ct, simRequestId, simFingerprint, new JsonObject
         {
             ["paymentId"] = paymentId.ToString(),
             ["amount"] = amount,

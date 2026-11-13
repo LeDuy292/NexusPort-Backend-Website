@@ -8,18 +8,25 @@ namespace NexusPort.Modules.ServiceCatalog.Application;
 public interface IServiceWorkflowEmail
 {
     Task SendCode(string email, string code, CancellationToken ct);
-    Task SendMessage(string email,string subject,string body,string attachmentName,string attachmentHtml,CancellationToken ct)
+    Task SendMessage(string email, string subject, string body, string attachmentName, string attachmentHtml, CancellationToken ct)
+        => throw new NotSupportedException("Order email delivery is not configured.");
+    Task SendMessage(string email, string subject, string body, string attachmentName, byte[]? attachmentBytes, string mimeType, bool isHtmlBody, CancellationToken ct)
         => throw new NotSupportedException("Order email delivery is not configured.");
 }
 
 /// <summary>Uses the existing EmailSettings; only successful SMTP delivery is reported as sent.</summary>
 public sealed class ServiceWorkflowEmail(IConfiguration configuration) : IServiceWorkflowEmail
 {
-    public Task SendCode(string email,string code,CancellationToken ct)=>Send(email,"NexusPort - Mã xác thực đăng ký giao nhận",
-        $"Mã xác thực đăng ký giao nhận của bạn là: {code}\nMã có hiệu lực trong 5 phút, tối đa 5 lần nhập. Không cung cấp mã này cho người khác.\nXác thực email không thay thế kiểm tra hiệu lực Booking/DO/eDO hoặc thông quan.",null,null,ct);
-    public Task SendMessage(string email,string subject,string body,string attachmentName,string attachmentHtml,CancellationToken ct)
-        =>Send(email,subject,body,attachmentName,attachmentHtml,ct);
-    private async Task Send(string email,string subject,string body,string? attachmentName,string? attachmentHtml,CancellationToken ct)
+    public Task SendCode(string email, string code, CancellationToken ct) => Send(email, "NexusPort - Mã xác thực đăng ký giao nhận",
+        $"Mã xác thực đăng ký giao nhận của bạn là: {code}\nMã có hiệu lực trong 5 phút, tối đa 5 lần nhập. Không cung cấp mã này cho người khác.\nXác thực email không thay thế kiểm tra hiệu lực Booking/DO/eDO hoặc thông quan.", null, null, null, false, ct);
+
+    public Task SendMessage(string email, string subject, string body, string attachmentName, string attachmentHtml, CancellationToken ct)
+        => Send(email, subject, body, attachmentName, attachmentHtml != null ? System.Text.Encoding.UTF8.GetBytes(attachmentHtml) : null, "text/html", false, ct);
+
+    public Task SendMessage(string email, string subject, string body, string attachmentName, byte[]? attachmentBytes, string mimeType, bool isHtmlBody, CancellationToken ct)
+        => Send(email, subject, body, attachmentName, attachmentBytes, mimeType, isHtmlBody, ct);
+
+    private async Task Send(string email, string subject, string body, string? attachmentName, byte[]? attachmentBytes, string? mimeType, bool isHtmlBody, CancellationToken ct)
     {
         var settings = configuration.GetSection("EmailSettings");
         var host = settings["SmtpHost"]; var sender = settings["SenderEmail"];
@@ -52,13 +59,16 @@ public sealed class ServiceWorkflowEmail(IConfiguration configuration) : IServic
         {
             From = new MailAddress(sender!, settings["SenderName"] ?? "NexusPort"),
             Subject = subject,
-            IsBodyHtml = false,
+            IsBodyHtml = isHtmlBody,
             Body = body,
             BodyEncoding = System.Text.Encoding.UTF8,
             SubjectEncoding = System.Text.Encoding.UTF8
         };
         message.To.Add(email);
-        if(attachmentHtml!=null)message.Attachments.Add(new Attachment(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(attachmentHtml)),attachmentName??"Chung-tu.html","text/html"));
+        if (attachmentBytes != null && attachmentBytes.Length > 0)
+        {
+            message.Attachments.Add(new Attachment(new MemoryStream(attachmentBytes), attachmentName ?? "Chung-tu.pdf", mimeType ?? "application/pdf"));
+        }
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(15));

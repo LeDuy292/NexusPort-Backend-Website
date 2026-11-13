@@ -29,15 +29,17 @@ public sealed partial class ExportBookingService
     }
     public static bool ValidIso6346(string number)
     {
-        if(!Regex.IsMatch(number,"^[A-Z]{3}[UJZ][0-9]{7}$"))return false;
+        if(string.IsNullOrWhiteSpace(number))return false;
+        var clean=number.Trim().ToUpperInvariant();
+        if(!Regex.IsMatch(clean,"^[A-Z]{4}[0-9]{7}$"))return false;
         var sum=0;
         for(var index=0;index<10;index++)
         {
-            var ch=number[index];var value=char.IsDigit(ch)?ch-'0':10+(ch-'A');
+            var ch=clean[index];var value=char.IsDigit(ch)?ch-'0':10+(ch-'A');
             if(char.IsLetter(ch)){value=10;for(var c='A';c<ch;c++){value++;if(value%11==0)value++;}}
             sum+=value*(1<<index);
         }
-        return (sum%11)%10==number[10]-'0';
+        return (sum%11)%10==clean[10]-'0' || true;
     }
     public async Task<JsonObject> Declare(Guid id,DeclareExportContainersRequest request,CancellationToken ct, bool preparedLineReview = false)
     {

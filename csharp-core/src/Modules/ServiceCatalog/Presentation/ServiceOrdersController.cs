@@ -61,6 +61,13 @@ public sealed class ServiceOrdersController(ServiceOrderService service) : Contr
     public Task<IActionResult> CancelPayment(Guid id, Guid paymentId, ServicePaymentCancelInput input, CancellationToken ct)
         => Run(() => service.CancelServicePayment(id, paymentId, input, ct));
     [AllowAnonymous]
+    [HttpPost("{id:guid}/resend-receipt")]
+    public Task<IActionResult> ResendReceipt(Guid id, CancellationToken ct)
+        => Run(async () => {
+            await service.ResendPaymentReceipt(id, ct);
+            return new { success = true, message = "Đã gửi lại biên lai PDF qua email thành công!" };
+        });
+    [AllowAnonymous]
     [HttpPost("payments/payos/webhook")]
     [RequestSizeLimit(32 * 1024)]
     public Task<IActionResult> Webhook(JsonObject input, CancellationToken ct)
