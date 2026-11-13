@@ -67,6 +67,12 @@ const local = process.env.DATABASE_URL === 'postgresql://postgres@127.0.0.1:5544
     const dto = manifestSchema.parse(input());
     const [a,b] = await Promise.all([repo.save(owner, dto), repo.save(owner, dto)]);
     expect(a.id).toBe(b.id);
+    const summary = (await repo.list(owner))[0];
+    expect(summary).toMatchObject({id:a.id,totalBills:1,totalContainers:1});
+    expect(summary).not.toHaveProperty('records');
+    expect(summary).not.toHaveProperty('bills');
+    expect(summary).not.toHaveProperty('blGroups');
+    expect(new Date(summary.createdAt).getTime()).toBe(new Date(a.createdAt).getTime());
     expect((await new ManifestRepository().detail(owner, a.id)).records[0].commodity).toBe('Cá đông lạnh');
     await expect(repo.detail(other, a.id)).rejects.toThrow();
     expect(await repo.list(other)).toEqual([]);
@@ -87,6 +93,8 @@ const local = process.env.DATABASE_URL === 'postgresql://postgres@127.0.0.1:5544
     await expect(repo.send(owner, a.id)).rejects.toThrow();
     const b = await repo.save(owner, { ...dto, revision: 1, isDraft: false }, a.id);
     expect(b.revision).toBe(2);
+    expect(new Date(b.createdAt).getTime()).toBe(new Date(a.createdAt).getTime());
+    expect(new Date((await repo.detail(owner,a.id)).createdAt).getTime()).toBe(new Date(a.createdAt).getTime());
     await expect(repo.save(owner, { ...dto, revision: 1 }, a.id)).rejects.toThrow('đã thay đổi');
     await repo.send(owner, a.id);
     expect((await repo.detail(owner, a.id)).status).toBe('SENT_TO_PORT');

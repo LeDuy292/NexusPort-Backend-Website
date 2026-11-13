@@ -107,6 +107,21 @@ the development dataset, not external verification of physical box markings.
 | POST | `/api/v1/shipping-line/manifests/:id/send-to-port` | Mark completed document as sent |
 | POST | `/api/v1/shipping-line/manifests/:id/recall` | Recall sent document |
 
+The list endpoint returns summary metadata only, including `createdAt`, bill count
+and container count; it does not transmit nested cargo/records. Detail responses
+include the full document. Both use the actual `shipping_manifests.created_at`,
+which is preserved when editing a draft. No schema migration is needed for this
+existing column. The original portal list/filter/pagination layout is retained.
+After saving, the portal returns to this list rather than jumping into details.
+Creation times display in Vietnam time. The viewing levels use shareable query
+parameters and support the browser Back button:
+
+- `/shipping-line/manifest`: summary list.
+- `?manifest=<id>`: Manifest metadata and B/L list.
+- `?manifest=<id>&bill=<number>`: B/L metadata and container list (10 per page).
+- `?manifest=<id>&bill=<number>&container=<number>`: full cargo description and
+  equipment/seal/weight details for that container.
+
 Create/update body:
 
 ```json
