@@ -96,6 +96,10 @@ User.init(
       defaultValue: false,
       allowNull: false,
     },
+    email_verified_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
     reset_token: {
       type: DataTypes.STRING(255),
       allowNull: true,

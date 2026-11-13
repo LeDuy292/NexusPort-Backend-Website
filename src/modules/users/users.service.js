@@ -100,7 +100,7 @@ async function getUserById(id) {
  * @throws {{ statusCode: 409 }} Trùng email/username
  */
 async function createUser({ username, email, password, role, fullName, isActive = true, carrierId, driverId }) {
-  if (role === 'Driver') throw Object.assign(new Error('Tài khoản Driver phải được cấp qua yêu cầu đã duyệt.'), {statusCode:409});
+  if (role === 'Driver') throw Object.assign(new Error('Vui lòng tạo tài khoản từ trang quản lý tài xế của công ty vận tải.'), {statusCode:409});
   // Kiểm tra username trùng
   const existingUsername = await User.findOne({
     where: { username: { [Op.iLike]: username } },
@@ -220,7 +220,7 @@ async function updateUser(id, { fullName, email, username, carrierId, driverId }
  * @throws {{ statusCode: 400 | 404 }}
  */
 async function assignRole(id, role, { carrierId, driverId } = {}) {
-  if (role === 'Driver') throw Object.assign(new Error('Không cấp vai trò Driver thủ công. Hãy dùng yêu cầu cấp tài khoản.'), {statusCode:409});
+  if (role === 'Driver') throw Object.assign(new Error('Vui lòng tạo tài khoản từ trang quản lý tài xế của công ty vận tải.'), {statusCode:409});
   if (!VALID_ROLES.includes(role)) {
     const err = new Error(`Role không hợp lệ. Phải là một trong: ${VALID_ROLES.join(', ')}`);
     err.statusCode = 400;
@@ -351,7 +351,7 @@ async function getCarrierStaffs(carrierId) {
  * Tạo và cấp tài khoản đăng nhập cho tài xế (vai trò Driver).
  */
 async function createDriverAccount() {
-  throw Object.assign(new Error('Vui lòng gửi yêu cầu cấp tài khoản để quản trị viên duyệt.'), {statusCode:410});
+  throw Object.assign(new Error('Vui lòng tạo tài khoản từ trang quản lý tài xế của công ty vận tải.'), {statusCode:410});
 }
 
 /**

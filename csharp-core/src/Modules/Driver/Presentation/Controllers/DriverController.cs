@@ -340,7 +340,7 @@ public class DriverController : ControllerBase
     }
 
     [HttpPost]
-    public ActionResult Create() => StatusCode(410, new { message = "Vui lòng gửi yêu cầu thêm tài xế để admin duyệt." });
+    public ActionResult Create() => StatusCode(410, new { message = "Vui lòng tạo tài khoản từ trang quản lý tài xế của công ty vận tải." });
 
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<DriverDto>> Update(Guid id, [FromBody] UpdateDriverDto dto, CancellationToken cancellationToken)

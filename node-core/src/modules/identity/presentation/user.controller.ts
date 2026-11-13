@@ -3,7 +3,7 @@ import jwt, { JwtPayload } from 'jsonwebtoken';
 import { UserService } from '../application/user.service';
 import { UserRepository } from '../infrastructure/user.repository';
 import { UnauthorizedError, ForbiddenError } from '../../../shared/errors/app-error';
-import { authenticateAccountManager } from './account-request.controller';
+import { authenticateAccountManager } from './driver-account.controller';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!';
 

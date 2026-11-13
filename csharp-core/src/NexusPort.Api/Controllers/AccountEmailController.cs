@@ -28,7 +28,7 @@ public sealed class AccountEmailController(IEmailService email, IConfiguration c
         if (string.IsNullOrWhiteSpace(config["EmailSettings:SmtpUser"]) || string.IsNullOrWhiteSpace(config["EmailSettings:SmtpPass"]))
             return StatusCode(503, new { message = "Email service is not configured." });
         await email.SendEmailAsync(input.To, "NexusPort — Liên kết tài khoản tài xế",
-            $"<p>Yêu cầu tài khoản tài xế đã được duyệt.</p><p><a href=\"{WebUtility.HtmlEncode(input.ActivationUrl)}\">Liên kết tài khoản và tạo mật khẩu</a></p><p>Liên kết dùng một lần, có hiệu lực 24 giờ. Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>", ct);
+            $"<p>Công ty vận tải đã đăng ký tài khoản tài xế cho bạn.</p><p><a href=\"{WebUtility.HtmlEncode(input.ActivationUrl)}\">Xác nhận email và tạo mật khẩu</a></p><p>Liên kết dùng một lần, có hiệu lực 24 giờ. Hãy xác nhận và tạo mật khẩu để đăng nhập. Nếu bạn không yêu cầu, hãy bỏ qua email này.</p>", ct);
         return Ok(new { success = true });
     }
 }
