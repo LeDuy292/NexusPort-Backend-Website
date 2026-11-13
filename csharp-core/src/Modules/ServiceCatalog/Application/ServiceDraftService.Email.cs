@@ -37,12 +37,11 @@ public sealed partial class ServiceDraftService
         Require(input.MainServiceId.HasValue, "Chọn dịch vụ chính trước khi xác thực.");
         if (input.Flow == "IMPORT")
             Require(!string.IsNullOrEmpty(input.Source.ReferenceNumber) && !string.IsNullOrEmpty(input.Source.BlNumber)
-                && !string.IsNullOrEmpty(input.Source.VesselName) && !string.IsNullOrEmpty(input.Source.VoyageNumber), "Nhập đủ số DO/eDO, vận đơn, tên tàu và chuyến tàu trước khi xác thực.");
-        else Require(input.Source.BookingId.HasValue && (input.Source.BookingMode != "PAPER" || !string.IsNullOrEmpty(input.Source.ReferenceNumber)), "Nhập/chọn Booking hợp lệ trước khi xác thực.");
-        if (input.Flow == "EXPORT")
+                && !string.IsNullOrEmpty(input.Source.VesselName) && !string.IsNullOrEmpty(input.Source.VoyageNumber), "Nhập đủ số eDO, vận đơn, tên tàu và chuyến tàu trước khi xác thực.");
+        else
         {
-            var source = await ExportSource(company, input.Source.BookingId!.Value, ct);
-            Require(input.Source.BookingMode != "PAPER" || input.Source.ReferenceNumber == S(source, "bookingNumber"), "Số Booking giấy không khớp hồ sơ của công ty.");
+            Require(input.Source.BookingId.HasValue, "Chọn eBooking hợp lệ trước khi xác thực.");
+            _ = await ExportSource(company, input.Source.BookingId!.Value, ct);
         }
         var email = await RegisteredEmail(ct);
         Require(workflowEmail != null, "Chưa cấu hình gửi email.", 503, "SERVICE_EMAIL_NOT_CONFIGURED");

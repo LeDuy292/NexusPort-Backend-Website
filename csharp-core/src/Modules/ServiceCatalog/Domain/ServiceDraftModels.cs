@@ -88,18 +88,18 @@ public static class ServiceDraftRules
         Require(input.MainServiceId != Guid.Empty, "Dịch vụ chính không hợp lệ.");
         var source = input.Source ?? new ServiceDraftSource();
         Require(source.BookingId != Guid.Empty, "Booking không hợp lệ.");
-        Require(source.DocumentType is "EDO" or "DO", "Loại chứng từ phải là DO hoặc eDO.");
+        Require(flow != "IMPORT" || source.DocumentType == "EDO", "Quy trình giao hàng nhập chỉ chấp nhận Lệnh giao nhận điện tử eDO.");
         string? validUntil = null;
         if (!string.IsNullOrWhiteSpace(source.ValidUntil))
         {
-            Require(DateOnly.TryParseExact(source.ValidUntil, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date), "Hạn DO/eDO phải là ngày hợp lệ (yyyy-MM-dd).");
+            Require(DateOnly.TryParseExact(source.ValidUntil, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date), "Hạn eDO phải là ngày hợp lệ (yyyy-MM-dd).");
             validUntil = date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
-        Require(flow != "IMPORT" || source.BookingId == null, "Luồng nhập dùng tham chiếu DO/eDO, không dùng Booking xuất.");
-        Require(source.BookingMode is "LINKED" or "PAPER", "Chọn Booking điện tử hoặc Booking giấy.");
+        Require(flow != "IMPORT" || source.BookingId == null, "Luồng nhập dùng tham chiếu eDO, không dùng Booking xuất.");
+        Require(flow != "EXPORT" || source.BookingMode == "LINKED", "Quy trình hạ hàng xuất chỉ chấp nhận eBooking đã liên kết.");
         source = source with
         {
-            ReferenceNumber = Text(source.ReferenceNumber, 100, "Số DO/eDO"),
+            ReferenceNumber = Text(source.ReferenceNumber, 100, flow == "IMPORT" ? "Số eDO" : "Số tham chiếu"),
             BookingNumber = Text(source.BookingNumber, 100, "Số Booking"),
             BlNumber = Text(source.BlNumber, 100, "Số vận đơn"),
             VesselName = Text(source.VesselName, 150, "Tên tàu"),
