@@ -1,3 +1,4 @@
+
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -8,6 +9,7 @@ public sealed record ServiceDraftSource
     public Guid? BookingId { get; init; }
     public string DocumentType { get; init; } = "EDO";
     public string ReferenceNumber { get; init; } = "";
+    public string BookingNumber { get; init; } = "";
     public string BlNumber { get; init; } = "";
     public string? ValidUntil { get; init; }
     public string BookingMode { get; init; } = "LINKED";
@@ -98,6 +100,7 @@ public static class ServiceDraftRules
         source = source with
         {
             ReferenceNumber = Text(source.ReferenceNumber, 100, "Số DO/eDO"),
+            BookingNumber = Text(source.BookingNumber, 100, "Số Booking"),
             BlNumber = Text(source.BlNumber, 100, "Số vận đơn"),
             VesselName = Text(source.VesselName, 150, "Tên tàu"),
             VoyageNumber = Text(source.VoyageNumber, 80, "Chuyến tàu"),

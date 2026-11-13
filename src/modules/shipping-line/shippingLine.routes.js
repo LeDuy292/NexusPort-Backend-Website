@@ -92,6 +92,21 @@ router.post('/manifests/:id/reconcile', ...manifestWriter, asyncHandler(async (r
   res.json({ success: true, message: 'Đối soát Manifest với dữ liệu cảng thành công', data });
 }));
 
+router.post('/manifests/:id/send-to-port', ...manifestWriter, asyncHandler(async (req, res) => {
+  const data = await shippingLineService.sendManifestToPort(req.params.id);
+  res.json({ success: true, message: 'Đã gửi dữ liệu Bản khai hàng hóa cho Cảng Tiên Sa thành công', data });
+}));
+
+router.get('/manifests/port/synced', asyncHandler(async (req, res) => {
+  const data = await shippingLineService.getSyncedManifests();
+  res.json({ success: true, data });
+}));
+
+router.get('/manifests/port/lookup/:containerNo', asyncHandler(async (req, res) => {
+  const data = await shippingLineService.lookupContainerManifest(req.params.containerNo);
+  res.json({ success: true, data });
+}));
+
 // 4. Bills of Lading (B/L) & Shipping Instructions (SI)
 router.get('/shipping-instructions', asyncHandler(async (req, res) => {
   const data = await shippingLineService.getShippingInstructions(req.query);
