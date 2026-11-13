@@ -50,10 +50,11 @@ public sealed partial class ServiceDraftService
             var ranked = BookingFleetPolicy.Rank(
                 available.Trucks.Where(t => !overlapping.Any(x => x.TruckId == t.Id)),
                 available.Drivers.Where(d => !overlapping.Any(x => x.DriverId == d.Id)));
-            var truck = ranked.Trucks.FirstOrDefault(t => t.Id == trip.TruckId)
-                ?? ranked.Trucks.FirstOrDefault(t => t.Id == ranked.RecommendedTruckId);
-            var driver = ranked.Drivers.FirstOrDefault(d => d.Id == trip.DriverId)
-                ?? ranked.Drivers.FirstOrDefault(d => d.Id == truck?.DriverId) ?? ranked.Drivers.FirstOrDefault();
+            var truck = ranked.Trucks.FirstOrDefault(t => t.Id == ranked.RecommendedTruckId)
+                ?? ranked.Trucks.FirstOrDefault();
+            var driver = ranked.Drivers.FirstOrDefault(d => d.Id == ranked.RecommendedDriverId)
+                ?? ranked.Drivers.FirstOrDefault(d => d.Id == truck?.DriverId)
+                ?? ranked.Drivers.FirstOrDefault();
             selected.Add(trip with { TruckId = truck?.Id, DriverId = driver?.Id });
             results.Add(new { trip.SourceContainerId, trip.AppointmentStart, trip.AppointmentEnd,
                 Trucks = ranked.Trucks, Drivers = ranked.Drivers, RecommendedTruckId = truck?.Id,

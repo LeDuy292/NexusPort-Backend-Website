@@ -895,19 +895,114 @@ class ShippingLineService {
       toleranceKg: TOLERANCE_KG,
     };
 
-    mnf.reconciledAt = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    mnf.reconciledAt = now;
+    mnf.sentToPortAt = mnf.sentToPortAt || now;
+    mnf.sentToPort = true;
+    mnf.portSyncStatus = 'RECEIVED_BY_PORT';
     mnf.reconciliationStatus = (mismatchedCount === 0 && portReceivedCount > 0) ? 'MATCHED' : (mismatchedCount > 0 ? 'MISMATCHED' : 'PENDING');
     if (mismatchedCount === 0 && portReceivedCount === mnf.records.length) {
       mnf.status = 'RECONCILED';
+    } else {
+      mnf.status = 'SENT_TO_PORT';
     }
 
     return {
       manifestId: mnf.id,
       manifestNumber: mnf.manifestNumber,
+      sentToPortAt: mnf.sentToPortAt,
       summary,
       matchPercentage,
       reconciliationDetails,
     };
+  }
+
+  async sendManifestToPort(manifestId) {
+    const mnf = manifests.find(m => m.id === manifestId || m.manifestNumber === manifestId);
+    if (!mnf) throw new Error('Không tìm thấy Manifest');
+
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    mnf.sentToPort = true;
+    mnf.sentToPortAt = now;
+    mnf.status = 'SENT_TO_PORT';
+    mnf.portSyncStatus = 'RECEIVED_BY_PORT';
+
+    // Thực hiện tự động đối soát số liệu cân và seal
+    const recon = await this.reconcileManifest(manifestId);
+
+    const voy = voyages.find(v => v.voyageNumber === mnf.voyageNumber);
+
+    return {
+      success: true,
+      manifestId: mnf.id,
+      manifestNumber: mnf.manifestNumber,
+      vesselName: voy?.vesselName || mnf.vesselName || 'EVER ENVOY',
+      voyageNumber: mnf.voyageNumber,
+      direction: mnf.direction,
+      totalContainers: mnf.records?.length || 0,
+      sentToPortAt: now,
+      status: 'SENT_TO_PORT',
+      message: 'Đã gửi dữ liệu Bản khai hàng hóa (Manifest) cho Cảng Tiên Sa thành công. Dữ liệu đã sẵn sàng để đối soát tại Gate Booking.',
+      summary: recon.summary,
+      matchPercentage: recon.matchPercentage,
+      reconciliationDetails: recon.reconciliationDetails,
+    };
+  }
+
+  async getSyncedManifests() {
+    return manifests
+      .filter(m => m.sentToPort || m.sentToPortAt || m.status === 'SENT_TO_PORT' || m.status === 'RECONCILED')
+      .map(m => {
+        const voy = voyages.find(v => v.voyageNumber === m.voyageNumber);
+        return {
+          id: m.id,
+          manifestNumber: m.manifestNumber,
+          voyageNumber: m.voyageNumber,
+          vesselName: voy?.vesselName || m.vesselName || 'Tàu biển quốc tế',
+          direction: m.direction,
+          totalContainers: m.records?.length || 0,
+          sentToPortAt: m.sentToPortAt || m.reconciledAt,
+          status: m.status,
+          containers: (m.records || []).map(r => ({
+            containerNumber: r.containerNumber,
+            sealNumber: r.sealNumber,
+            grossWeightKg: r.grossWeightKg,
+            blNumber: r.blNumber,
+            isoType: r.isoType,
+          })),
+        };
+      });
+  }
+
+  async lookupContainerManifest(containerNo) {
+    if (!containerNo) return { found: false, message: 'Số container không hợp lệ' };
+    const cleanNo = containerNo.trim().toUpperCase();
+
+    for (const mnf of manifests) {
+      const rec = (mnf.records || []).find(r => r.containerNumber?.trim().toUpperCase() === cleanNo);
+      if (rec) {
+        const voy = voyages.find(v => v.voyageNumber === mnf.voyageNumber);
+        const isSent = Boolean(mnf.sentToPort || mnf.sentToPortAt || mnf.status === 'SENT_TO_PORT' || mnf.status === 'RECONCILED');
+        return {
+          found: true,
+          manifestId: mnf.id,
+          manifestNumber: mnf.manifestNumber,
+          direction: mnf.direction,
+          vesselName: voy?.vesselName || mnf.vesselName || 'EVER ENVOY',
+          voyageNumber: mnf.voyageNumber,
+          containerNumber: rec.containerNumber,
+          sealNumber: rec.sealNumber,
+          grossWeightKg: rec.grossWeightKg,
+          isoType: rec.isoType,
+          blNumber: rec.blNumber,
+          cargoDescription: rec.cargoDescription || rec.commodity,
+          sentToPort: isSent,
+          sentToPortAt: mnf.sentToPortAt || mnf.reconciledAt || null,
+          status: isSent ? 'SENT_TO_PORT' : mnf.status,
+        };
+      }
+    }
+    return { found: false, message: 'Container chưa nằm trong Bản khai hàng hóa nào của hãng tàu' };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

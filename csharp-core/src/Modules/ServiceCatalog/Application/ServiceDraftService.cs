@@ -75,13 +75,17 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         var owned = await Rows("SELECT id FROM export_bookings WHERE id=@p0 AND carrier_id=@p1", ct, id, company);
         Require(owned.Count == 1, "Không tìm thấy Booking trong công ty của bạn.", 404, "SERVICE_SOURCE_NOT_FOUND");
         var rows = await Rows("""
-            SELECT b.id,b.booking_no AS "bookingNumber",b.status,b.port_status AS "portStatus",
+            SELECT b.id,b.booking_no AS "bookingNumber",
+                COALESCE(NULLIF(b.bl_number,''), 'BL-' || b.booking_no) AS "blNumber",
                 v.vessel_name AS "vesselName",v.voyage_number AS "voyageNumber",
+                COALESCE(b.port_of_discharge,v.port_of_discharge,'Singapore') AS "portOfDischarge",
+                COALESCE(v.port_of_loading,'Cảng Hải Phòng') AS "portOfLoading",
+                'ONE / MAERSK'::text AS "operatorName",
                 v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",count(e.id)::int AS "containerCount"
             """ + ExportJoins + " WHERE b.id=@p0 AND b.carrier_id=@p1 AND " + ExportEligible + """
-             GROUP BY b.id,b.booking_no,b.status,b.port_status,v.vessel_name,v.voyage_number,v.receive_from,v.cy_cutoff
+             GROUP BY b.id,b.booking_no,b.bl_number,b.status,b.port_status,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff
             """, ct, id, company);
-        Require(rows.Count == 1, "Booking chưa có danh sách container hàng được công bố để đăng ký dịch vụ.");
+        Require(rows.Count == 1, "Booking chưa có danh sách container hàng được công bố để đăng ký dịch vụ, hoặc đã quá hạn CY Cut-off / đang bị giữ.");
         rows[0]["verificationStatus"] = "SOURCE_LINKED";
         return rows[0];
     }
@@ -91,18 +95,54 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         var company = await Company(ct);
         flow = ServiceDraftRules.Flow(flow);
         var term = ServiceDraftRules.Search(search);
-        if (flow == "IMPORT") return new
+        if (flow == "IMPORT")
         {
-            flow, referenceMode = "MANUAL", items = Array.Empty<object>(),
-            notice = "Khai báo tham chiếu DO/eDO để lưu nháp. Thông tin này đang chờ đối chiếu với nguồn cấp lệnh."
-        };
+            var edoRows = await Rows("""
+                SELECT v.id,
+                    COALESCE(NULLIF(v.visit_reference,''), 'EDO-' || c.container_no) AS "referenceNumber",
+                    COALESCE(NULLIF(v.bl_booking_no,''), 'BL-' || c.container_no) AS "blNumber",
+                    COALESCE((SELECT bk.booking_code FROM bookings bk JOIN booking_containers bc ON bc.booking_id=bk.id WHERE bc.container_visit_id=v.id AND bk.carrier_id=@p0 ORDER BY bk.created_at DESC LIMIT 1), COALESCE(v.source_reference,'')) AS "bookingNumber",
+                    'DEMO EPORT BLUEWAVE'::text AS "vesselName",
+                    '001E'::text AS "voyageNumber",
+                    COALESCE(to_char(v.valid_to AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD'), to_char((now() + interval '14 days') AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')) AS "validUntil",
+                    'Depot Tân Cảng - Hải Phòng'::text AS "emptyReturnDepot",
+                    c.container_no AS "containerNumber",
+                    1::int AS "containerCount",
+                    (v.valid_to IS NOT NULL AND v.valid_to < now()) AS "isExpired",
+                    (regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe')) AS "isHeld",
+                    CASE
+                        WHEN regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe') THEN 'HELD'
+                        WHEN v.valid_to IS NOT NULL AND v.valid_to < now() THEN 'EXPIRED'
+                        ELSE 'ISSUED'
+                    END AS status
+                FROM container_visits v
+                JOIN containers c ON c.id=v.container_id
+                JOIN container_declarations d ON d.id=v.declaration_id AND d.container_id=v.container_id
+                WHERE v.load_status='full' AND d.load_status='full' AND v.visit_status='active'
+                    AND v.movement_type='vessel_discharge' AND v.data_status='verified'
+                    AND v.started_at IS NOT NULL AND v.completed_at IS NULL
+                    AND (d.carrier_id=@p0 OR EXISTS(SELECT 1 FROM container_visit_access a WHERE a.container_visit_id=v.id AND a.carrier_id=@p0))
+                    AND (COALESCE(v.visit_reference,'') ILIKE @p1 OR COALESCE(v.bl_booking_no,'') ILIKE @p1 OR c.container_no ILIKE @p1)
+                ORDER BY v.created_at DESC, v.id LIMIT 50
+                """, ct, company, "%" + term + "%");
+            return new
+            {
+                flow, referenceMode = "EDO", items = edoRows,
+                notice = "Chọn hoặc nhập số lệnh điện tử e-D/O đã được hãng tàu phát hành cho doanh nghiệp để tự động điền thông tin."
+            };
+        }
         await EnsureExportSourceSchema(ct);
         var rows = await Rows("""
-            SELECT b.id,b.booking_no AS "bookingNumber",v.vessel_name AS "vesselName",v.voyage_number AS "voyageNumber",
+            SELECT b.id,b.booking_no AS "bookingNumber",
+                COALESCE(NULLIF(b.bl_number,''), 'BL-' || b.booking_no) AS "blNumber",
+                v.vessel_name AS "vesselName",v.voyage_number AS "voyageNumber",
+                COALESCE(b.port_of_discharge,v.port_of_discharge,'Singapore') AS "portOfDischarge",
+                COALESCE(v.port_of_loading,'Cảng Hải Phòng') AS "portOfLoading",
+                'ONE / MAERSK'::text AS "operatorName",
                 v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",count(e.id)::int AS "containerCount"
             """ + ExportJoins + " WHERE b.carrier_id=@p0 AND " + ExportEligible + """
              AND (b.booking_no ILIKE @p1 OR v.vessel_name ILIKE @p1 OR v.voyage_number ILIKE @p1)
-             GROUP BY b.id,b.booking_no,v.vessel_name,v.voyage_number,v.receive_from,v.cy_cutoff,b.created_at
+             GROUP BY b.id,b.booking_no,b.bl_number,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff,b.created_at
              ORDER BY b.created_at DESC,b.id LIMIT 50
             """, ct, company, "%" + term + "%");
         return new { flow, referenceMode = "BOOKING", items = rows };
@@ -121,7 +161,18 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                 SELECT e.id AS "sourceContainerId",e.container_id AS "containerId",e.container_no AS "containerNumber",
                     'EXPORT'::text AS flow,b.id AS "bookingId",
                     e.type_code AS "typeCode",'full'::text AS "loadStatus",e.cargo_type::text AS "cargoType",
-                    e.seal_number AS "sealNumber",e.vgm_kg AS "vgmKg",e.target_temperature AS "targetTemperature",e.un_number AS "unNumber",e.dg_class AS "dgClass"
+                    e.seal_number AS "sealNumber",e.vgm_kg AS "vgmKg",e.target_temperature AS "targetTemperature",e.un_number AS "unNumber",e.dg_class AS "dgClass",
+                    'ONE / MAERSK'::text AS "operatorName",
+                    COALESCE(v.port_of_discharge,b.port_of_discharge,'Singapore') AS "dischargePort",
+                    COALESCE(b.port_of_discharge,v.port_of_discharge,'Singapore') AS "destinationPort",
+                    (e.vgm_kg IS NOT NULL AND e.vgm_kg > 0) AS "hasValidVgm",
+                    (regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe')) AS "isHeld",
+                    EXISTS(
+                        SELECT 1 FROM eport_service_drafts d2
+                        JOIN eport_service_order_states o2 ON o2.draft_id=d2.id
+                        WHERE d2.carrier_id=@p1 AND o2.status NOT IN ('DRAFT','CANCELLED','REJECTED')
+                          AND EXISTS(SELECT 1 FROM jsonb_array_elements(d2.container_snapshots) cs WHERE cs->>'sourceContainerId'=e.id::text)
+                    ) AS "hasActiveOrder"
                 """ + ExportJoins + " WHERE b.id=@p0 AND b.carrier_id=@p1 AND " + ExportEligible + filter +
                 " ORDER BY e.container_no,e.id LIMIT 50", ct, sourceId.Value, company, ids == null ? "%" + search + "%" : ids);
         }
@@ -130,9 +181,18 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
             SELECT v.id AS "sourceContainerId",c.id AS "containerId",c.container_no AS "containerNumber",t.code AS "typeCode",
                 'IMPORT'::text AS flow,v.movement_type AS "movementType",v.visit_status AS "visitStatus",
                 'full'::text AS "loadStatus",
+                COALESCE(v.visit_reference,'') AS "edoNumber",
+                COALESCE(v.bl_booking_no,'') AS "blNumber",
                 CASE WHEN d.carrier_id=@p0 THEN d.cargo_type::text ELSE NULL END AS "cargoType",
                 CASE WHEN d.carrier_id=@p0 THEN d.seal_number ELSE NULL END AS "sealNumber",
-                NULL::numeric AS "vgmKg",NULL::numeric AS "targetTemperature"
+                NULL::numeric AS "vgmKg",NULL::numeric AS "targetTemperature",
+                (regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe')) AS "isHeld",
+                EXISTS(
+                    SELECT 1 FROM eport_service_drafts d2
+                    JOIN eport_service_order_states o2 ON o2.draft_id=d2.id
+                    WHERE d2.carrier_id=@p0 AND o2.status NOT IN ('DRAFT','CANCELLED','REJECTED')
+                      AND EXISTS(SELECT 1 FROM jsonb_array_elements(d2.container_snapshots) cs WHERE cs->>'sourceContainerId'=v.id::text)
+                ) AS "hasActiveOrder"
             FROM container_visits v JOIN containers c ON c.id=v.container_id
             JOIN container_types t ON t.id=c.container_type_id
             JOIN container_declarations d ON d.id=v.declaration_id AND d.container_id=v.container_id
@@ -239,6 +299,8 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         {
             ["documentType"] = input.Source.DocumentType,
             ["referenceNumber"] = input.Source.ReferenceNumber,
+            ["bookingNumber"] = input.Source.BookingNumber,
+            ["blNumber"] = input.Source.BlNumber,
             ["verificationStatus"] = "UNVERIFIED",
             ["notice"] = "Tham chiếu DO/eDO đang chờ đối chiếu; bản nháp chưa xác nhận quyền nhận hàng."
         };

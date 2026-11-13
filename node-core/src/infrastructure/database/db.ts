@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { logger } from '../../shared/utils/logger';
+import { connectWithCapacityRetry } from './connection-capacity';
 
 function resolveConnectionString(): string {
   if (process.env.DATABASE_URL) {
@@ -12,22 +13,32 @@ function resolveConnectionString(): string {
   if (aivenHost && aivenUser && aivenPass) {
     const aivenPort = process.env.AIVEN_DB_PORT || '20134';
     const aivenDb = process.env.AIVEN_DB_NAME || 'defaultdb';
-    return `postgresql://${encodeURIComponent(aivenUser)}:${encodeURIComponent(aivenPass)}@${aivenHost}:${aivenPort}/${aivenDb}?sslmode=${process.env.AIVEN_DB_SSLMODE || 'require'}`;
+    return `postgresql://${encodeURIComponent(aivenUser)}:${encodeURIComponent(aivenPass)}@${aivenHost}:${aivenPort}/${aivenDb}`;
   }
 
   return 'postgresql://postgres:120104@localhost:5432/nexusport';
 }
 
-const connectionString = resolveConnectionString();
+const rawConnectionString = resolveConnectionString();
+// Strip sslmode from query string to prevent pg-connection-string from forcing strict SSL verification
+const connectionString = rawConnectionString
+  .replace(/([?&])sslmode=[^&]+(&|$)/, '$1')
+  .replace(/([?&])uselibpqcompat=[^&]+(&|$)/, '$1')
+  .replace(/[?&]$/, '');
+
 const isSslRequired =
   process.env.DB_SSL === 'true' ||
   process.env.DB_TARGET === 'aiven' ||
-  (connectionString.includes('sslmode=') && !connectionString.includes('sslmode=disable'));
+  Boolean(process.env.AIVEN_DB_HOST) ||
+  rawConnectionString.includes('aivencloud.com') ||
+  (rawConnectionString.includes('sslmode=') && !rawConnectionString.includes('sslmode=disable'));
 
 const pool = new Pool({
   connectionString,
+  application_name: 'nexusport-node-core',
   max: Number(process.env.DB_POOL_MAX || 2),
-  idleTimeoutMillis: 10000,
+  min: 1,
+  idleTimeoutMillis: 3000,
   connectionTimeoutMillis: 10000,
   ...(isSslRequired ? { ssl: { rejectUnauthorized: false } } : {}),
 });
@@ -38,12 +49,15 @@ pool.on('error', (err) => {
 
 export const query = async (text: string, params?: unknown[]) => {
   const start = Date.now();
-  const res = await pool.query(text, params);
-  const duration = Date.now() - start;
-  logger.debug('Executed query', { text, duration, rows: res.rowCount });
-  return res;
+  const client = await getClient();
+  try {
+    const res = await client.query(text, params);
+    const duration = Date.now() - start;
+    logger.debug('Executed query', { text, duration, rows: res.rowCount });
+    return res;
+  } finally { client.release(); }
 };
 
-export const getClient = () => pool.connect();
+export const getClient = () => connectWithCapacityRetry(() => pool.connect());
 
 export default pool;

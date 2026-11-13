@@ -7,6 +7,7 @@ const { sequelize } = require('../../config/database');
 const { User } = require('../../models/User');
 const { generateToken } = require('../../utils/jwt');
 const { kickUserSockets, hasActiveSockets } = require('../../config/socket');
+const { sendPasswordResetOtpEmail } = require('../../utils/mailer');
 
 // Map lưu thời điểm hoạt động gần nhất (heartbeat) của user: userId -> timestamp (ms)
 const activeHeartbeats = new Map();
@@ -254,6 +255,12 @@ async function forgotPassword(emailOrUsername) {
     throw err;
   }
 
+  if (!user.email) {
+    const err = new Error('Tài khoản chưa được cấu hình địa chỉ email để nhận mã OTP.');
+    err.statusCode = 400;
+    throw err;
+  }
+
   // Sinh mã OTP ngẫu nhiên 6 chữ số
   const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
   const tokenExp = new Date(Date.now() + 15 * 60 * 1000); // 15 phút
@@ -262,10 +269,25 @@ async function forgotPassword(emailOrUsername) {
   user.reset_token_exp = tokenExp;
   await user.save();
 
+  // Gửi email thật qua SMTP Gmail đến hòm thư người dùng
+  try {
+    await sendPasswordResetOtpEmail(user.email, otpCode, user.full_name || user.username);
+  } catch (emailErr) {
+    console.error('Lỗi gửi email OTP:', emailErr);
+    const err = new Error('Không thể gửi email chứa mã OTP xác thực. Vui lòng thử lại sau hoặc liên hệ quản trị viên.');
+    err.statusCode = 503;
+    throw err;
+  }
+
+  // Che email để bảo mật thông tin (ví dụ d*****9@gmail.com)
+  const [name, domain] = (user.email || '').split('@');
+  const maskedName = name.length <= 2 ? `${name[0]}*` : `${name[0]}${'*'.repeat(Math.min(name.length - 2, 5))}${name[name.length - 1]}`;
+  const maskedEmail = domain ? `${maskedName}@${domain}` : user.email;
+
   return {
-    message: 'Mã xác thực khôi phục mật khẩu đã được khởi tạo.',
-    otp: otpCode,
+    message: `Mã OTP đã được gửi về email ${maskedEmail}. Vui lòng kiểm tra hộp thư (cả mục Spam/Rác nếu chưa thấy)!`,
     email: user.email,
+    maskedEmail,
     username: user.username,
   };
 }

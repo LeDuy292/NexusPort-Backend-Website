@@ -15,6 +15,7 @@ public class BookingVehicleDetailsDto
     public string? RegistrationImageUrl { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? CapturedAt { get; set; }
+    public int ActiveTripCount { get; set; }
 }
 
 public class BookingDriverDetailsDto
@@ -35,4 +36,5 @@ public class BookingDriverDetailsDto
     public string? LicenseBackImageUrl { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? CapturedAt { get; set; }
+    public int ActiveTripCount { get; set; }
 }
