@@ -5,6 +5,11 @@ import { logger } from '../../shared/utils/logger';
 import multer from 'multer';
 
 export const errorHandler = (err: Error, req: Request, res: Response, _next: NextFunction) => {
+  if ((err as Error & { code?: string }).code === '53300') {
+    logger.warn(`Database connection capacity reached for ${req.method} ${req.path}.`);
+    res.setHeader('Retry-After', '3');
+    return sendError(res, 'Dịch vụ dữ liệu đang bận. Vui lòng thử lại sau ít giây.', 503, 'DB_CONNECTION_LIMIT');
+  }
   logger.error(`Error processing ${req.method} ${req.path}:`, err);
 
   if (err instanceof AppError) {

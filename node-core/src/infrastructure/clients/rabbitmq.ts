@@ -5,6 +5,9 @@ export class RabbitMQClient {
   private static instance: RabbitMQClient;
   private connection: ChannelModel | null = null;
   private channel: Channel | null = null;
+  private connecting: Promise<void> | null = null;
+  private consumers = new Set<string>();
+  public onDisconnected?: () => void;
 
   private constructor() {}
 
@@ -15,17 +18,38 @@ export class RabbitMQClient {
 
   public async connect(): Promise<void> {
     if (this.channel) return;
+    if (this.connecting) return this.connecting;
+    this.connecting = this.open();
+    try { await this.connecting; } finally { this.connecting = null; }
+  }
+
+  private async open(): Promise<void> {
     const url = process.env.RABBITMQ_URL || 'amqp://guest:guest@localhost:5672';
-    const connection = await amqp.connect(url);
-    const channel = await connection.createChannel();
+    const connection = await amqp.connect(url, { timeout: 5000, noDelay: true });
     this.connection = connection;
-    this.channel = channel;
-    connection.on('error', (error: Error) => logger.error('[RabbitMQClient] Connection error:', error));
+    connection.on('error', (error: Error) => logger.warn(`[RabbitMQClient] Connection interrupted: ${error.message}`));
     connection.on('close', () => {
-      logger.warn('[RabbitMQClient] Connection closed.');
+      if (this.connection !== connection) return;
       this.connection = null;
       this.channel = null;
+      this.consumers.clear();
+      this.onDisconnected?.();
     });
+    try {
+      const channel = await connection.createChannel();
+      this.channel = channel;
+      channel.on('error', (error: Error) => logger.warn(`[RabbitMQClient] Channel interrupted: ${error.message}`));
+      channel.on('close', () => {
+        if (this.channel !== channel) return;
+        this.channel = null;
+        this.consumers.clear();
+        void connection.close().catch(() => {});
+      });
+    } catch (error) {
+      this.connection = null;
+      await connection.close().catch(() => {});
+      throw error;
+    }
     logger.info('[RabbitMQClient] Connected to RabbitMQ broker.');
   }
 
@@ -44,6 +68,7 @@ export class RabbitMQClient {
   public async consume(queue: string, handler: (message: ConsumeMessage) => Promise<void>): Promise<void> {
     await this.connect();
     if (!this.channel) throw new Error('RabbitMQ channel is unavailable.');
+    if (this.consumers.has(queue)) return;
     await this.channel.assertQueue(queue, { durable: true });
     await this.channel.prefetch(10);
     await this.channel.consume(queue, async message => {
@@ -56,6 +81,15 @@ export class RabbitMQClient {
         this.channel.nack(message, false, false);
       }
     }, { noAck: false });
+    this.consumers.add(queue);
     logger.info(`[RabbitMQClient] Consuming ${queue}.`);
+  }
+
+  public async close(): Promise<void> {
+    const connection = this.connection;
+    this.connection = null;
+    this.channel = null;
+    this.consumers.clear();
+    if (connection) await connection.close();
   }
 }
