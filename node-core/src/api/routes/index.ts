@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { createManifestRouter } from '../../modules/manifest/manifest.controller';
 import { HealthController } from '../controllers/health.controller';
 import { createIdentityRouter } from '../../modules/identity/presentation/identity.controller';
 import { createAuthRouter } from '../../modules/identity/presentation/auth.controller';
@@ -26,6 +27,7 @@ export interface NodeCoreRouteModule {
 }
 
 export const nodeCoreRouteModules: NodeCoreRouteModule[] = [
+  { prefix: '/shipping-line/manifests', tag: 'Manifests', secured: true, router: createManifestRouter() },
   { prefix: '/auth', tag: 'Auth', secured: false, router: createAuthRouter() },
   { prefix: '/users', tag: 'Users', secured: false, router: createUserRouter() },
   { prefix: '/identity', tag: 'Identity', secured: false, router: createIdentityRouter() },

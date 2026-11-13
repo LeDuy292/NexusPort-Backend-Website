@@ -1,5 +1,6 @@
 import { Pool } from 'pg';
 import { logger } from '../../shared/utils/logger';
+import { connectWithCapacityRetry } from './connection-capacity';
 
 function resolveConnectionString(): string {
   if (process.env.DATABASE_URL) {
@@ -34,8 +35,10 @@ const isSslRequired =
 
 const pool = new Pool({
   connectionString,
-  max: Number(process.env.DB_POOL_MAX || 5),
-  idleTimeoutMillis: 10000,
+  application_name: 'nexusport-node-core',
+  max: Number(process.env.DB_POOL_MAX || 2),
+  min: 1,
+  idleTimeoutMillis: 3000,
   connectionTimeoutMillis: 10000,
   ...(isSslRequired ? { ssl: { rejectUnauthorized: false } } : {}),
 });
@@ -46,12 +49,15 @@ pool.on('error', (err) => {
 
 export const query = async (text: string, params?: unknown[]) => {
   const start = Date.now();
-  const res = await pool.query(text, params);
-  const duration = Date.now() - start;
-  logger.debug('Executed query', { text, duration, rows: res.rowCount });
-  return res;
+  const client = await getClient();
+  try {
+    const res = await client.query(text, params);
+    const duration = Date.now() - start;
+    logger.debug('Executed query', { text, duration, rows: res.rowCount });
+    return res;
+  } finally { client.release(); }
 };
 
-export const getClient = () => pool.connect();
+export const getClient = () => connectWithCapacityRetry(() => pool.connect());
 
 export default pool;

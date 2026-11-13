@@ -17,7 +17,7 @@ export class ContainerJourneyRepository {
     if (!/^[A-Z]{4}\d{7}$/.test(number)) throw new AppError('Nhập đầy đủ số Container gồm 11 ký tự.', 422);
     const result = await query(`SELECT c.id,c.container_no AS "containerNumber",ct.id AS "containerTypeId",
       ct.code AS "containerTypeCode",ct.description AS "containerTypeDescription"
-      FROM containers c JOIN container_types ct ON ct.id=c.container_type_id WHERE c.container_no=$1`, [number]);
+      FROM containers c JOIN container_types ct ON ct.id=c.container_type_id WHERE c.container_no=$1 AND NOT c.identity_quarantined`, [number]);
     return result.rows[0] ?? null;
   }
 
@@ -29,7 +29,7 @@ export class ContainerJourneyRepository {
     const { containerNumber, prefix, shippingLineId, containerTypeId, isoSizeType, size, category,
       manufacturer, minPayloadKg, page, limit } = filters;
     const params: Array<string | number> = [];
-    const conditions: string[] = [];
+    const conditions: string[] = ['NOT c.identity_quarantined'];
     const add = (condition: string, value?: string | number) => {
       if (value === undefined) return;
       params.push(value);
@@ -45,7 +45,7 @@ export class ContainerJourneyRepository {
     add('strpos(lower(c.manufacturer),lower(?)) > 0', manufacturer);
     add('c.max_gross_mass_kg-c.tare_weight_kg >= ?', minPayloadKg);
     add(`l.id = (${ownShippingLine})`, shippingLineUserId);
-    if (!conditions.length) throw new AppError('Nhập số container hoặc chọn ít nhất một bộ lọc.', 422);
+    if (conditions.length === 1) throw new AppError('Nhập số container hoặc chọn ít nhất một bộ lọc.', 422);
     const from = `FROM containers c JOIN container_types ct ON ct.id=c.container_type_id
       LEFT JOIN shipping_line_prefixes p ON c.shipping_line_id IS NULL AND p.prefix=left(c.container_no,4)
       LEFT JOIN shipping_lines l ON l.id=COALESCE(c.shipping_line_id,p.shipping_line_id)
