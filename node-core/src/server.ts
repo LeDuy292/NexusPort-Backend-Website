@@ -10,11 +10,23 @@ const server = createServer(app);
 const realtimeGateway = new DriverRealtimeGateway(server);
 
 const startRealtime = async (): Promise<void> => {
+  if (process.env.ENABLE_RABBITMQ === 'false') {
+    logger.info('[Realtime] RabbitMQ message broker listener is disabled (ENABLE_RABBITMQ=false).');
+    return;
+  }
   try {
     await realtimeGateway.start();
-  } catch (error) {
-    logger.error('[Realtime] Startup failed; retrying in 5 seconds:', error);
-    setTimeout(() => void startRealtime(), 5000);
+  } catch (error: any) {
+    const isConnRefused = error?.code === 'ECONNREFUSED' ||
+      (Array.isArray(error?.errors) && error.errors.some((e: any) => e.code === 'ECONNREFUSED'));
+
+    if (isConnRefused) {
+      logger.warn('[Realtime] RabbitMQ broker is not running at localhost:5672. Realtime message consumer is paused. (Set ENABLE_RABBITMQ=false in .env to disable or start RabbitMQ)');
+      setTimeout(() => void startRealtime(), 30000);
+      return;
+    }
+    logger.error('[Realtime] Startup failed; retrying in 10 seconds:', error);
+    setTimeout(() => void startRealtime(), 10000);
   }
 };
 void startRealtime();
