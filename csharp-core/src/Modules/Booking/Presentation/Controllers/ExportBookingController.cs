@@ -7,13 +7,13 @@ using NexusPort.Modules.Booking.Application.Services;
 namespace NexusPort.Modules.Booking.Presentation.Controllers;
 
 [ApiController]
-[Authorize(Roles = "Administrator,Admin,Transport Company,Carrier,Carrier Staff,Shipping Line,Dispatcher,Gate Officer,Gate,Yard Operator,Berth Staff")]
+[Authorize(Roles = "Administrator,Admin,Transport Company,Carrier,Carrier Staff,Shipping Line,Dispatcher,Gate Officer,Gate,Yard Operator")]
 [Route("api/v1/Booking/export")]
 public sealed class ExportBookingController : ControllerBase
 {
     private const string Customers = "Transport Company,Carrier,Carrier Staff";
     private const string Lines = "Shipping Line,Administrator,Admin";
-    private const string PortStaff = "Administrator,Admin,Dispatcher,Gate Officer,Gate,Yard Operator,Berth Staff";
+    private const string PortStaff = "Administrator,Admin,Dispatcher,Gate Officer,Gate,Yard Operator";
     private readonly ExportBookingService _service;
     public ExportBookingController(ExportBookingService service) => _service = service;
 
@@ -93,7 +93,7 @@ public sealed class ExportBookingController : ControllerBase
     public async Task<IActionResult> Preview(Guid id, CancellationToken ct) => Ok(await _service.ClosePreview(id, ct));
     [Authorize(Roles = Lines)] [HttpPost("voyages/{id:guid}/close")]
     public async Task<IActionResult> Close(Guid id, ExportVersionRequest request, CancellationToken ct) => Ok(await _service.CloseVoyage(id, request, ct));
-    [Authorize(Roles = "Administrator,Admin,Berth Staff")] [HttpPost("voyages/{id:guid}/port-event")]
+    [Authorize(Roles = "Administrator,Admin")] [HttpPost("voyages/{id:guid}/port-event")]
     public async Task<IActionResult> VoyageEvent(Guid id, ExportPortEventRequest request, CancellationToken ct) => Ok(await _service.VoyageEvent(id, request, ct));
     [Authorize(Roles = Lines)] [HttpGet("voyages/{id:guid}/manifest")]
     public async Task<IActionResult> Manifest(Guid id, CancellationToken ct) => Ok(await _service.Manifest(id, ct));

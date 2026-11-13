@@ -1,4 +1,6 @@
 import bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
+import { query } from '../../../infrastructure/database/db';
 import jwt from 'jsonwebtoken';
 import { UserRepository } from '../infrastructure/user.repository';
 import { DbUser, LoginResult, SafeUser } from '../domain/user.types';
@@ -49,7 +51,10 @@ export class AuthService {
       carrierId = await this.userRepo.findCarrierIdByUserId(user.id);
     }
 
+    const sessionId = randomUUID();
+    await query('UPDATE users SET session_id=$2 WHERE id=$1', [user.id, sessionId]);
     const payload: Record<string, unknown> = {
+      sessionId,
       id: user.id,
       sub: user.id,
       'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier': user.id,

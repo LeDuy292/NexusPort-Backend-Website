@@ -15,6 +15,7 @@ bin/
 obj/
 .vs/
 appsettings.Development.json
+appsettings.Local.json
 
 __pycache__/
 *.pyc

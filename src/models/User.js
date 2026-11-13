@@ -14,7 +14,6 @@ const VALID_ROLES = [
   'Dispatcher',
   'Gate Officer',
   'Yard Operator',
-  'Berth Staff',
   'Shipping Line',
 ];
 
@@ -90,6 +89,11 @@ User.init(
     is_active: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
+      allowNull: false,
+    },
+    invitation_pending: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
       allowNull: false,
     },
     reset_token: {

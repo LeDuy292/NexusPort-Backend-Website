@@ -20,7 +20,7 @@ describe('Container declaration access', () => {
         expect(all.some(r => r.path === '/' && r.methods.post)).toBe(false);
         expect(all.some(r => r.path === '/:id' && (r.methods.put || r.methods.patch || r.methods.delete))).toBe(false);
     });
-    it.each(['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer', 'Carrier', 'Driver', 'Berth Staff'])('lets %s search identities and forbids registration', role => {
+    it.each(['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer', 'Carrier', 'Driver'])('lets %s search identities and forbids registration', role => {
         const all = routes();
         const req = { containerUser: { id: 'test', role } } as unknown as Request;
         const searchNext = jest.fn();

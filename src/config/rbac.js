@@ -12,7 +12,6 @@ const ROLES = Object.freeze({
   DISPATCHER:        'Dispatcher',
   GATE_OFFICER:      'Gate Officer',
   YARD_OPERATOR:     'Yard Operator',
-  BERTH_STAFF:       'Berth Staff',
   SHIPPING_LINE:     'Shipping Line',
 });
 
@@ -44,11 +43,6 @@ const PERMISSIONS = Object.freeze({
     ROLES.YARD_OPERATOR,
   ],
 
-  // Vận hành cầu tàu
-  BERTH_ACCESS: [
-    ROLES.ADMINISTRATOR,
-    ROLES.BERTH_STAFF,
-  ],
 
   // Hãng tàu vận tải biển
   SHIPPING_LINE_ACCESS: [

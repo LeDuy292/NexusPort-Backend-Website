@@ -123,24 +123,6 @@ router.get(
   ok('GET /api/yard/containers — Yard Operator + Administrator')
 );
 
-// ─── Berth Staff ──────────────────────────────────────────────────────────────
-
-/**
- * @swagger
- * /api/berth/schedule:
- *   get:
- *     summary: Lịch cầu tàu (Administrator + Berth Staff)
- *     tags: [RBAC Demo]
- *     security:
- *       - BearerAuth: []
- */
-router.get(
-  '/berth/schedule',
-  authenticate,
-  authorize(PERMISSIONS.BERTH_ACCESS),
-  ok('GET /api/berth/schedule — Berth Staff + Administrator')
-);
-
 // ─── Transport Company ────────────────────────────────────────────────────────
 
 /**

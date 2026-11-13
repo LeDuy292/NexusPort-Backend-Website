@@ -154,8 +154,8 @@ async function login(usernameOrEmail, password, rememberMe = false, expectedRole
         ['yard', 'yard operator', 'yard staff'].includes(normActual)) ||
       (['gate', 'gate officer'].includes(normExpected) &&
         ['gate', 'gate officer'].includes(normActual)) ||
-      (['berth', 'berth staff', 'shipping line', 'shippingline', 'hãng tàu'].includes(normExpected) &&
-        ['berth', 'berth staff', 'shipping line', 'shippingline', 'hãng tàu'].includes(normActual));
+      (['shipping line', 'shippingline', 'hãng tàu'].includes(normExpected) &&
+        ['shipping line', 'shippingline', 'hãng tàu'].includes(normActual));
 
     if (!isRoleMatch) {
       const err = new Error(
@@ -467,8 +467,8 @@ async function loginWithGoogle({ credential, idToken, accessToken, email, expect
         ['yard', 'yard operator', 'yard staff'].includes(normActual)) ||
       (['gate', 'gate officer'].includes(normExpected) &&
         ['gate', 'gate officer'].includes(normActual)) ||
-      (['berth', 'berth staff', 'shipping line', 'shippingline', 'hãng tàu'].includes(normExpected) &&
-        ['berth', 'berth staff', 'shipping line', 'shippingline', 'hãng tàu'].includes(normActual));
+      (['shipping line', 'shippingline', 'hãng tàu'].includes(normExpected) &&
+        ['shipping line', 'shippingline', 'hãng tàu'].includes(normActual));
 
     if (!isRoleMatch) {
       const err = new Error(

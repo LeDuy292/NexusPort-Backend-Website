@@ -1,3 +1,4 @@
+import { AccountRequestService } from '../application/account-request.service';
 import { Request, Response, NextFunction, Router } from 'express';
 import { AuthService } from '../application/auth.service';
 
@@ -24,6 +25,7 @@ export const createAuthRouter = (): Router => {
   const controller = new AuthController();
 
   router.post('/login', controller.login);
+  router.post('/activate-account', async (req, res, next) => { try { res.json({success:true,data:await new AccountRequestService().activate(req.body)}); } catch(e) {next(e);} });
 
   return router;
 };
