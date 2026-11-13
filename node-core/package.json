@@ -4,6 +4,12 @@
   "description": "NexusPort Terminal Operating System - Node.js TypeScript Core Service",
   "main": "dist/server.js",
   "scripts": {
+    "predev": "npm run db:check -- --require-current && npm run dev:rabbitmq",
+    "db:check": "tsx src/scripts/migrate.ts",
+    "db:capacity": "tsx src/scripts/inspect-db-capacity.ts",
+    "db:migrate": "tsx src/scripts/migrate.ts --apply",
+    "db:audit-manifests": "tsx src/scripts/audit-manifests.ts",
+    "dev:rabbitmq": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-rabbitmq.ps1",
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
