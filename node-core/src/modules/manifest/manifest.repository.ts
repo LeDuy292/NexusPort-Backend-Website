@@ -28,9 +28,15 @@ export type ManifestSummary = Pick<StoredManifest, 'id' | 'manifestNumber' | 'vo
 const registeredEquipment = `SELECT c.id AS "containerId",c.container_no AS "containerNumber",
   ct.code AS "isoType",c.iso_size_type AS "isoSizeType",c.is_reefer AS "isReefer"
   FROM containers c JOIN container_types ct ON ct.id=c.container_type_id`;
-interface RegisteredEquipment { containerId: string; containerNumber: string; isoType: string; isoSizeType: string | null; isReefer: boolean }
+export interface RegisteredEquipment { containerId: string; containerNumber: string; isoType: string; isoSizeType: string | null; isReefer: boolean }
 
 export class ManifestRepository {
+  async lookupContainers(numbers: string[]): Promise<RegisteredEquipment[]> {
+    return (await query(`${registeredEquipment} WHERE c.container_no=ANY($1::text[]) AND NOT c.identity_quarantined`, [numbers])).rows;
+  }
+  async usedBillNumbers(owner: string, numbers: string[]): Promise<string[]> {
+    return (await query('SELECT bl_number FROM shipping_manifest_bills WHERE owner_id=$1 AND bl_number=ANY($2::text[])', [owner, numbers])).rows.map(r => r.bl_number);
+  }
   async lookupContainer(number: string): Promise<RegisteredEquipment | null> {
     return (await query(`${registeredEquipment} WHERE c.container_no=$1 AND NOT c.identity_quarantined`, [number])).rows[0] ?? null;
   }

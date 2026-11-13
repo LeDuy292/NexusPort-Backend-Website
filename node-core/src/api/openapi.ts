@@ -36,6 +36,16 @@ const parameterSchema = (path: string) => [...path.matchAll(/\{([A-Za-z0-9_]+)\}
 }));
 
 const operationOverrides: Record<string, Record<string, unknown>> = {
+  'GET /api/v1/shipping-line/manifests/import/template': {
+    summary: 'Download the single-sheet Manifest Excel template',
+    responses: { 200: { description: 'Blank Manifest template', content: { 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { schema: { type: 'string', format: 'binary' } } } } },
+  },
+  'POST /api/v1/shipping-line/manifests/import/preview': {
+    summary: 'Validate Excel rows and preview a Manifest without saving',
+    description: 'One .xlsx sheet, 5 MB maximum, 5,000 containers, 100 bills and 500 containers per bill. Registry supplies ISO/reefer fields. Row errors return valid=false with Excel row/column details. Save the reviewed manifest using the existing POST route.',
+    requestBody: { required: true, content: { 'multipart/form-data': { schema: { type: 'object', required: ['file'], properties: { file: { type: 'string', format: 'binary' } } } } } },
+    responses: { 200: { description: 'Valid grouped Manifest or row errors; no DB writes' }, 422: { description: 'Invalid file, headers or upload limits' } },
+  },
   'GET /api/v1/containers/shipping-lines': {
     summary: 'List shipping line profiles and their registered BIC prefixes',
     description: 'Returns the current database directory. The response example shows five profiles from the reference import with illustrative IDs.',
