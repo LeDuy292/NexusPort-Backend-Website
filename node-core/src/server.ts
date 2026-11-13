@@ -47,18 +47,23 @@ const scheduleRealtime = (delay: number) => {
 broker.onDisconnected = () => scheduleRealtime(1000);
 
 const startRealtime = async (): Promise<void> => {
-  if (stopping || realtimeStarting) return;
-  realtimeStarting = true;
+  if (process.env.ENABLE_RABBITMQ === 'false') {
+    logger.info('[Realtime] RabbitMQ message broker listener is disabled (ENABLE_RABBITMQ=false).');
+    return;
+  }
   try {
     await realtimeGateway.start();
-    reconnectAttempts = 0;
-    logger.info('[Realtime] RabbitMQ consumers ready.');
-  } catch (error) {
-    const delay = Math.min(5000 * 2 ** Math.min(reconnectAttempts++, 4), 60000);
-    logger.warn(`[Realtime] RabbitMQ unavailable (${(error as { code?: string }).code || 'connection failed'}); retrying in ${delay / 1000}s. Ensure the configured broker is running.`);
-    scheduleRealtime(delay);
-  } finally {
-    realtimeStarting = false;
+  } catch (error: any) {
+    const isConnRefused = error?.code === 'ECONNREFUSED' ||
+      (Array.isArray(error?.errors) && error.errors.some((e: any) => e.code === 'ECONNREFUSED'));
+
+    if (isConnRefused) {
+      logger.warn('[Realtime] RabbitMQ broker is not running at localhost:5672. Realtime message consumer is paused. (Set ENABLE_RABBITMQ=false in .env to disable or start RabbitMQ)');
+      setTimeout(() => void startRealtime(), 30000);
+      return;
+    }
+    logger.error('[Realtime] Startup failed; retrying in 10 seconds:', error);
+    setTimeout(() => void startRealtime(), 10000);
   }
 };
 void startRealtime();

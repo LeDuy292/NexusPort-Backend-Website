@@ -65,8 +65,8 @@ async function forgotPasswordController(req, res, next) {
       success: true,
       message: result.message,
       data: {
-        otp: result.otp, // Trả về OTP trực tiếp cho mục đích demo / test dễ dàng
         email: result.email,
+        maskedEmail: result.maskedEmail,
         username: result.username,
       },
     });

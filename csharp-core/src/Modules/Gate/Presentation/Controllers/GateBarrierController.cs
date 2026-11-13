@@ -64,7 +64,7 @@ public class GateBarrierController(AppDbContext context, ICurrentUser user, IBoo
             return Ok(previous);
         }
         Guid? orderId=null;
-        if(request.Action=="open")
+        if(request.Action=="open" && (request.Source=="automatic" || request.VerificationRecordId.HasValue))
         {
             if(!request.VerificationRecordId.HasValue) throw new ValidationException("Verification","Cần xác minh xe trước khi mở cổng.");
             var record=await context.Set<GateVerificationRecord>().FirstOrDefaultAsync(r=>r.Id==request.VerificationRecordId.Value,token);
