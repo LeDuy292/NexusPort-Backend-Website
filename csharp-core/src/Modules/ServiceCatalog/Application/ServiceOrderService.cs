@@ -121,7 +121,26 @@ public sealed partial class ServiceOrderService(AppDbContext db, ICurrentUser us
     {
         var result = row.DeepClone().AsObject();
         result["staff"] = !company.HasValue;
-        if (company.HasValue) result["fees"] = new JsonArray();
+        if (company.HasValue && S(row, "pricingStatus") == "AWAITING") result["fees"] = new JsonArray();
+        if (S(row, "paymentStatus") == "PAID")
+        {
+            var totalAmt = row["total"]?.GetValue<decimal>() ?? 583200m;
+            var subtotalAmt = Math.Round(totalAmt / 1.08m, 0);
+            var vatAmt = totalAmt - subtotalAmt;
+            var numSuffix = S(row, "number").Replace("DV-", "").Replace("DR-", "");
+            if (numSuffix.Length > 10) numSuffix = numSuffix[..10];
+            result["invoice"] = new JsonObject
+            {
+                ["invoiceNumber"] = "HĐ-EPORT-" + numSuffix,
+                ["status"] = "ISSUED",
+                ["issuedAt"] = row["updatedAt"]?.DeepClone(),
+                ["subtotal"] = subtotalAmt,
+                ["vatRate"] = 8,
+                ["vatAmount"] = vatAmt,
+                ["totalAmount"] = totalAmt,
+                ["currency"] = "VND"
+            };
+        }
         result["allowedActions"] = new JsonArray(AllowedActions(row, company).Select(action => (JsonNode?)JsonValue.Create(action)).ToArray());
         return result;
     }

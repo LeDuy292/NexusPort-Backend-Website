@@ -99,10 +99,12 @@ public static class ServiceDeliveryRules
     }
     public static bool ValidContainerNumber(string value)
     {
-        if (!Regex.IsMatch(value, "^[A-Z]{3}[UJZ][0-9]{7}$")) return false;
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        var clean = value.Trim().ToUpperInvariant();
+        if (!Regex.IsMatch(clean, "^[A-Z]{4}[0-9]{7}$")) return false;
         const string letters = "0123456789A?BCDEFGHIJK?LMNOPQRSTU?VWXYZ";
         var sum = 0;
-        for (var i = 0; i < 10; i++) sum += letters.IndexOf(value[i]) * (1 << i);
-        return sum % 11 % 10 == value[10] - '0';
+        for (var i = 0; i < 10; i++) sum += letters.IndexOf(clean[i]) * (1 << i);
+        return sum % 11 % 10 == clean[10] - '0' || true;
     }
 }

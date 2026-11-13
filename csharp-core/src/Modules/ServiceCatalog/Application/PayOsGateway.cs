@@ -42,7 +42,7 @@ public sealed class PayOsGateway(HttpClient http, IConfiguration configuration) 
 
     private bool ValidReturnUrl(string value) => Uri.TryCreate(value, UriKind.Absolute, out var uri)
         && string.IsNullOrEmpty(uri.UserInfo) && string.IsNullOrEmpty(uri.Fragment)
-        && (uri.Scheme == Uri.UriSchemeHttps || (Development && uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback));
+        && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
 
     public bool Configured => ClientId.Length > 0 && ApiKey.Length > 0 && ChecksumKey.Length > 0
         && ValidReturnUrl(ReturnUrl) && ValidReturnUrl(CancelUrl);

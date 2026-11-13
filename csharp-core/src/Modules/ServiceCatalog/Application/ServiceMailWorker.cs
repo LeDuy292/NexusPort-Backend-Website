@@ -13,10 +13,17 @@ public sealed class ServiceMailWorker(IServiceScopeFactory scopes,ILogger<Servic
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while(!stoppingToken.IsCancellationRequested){
-            try{await using var scope=scopes.CreateAsyncScope();await scope.ServiceProvider.GetRequiredService<ServiceMailQueue>().SendNext(stoppingToken);}
+            var processed = false;
+            try{
+                await using var scope=scopes.CreateAsyncScope();
+                processed = await scope.ServiceProvider.GetRequiredService<ServiceMailQueue>().SendNext(stoppingToken);
+            }
             catch(OperationCanceledException) when(stoppingToken.IsCancellationRequested){break;}
             catch(Exception error){logger.LogWarning("Service mail queue unavailable ({ErrorType}); will retry.",error.GetType().Name);}
-            try{await Task.Delay(TimeSpan.FromSeconds(5),stoppingToken);}catch(OperationCanceledException){break;}
+            if (!processed)
+            {
+                try{await Task.Delay(TimeSpan.FromSeconds(2),stoppingToken);}catch(OperationCanceledException){break;}
+            }
         }
     }
 }
@@ -41,7 +48,29 @@ public sealed class ServiceMailQueue(AppDbContext db,IServiceWorkflowEmail email
         }
         if(job==null)return false;
         var sent=false;
-        try{var payload=job["payload"]!;await email.SendMessage(job["recipient"]!.GetValue<string>(),payload["subject"]!.GetValue<string>(),payload["body"]!.GetValue<string>(),payload["attachmentName"]!.GetValue<string>(),payload["attachmentHtml"]!.GetValue<string>(),ct);sent=true;}
+        try{
+            var payload=job["payload"]!;
+            var recipient = job["recipient"]!.GetValue<string>();
+            var subject = payload["subject"]!.GetValue<string>();
+            var body = payload["body"]!.GetValue<string>();
+            var isHtml = payload["isHtml"]?.GetValue<bool>() ?? true;
+            var attachmentName = payload["attachmentName"]?.GetValue<string>();
+            byte[]? attachmentBytes = null;
+            var mimeType = payload["mimeType"]?.GetValue<string>() ?? "application/pdf";
+
+            if (payload["attachmentPdfBase64"] is JsonValue base64Val && base64Val.TryGetValue<string>(out var base64Str) && !string.IsNullOrEmpty(base64Str))
+            {
+                attachmentBytes = Convert.FromBase64String(base64Str);
+                mimeType = "application/pdf";
+            }
+            else if (payload["attachmentHtml"] is JsonValue htmlVal && htmlVal.TryGetValue<string>(out var htmlStr) && !string.IsNullOrEmpty(htmlStr))
+            {
+                attachmentBytes = System.Text.Encoding.UTF8.GetBytes(htmlStr);
+                mimeType = "text/html";
+            }
+            await email.SendMessage(recipient, subject, body, attachmentName ?? "Chung-tu.pdf", attachmentBytes, mimeType, isHtml, ct);
+            sent=true;
+        }
         catch(OperationCanceledException) when(ct.IsCancellationRequested){throw;}
         catch(Exception){/* Keep payment/approval committed; no message contents or credentials in logs. */}
         await using var finish=new NpgsqlCommand("""

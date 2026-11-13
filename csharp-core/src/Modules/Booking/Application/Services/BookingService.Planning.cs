@@ -221,6 +221,21 @@ public partial class BookingService
             WHERE (t.booking_id IS NULL OR t.booking_id<>{2}) AND t.status NOT IN ('Completed','Cancelled')
               AND (t.status NOT IN ('Assigned','Acknowledged') OR t.appointment_start IS NULL OR t.appointment_end IS NULL
                 OR (t.appointment_start<{1} AND t.appointment_end>{0}))
+            UNION ALL
+            SELECT
+              NULLIF(trip->>'driverId', '')::uuid AS "DriverId",
+              NULLIF(trip->>'truckId', '')::uuid AS "TruckId"
+            FROM eport_service_drafts sd
+            LEFT JOIN eport_service_order_states os ON os.draft_id = sd.id
+            CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(sd.content->'delivery'->'trips') = 'array' THEN sd.content->'delivery'->'trips' ELSE '[]'::jsonb END) AS trip
+            WHERE (os.status IS NULL OR os.status NOT IN ('CANCELLED', 'REJECTED'))
+              AND sd.id <> {2}
+              AND NULLIF(trip->>'truckId', '') IS NOT NULL
+              AND NULLIF(trip->>'driverId', '') IS NOT NULL
+              AND trip->>'appointmentStart' LIKE '____-__-__%'
+              AND trip->>'appointmentEnd' LIKE '____-__-__%'
+              AND (trip->>'appointmentStart')::timestamptz < {1}
+              AND (trip->>'appointmentEnd')::timestamptz > {0}
             """, start, end, excludeId ?? Guid.Empty).ToListAsync(token);
         var driverIds = busy.Where(b => b.DriverId.HasValue).Select(b => b.DriverId!.Value).ToHashSet();
         var truckIds = busy.Where(b => b.TruckId.HasValue).Select(b => b.TruckId!.Value).ToHashSet();
@@ -234,8 +249,37 @@ public partial class BookingService
         var eligibleDrivers = drivers.Where(d => !driverIds.Contains(d.Id) && !string.IsNullOrWhiteSpace(d.LicenseNumber)
             && BookingFleetPolicy.IsAvailableDriver(d.Status.ToString(), d.LicenseExpiryDate, end))
             .Select(DriverDetails).ToList();
-        foreach(var truck in eligibleTrucks) SignFleetDocuments(truck,null);
-        foreach(var driver in eligibleDrivers) SignFleetDocuments(null,driver);
+
+        var workloads = await _context.Database.SqlQueryRaw<BookingBusyFleet>("""
+            SELECT
+              NULLIF(trip->>'driverId', '')::uuid AS "DriverId",
+              NULLIF(trip->>'truckId', '')::uuid AS "TruckId"
+            FROM eport_service_drafts sd
+            LEFT JOIN eport_service_order_states os ON os.draft_id = sd.id
+            CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(sd.content->'delivery'->'trips') = 'array' THEN sd.content->'delivery'->'trips' ELSE '[]'::jsonb END) AS trip
+            WHERE (os.status IS NULL OR os.status NOT IN ('CANCELLED', 'REJECTED'))
+              AND sd.carrier_id = {0}
+              AND NULLIF(trip->>'truckId', '') IS NOT NULL
+              AND NULLIF(trip->>'driverId', '') IS NOT NULL
+            UNION ALL
+            SELECT b.driver_id AS "DriverId", COALESCE(b.truck_id, b.vehicle_id) AS "TruckId"
+            FROM bookings b
+            WHERE b.carrier_id = {0} AND b.status::text NOT IN ('canceled', 'rejected')
+            """, carrierId).ToListAsync(token);
+
+        var truckUsage = workloads.Where(w => w.TruckId.HasValue).GroupBy(w => w.TruckId!.Value).ToDictionary(g => g.Key, g => g.Count());
+        var driverUsage = workloads.Where(w => w.DriverId.HasValue).GroupBy(w => w.DriverId!.Value).ToDictionary(g => g.Key, g => g.Count());
+
+        foreach(var truck in eligibleTrucks)
+        {
+            truck.ActiveTripCount = truckUsage.GetValueOrDefault(truck.Id, 0);
+            SignFleetDocuments(truck,null);
+        }
+        foreach(var driver in eligibleDrivers)
+        {
+            driver.ActiveTripCount = driverUsage.GetValueOrDefault(driver.Id, 0);
+            SignFleetDocuments(null,driver);
+        }
         var result = BookingFleetPolicy.Rank(eligibleTrucks, eligibleDrivers);
         result.CompanyTruckCount=trucks.Count; result.CompanyDriverCount=drivers.Count;
         if (trucks.Count==0) result.UnavailableReasons.Add("Công ty chưa có xe trong danh mục.");
