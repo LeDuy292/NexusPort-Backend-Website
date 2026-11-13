@@ -104,6 +104,34 @@ public static class ServiceCollectionExtensions
             };
             options.Events = new JwtBearerEvents
             {
+                OnTokenValidated = async context =>
+                {
+                    var principal = context.Principal;
+                    var role = principal?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? principal?.FindFirst("role")?.Value;
+                    if (!string.Equals(role, "Driver", StringComparison.OrdinalIgnoreCase)) return;
+                    var id = principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                        ?? principal?.FindFirst("sub")?.Value ?? principal?.FindFirst("id")?.Value;
+                    var session = principal?.FindFirst("sessionId")?.Value;
+                    if (!Guid.TryParse(id, out var userId) || string.IsNullOrWhiteSpace(session))
+                    {
+                        context.Fail("Driver account must log in after email verification.");
+                        return;
+                    }
+                    var db = context.HttpContext.RequestServices.GetRequiredService<AppDbContext>();
+                    var connection = db.Database.GetDbConnection();
+                    var opened = connection.State != System.Data.ConnectionState.Open;
+                    try
+                    {
+                        if (opened) await connection.OpenAsync(context.HttpContext.RequestAborted);
+                        await using var command = connection.CreateCommand();
+                        command.CommandText = "SELECT EXISTS(SELECT 1 FROM users WHERE id=@id AND role='Driver' AND is_active AND email_verified_at IS NOT NULL AND NOT invitation_pending AND session_id=@session)";
+                        var idParameter = command.CreateParameter(); idParameter.ParameterName = "id"; idParameter.Value = userId; command.Parameters.Add(idParameter);
+                        var sessionParameter = command.CreateParameter(); sessionParameter.ParameterName = "session"; sessionParameter.Value = session; command.Parameters.Add(sessionParameter);
+                        if (await command.ExecuteScalarAsync(context.HttpContext.RequestAborted) is not true)
+                            context.Fail("Driver email is not verified or session has ended.");
+                    }
+                    finally { if (opened) await connection.CloseAsync(); }
+                },
                 OnMessageReceived = context =>
                 {
                     var accessToken = context.Request.Query["access_token"];

@@ -20,10 +20,12 @@ accepted. The company can send a fresh link from **Gửi lại link** on that dr
 card or detail; the previous link is revoked. The page offers **Làm mới trạng thái**.
 
 Each linked driver's card/detail shows **Đã xác minh** or **Chưa xác minh** based
-on `users.email_verified_at`. Unverified drivers have the resend action, including
-legacy accounts. A resend never changes their password or blocks an existing
-active account. Legacy accounts remain unblocked as requested; they are not
-assumed to have verified email. Suspended accounts outside invitation onboarding
+on `users.email_verified_at`, immediately after the name. Unverified drivers have
+the resend action and cannot log in or restore old sessions. A resend never
+changes their password. Exactly three explicitly approved legacy test accounts
+are administratively marked verified: Gia Huy\8k, Nguyen Dinh Tien (`tiendriver`)
+and Phan Nguyen Gia Huy with license `660225020133` in the displayed company.
+Every other driver must confirm email through an invitation. Suspended accounts outside invitation onboarding
 cannot be reactivated through resend. Profiles without a login show **Chưa có tài
 khoản** and have no resend action. The account fields on editing an unlinked
 profile can also provision its login without creating a duplicate driver.
@@ -76,6 +78,13 @@ it does not change legacy account activation, passwords, bookings or company
 links. Earlier 044–046 provide invitations, restored driver/user FK integrity and
 the explicit nine-account legacy unblock. The previous data repair preserved all
 33 bookings and linked all nine retained driver profiles to users and companies.
+Subsequent explicitly requested cleanup backed up and removed five invalid/test
+drivers and their ten bookings; 23 other bookings and all physical containers
+were preserved. Migration `20261114_048_require_driver_verification.sql` supersedes
+the earlier blanket legacy unblock: only the three approved legacy IDs are marked
+verified with the requested test password. Other unverified drivers are inactive
+and awaiting email activation. DB guards, Express/TS login and session checks,
+Socket.IO authentication, and C# Driver token validation all enforce this rule.
 
 Node `.env`:
 
@@ -103,8 +112,12 @@ worktree without committing them. Use the real HTTPS frontend origin and interna
 service endpoint in deployment. C# sends mail using the existing `IEmailService`;
 it returns 503 if SMTP credentials are missing. All account workflow logic is TS.
 
-Start C# :5000, Node :4000 and frontend :5173 from the **authen worktrees** to load
-these changes. Starting the original repo directories loads their other branch.
+The main backend/frontend repository directories are now on
+`fix/driver-account-approval`; their development services run from those main
+directories on C# :5000, Express :3001, Node :4000 and frontend :5173. The old
+authen worktrees are detached snapshots. Apply migrations before startup;
+Sequelize development sync is opt-in through `DB_SYNC=true` so restarting Express
+cannot silently change shared migration-owned tables or driver login links.
 
 ## Verification
 

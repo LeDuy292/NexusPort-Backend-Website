@@ -126,6 +126,9 @@ async function login(usernameOrEmail, password, rememberMe = false, expectedRole
   }
 
   // Kiểm tra tài khoản có đang active không
+  if (user.role === 'Driver' && (!user.email_verified_at || user.invitation_pending)) {
+    throw Object.assign(new Error('Tài khoản tài xế chưa xác minh email. Vui lòng mở link trong email và tạo mật khẩu.'), {statusCode:403});
+  }
   if (!user.is_active) {
     const err = new Error('Tài khoản đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.');
     err.statusCode = 403;
@@ -248,6 +251,9 @@ async function forgotPassword(emailOrUsername) {
     throw err;
   }
 
+  if (user.role === 'Driver' && (!user.email_verified_at || user.invitation_pending)) {
+    throw Object.assign(new Error('Tài khoản tài xế chưa xác minh email. Vui lòng mở link trong email và tạo mật khẩu.'), {statusCode:403});
+  }
   if (!user.is_active) {
     const err = new Error('Tài khoản đã bị vô hiệu hóa.');
     err.statusCode = 403;
@@ -446,6 +452,9 @@ async function loginWithGoogle({ credential, idToken, accessToken, email, expect
   }
 
   // 5. Nếu email tồn tại nhưng tài khoản đang bị khóa/vô hiệu hóa -> TỪ CHỐI
+  if (user.role === 'Driver' && (!user.email_verified_at || user.invitation_pending)) {
+    throw Object.assign(new Error('Tài khoản tài xế chưa xác minh email. Vui lòng mở link trong email và tạo mật khẩu.'), {statusCode:403});
+  }
   if (!user.is_active) {
     const err = new Error('Tài khoản của bạn đã bị vô hiệu hóa. Vui lòng liên hệ Quản trị viên.');
     err.statusCode = 403;

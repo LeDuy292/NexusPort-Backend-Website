@@ -21,6 +21,7 @@ export class AuthService {
       role: u.role,
       fullName: u.full_name,
       isActive: u.is_active,
+      emailVerified: !!u.email_verified_at,
       createdAt: u.created_at,
       updatedAt: u.updated_at,
     };
@@ -36,6 +37,9 @@ export class AuthService {
       throw new UnauthorizedError('Tài khoản không tồn tại!');
     }
 
+    if (user.role === 'Driver' && (!user.email_verified_at || user.invitation_pending)) {
+      throw new ForbiddenError('Tài khoản tài xế chưa xác minh email. Vui lòng mở link trong email và tạo mật khẩu.');
+    }
     if (!user.is_active) {
       throw new ForbiddenError('Tài khoản đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.');
     }

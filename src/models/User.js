@@ -29,6 +29,7 @@ class User extends Model {
       role: this.role,
       fullName: this.full_name,
       isActive: this.is_active,
+      emailVerified: !!this.email_verified_at,
       createdAt: this.created_at,
     };
   }

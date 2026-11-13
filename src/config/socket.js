@@ -37,6 +37,7 @@ function initSocket(server) {
       const decoded = verifyToken(token);
       const account = await User.findByPk(decoded.id);
       if (!account?.is_active || account.role !== decoded.role) return next(new Error('Tài khoản hoặc vai trò không còn hợp lệ.'));
+      if (account.role === 'Driver' && (!account.email_verified_at || account.invitation_pending)) return next(new Error('Tài khoản tài xế chưa xác minh email.'));
       if (decoded.sessionId) {
         if (account.session_id && decoded.sessionId !== account.session_id) {
           return next(new Error('SESSION_KICKED: Tài khoản đã đăng nhập ở thiết bị khác.'));

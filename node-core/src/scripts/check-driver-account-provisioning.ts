@@ -41,8 +41,8 @@ async function main() {
   const activation = (value: string | null, password = 'DriverSecure123!') => request('POST', '/auth/activate-account', {token: value, password});
   try {
     for (const [id, role] of [[admin, 'Administrator'], [company, 'Transport Company'], [other, 'Transport Company'], [legacyUser, 'Driver']])
-      await pool.query(`INSERT INTO users(id,username,email,password,role,is_active,created_at,updated_at)
-        VALUES($1,$1::uuid::text,$2,'test-only',$3,true,now(),now())`, [id, `${id}@example.invalid`, role]);
+      await pool.query(`INSERT INTO users(id,username,email,password,role,is_active,invitation_pending,created_at,updated_at)
+        VALUES($1,$1::uuid::text,$2,'test-only',$3::text,$3::text <> 'Driver',$3::text = 'Driver',now(),now())`, [id, `${id}@example.invalid`, role]);
     await pool.query("INSERT INTO carriers(id,company_name) VALUES($1,'Integration Company A'),($2,'Integration Company B')", [carrier, otherCarrier]);
     await pool.query('INSERT INTO carrier_users(carrier_id,user_id) VALUES($1,$2),($3,$4)', [carrier, company, otherCarrier, other]);
     await pool.query(`INSERT INTO drivers(id,carrier_id,user_id,full_name,license_number,status) VALUES($1,$2,$3,'Legacy driver',$4,'active')`, [legacyDriver, carrier, legacyUser, `legacy-${suffix}`]);
@@ -84,6 +84,7 @@ async function main() {
     assert.notEqual(stored.token_hash, validToken); assert.equal(Number(stored.expires_at) - Number(stored.created_at), 86400000);
     assert.equal((await request('PATCH', `/users/${user.id}/activate`, {}, company)).status, 403);
     await assert.rejects(pool.query('UPDATE users SET is_active=true WHERE id=$1', [user.id]));
+    await assert.rejects(pool.query('UPDATE users SET invitation_pending=false,is_active=true WHERE id=$1', [user.id]));
     assert.equal((await activation(validToken, 'short')).status, 422);
     assert.equal((await activation(validToken)).status, 200);
     assert.ok((await pool.query('SELECT session_id FROM users WHERE id=$1', [user.id])).rows[0].session_id);
@@ -96,15 +97,14 @@ async function main() {
     const login = await request('POST', '/auth/login', {username: profile.username, password: 'DriverSecure123!'});
     assert.equal(login.status, 200); assert.equal(login.body.data.user.role, 'Driver'); assert.ok(login.body.data.token);
     assert.equal((await request('POST', '/driver-accounts', {...profile, username: `other_${suffix}`, email: `other_${suffix}@example.invalid`, driverId: legacyDriver}, other)).status, 409);
-    // Legacy accounts are unblocked independently of email proof; resend must
-    // neither block them nor claim they have already verified their email.
+    // Unverified accounts must remain blocked until the email link is consumed.
     assert.equal(links.find((d: any) => d.id === legacyDriver).emailVerified, false);
     assert.equal((await request('POST', `/driver-accounts/${legacyDriver}/resend`, {}, company)).status, 200);
     const legacy = (await pool.query('SELECT is_active,invitation_pending,email_verified_at FROM users WHERE id=$1', [legacyUser])).rows[0];
-    assert.deepEqual(legacy, {is_active: true, invitation_pending: false, email_verified_at: null});
+    assert.deepEqual(legacy, {is_active: false, invitation_pending: true, email_verified_at: null});
     assert.equal((await activation(lastToken())).status, 200);
     assert.ok((await pool.query('SELECT email_verified_at FROM users WHERE id=$1', [legacyUser])).rows[0].email_verified_at);
-    console.log('PASS: company creation without admin, duplicate races, mail rollback, tenant isolation, verification badges, company resend, expiry/revocation, activation/login and legacy account access.');
+    console.log('PASS: company creation without admin, duplicate races, mail rollback, tenant isolation, verification badges, company resend, expiry/revocation, activation/login and mandatory driver email verification.');
   } finally {
     try {
       const ids = (await pool.query('SELECT id FROM users WHERE username=$1', [profile.username])).rows.map(r => r.id);

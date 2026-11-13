@@ -6,6 +6,8 @@ export interface DbUser {
   role: string;
   full_name: string | null;
   is_active: boolean;
+  email_verified_at?: Date | null;
+  invitation_pending?: boolean;
   reset_token?: string | null;
   reset_token_exp?: Date | null;
   created_at: Date;
@@ -19,6 +21,7 @@ export interface SafeUser {
   role: string;
   fullName: string | null;
   isActive: boolean;
+  emailVerified?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
