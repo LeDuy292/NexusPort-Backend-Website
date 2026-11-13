@@ -239,6 +239,8 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         {
             ["documentType"] = input.Source.DocumentType,
             ["referenceNumber"] = input.Source.ReferenceNumber,
+            ["bookingNumber"] = input.Source.BookingNumber,
+            ["blNumber"] = input.Source.BlNumber,
             ["verificationStatus"] = "UNVERIFIED",
             ["notice"] = "Tham chiếu DO/eDO đang chờ đối chiếu; bản nháp chưa xác nhận quyền nhận hàng."
         };

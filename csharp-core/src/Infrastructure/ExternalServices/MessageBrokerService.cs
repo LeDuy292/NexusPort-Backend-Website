@@ -1,3 +1,5 @@
+using System.Net;
+using System.Net.Mail;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
@@ -67,5 +69,55 @@ public interface IEmailService
 
 public class EmailService : IEmailService
 {
-    public Task SendEmailAsync(string to, string subject, string body, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<EmailService> _logger;
+
+    public EmailService(IConfiguration configuration, ILogger<EmailService> logger)
+    {
+        _configuration = configuration;
+        _logger = logger;
+    }
+
+    public async Task SendEmailAsync(string to, string subject, string body, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var host = _configuration["EmailSettings:SmtpHost"] ?? "smtp.gmail.com";
+            var port = int.TryParse(_configuration["EmailSettings:SmtpPort"], out var p) ? p : 587;
+            var user = _configuration["EmailSettings:SmtpUser"];
+            var pass = _configuration["EmailSettings:SmtpPass"];
+            var senderName = _configuration["EmailSettings:SenderName"] ?? "NexusPort";
+            var senderEmail = _configuration["EmailSettings:SenderEmail"] ?? user ?? "noreply@nexusport.com";
+            var enableSsl = !bool.TryParse(_configuration["EmailSettings:EnableSsl"], out var ssl) || ssl;
+
+            if (string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(pass))
+            {
+                _logger.LogWarning("EmailSettings not fully configured. Skipping email delivery to {To}", to);
+                return;
+            }
+
+            using var client = new SmtpClient(host, port)
+            {
+                Credentials = new NetworkCredential(user, pass),
+                EnableSsl = enableSsl
+            };
+
+            using var mail = new MailMessage
+            {
+                From = new MailAddress(senderEmail, senderName),
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = true
+            };
+            mail.To.Add(to);
+
+            await client.SendMailAsync(mail, cancellationToken);
+            _logger.LogInformation("Email sent successfully to {To}", to);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to send email to {To}", to);
+            throw;
+        }
+    }
 }

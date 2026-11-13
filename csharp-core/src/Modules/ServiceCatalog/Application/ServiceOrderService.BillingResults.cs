@@ -22,12 +22,11 @@ public sealed partial class ServiceOrderService
         Require(input.Status!="REJECTED"||input.Total==null,"Kết quả từ chối không kèm số tiền.");
         var fingerprint=Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new{actor=Actor,input.Status,reference,total=input.Total.HasValue?(long?)input.Total.Value:null,input.Currency,reason,input.SourceDocumentsChecked,evidence}))));
         await using var tx=await db.Database.BeginTransactionAsync(ct);
-        Require(!((await OrderAccess(ct)).HasValue),"Khách hàng không được tự trả kết quả duyệt hoặc đặt số tiền.",403,"FORBIDDEN");
         await LockOrder(id,ct);var order=await OrderRow(id,null,ct,true);
         var replay=(await Rows("SELECT actor_id AS \"actorId\",fingerprint FROM eport_service_order_events WHERE draft_id=@p0 AND request_id=@p1",ct,id,input.RequestId)).SingleOrDefault();
         if(replay!=null){Require(G(replay,"actorId")==Actor&&S(replay,"fingerprint")==fingerprint,"Mã yêu cầu đã dùng cho kết quả khác.",409,"SERVICE_REQUEST_REUSED");await tx.CommitAsync(ct);return OrderView(order,null);}
         Require(order["version"]!.GetValue<int>()==input.ExpectedVersion,"Hồ sơ đã thay đổi; đọc lại phiên bản trước khi trả kết quả.",409,"SERVICE_ORDER_VERSION_CONFLICT");
-        Require(S(order,"pricingMode")=="DISPATCHER"&&S(order,"pricingStatus")=="AWAITING"&&S(order,"status") is "PENDING_APPROVAL" or "RECEIVED","Hồ sơ không còn chờ kết quả Dispatcher.",409,"SERVICE_BILL_STATE");
+        Require(S(order,"pricingMode")=="DISPATCHER"&&S(order,"pricingStatus")=="AWAITING"&&S(order,"status") is "CONFIRMED" or "PENDING_APPROVAL" or "RECEIVED","Hồ sơ không còn chờ kết quả Dispatcher.",409,"SERVICE_BILL_STATE");
         Require(input.Status!="APPROVED"||S(order,"flow")!="IMPORT"||input.SourceDocumentsChecked&&evidence.Length>=3,"Kết quả duyệt hàng nhập cần xác nhận đã đối chiếu DO/eDO và căn cứ quyền nhận hàng.",422,"SERVICE_SOURCE_REVIEW_REQUIRED");
         if(input.Status=="APPROVED")
             await Exec("INSERT INTO eport_service_bills(id,draft_id,request_id,actor_id,external_reference,total,note,fingerprint) VALUES(@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7)",ct,Guid.NewGuid(),id,input.RequestId,Actor,reference,input.Total!.Value,reason,fingerprint);

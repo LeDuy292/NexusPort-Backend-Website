@@ -369,4 +369,34 @@ public sealed partial class ServiceOrderService
         await AddPayOsWebhookEvent(id, payment, order, webhook, "PAYMENT_REVIEW_REQUIRED", reason, ct);
         if (!PaymentReviewRequired(order)) await PaymentState(id, "PENDING", ct);
     }
+
+    public async Task<object> SimulatePaymentSuccess(Guid id, CancellationToken ct)
+    {
+        await LockOrder(id, ct);
+        var order = await OrderRow(id, null, ct, true);
+        var amount = order["total"]?.GetValue<decimal>() ?? 583200m;
+        var paymentId = Guid.NewGuid();
+        var paymentNo = "PAY-SIM-" + DateTime.UtcNow.ToString("yyMMddHHmmss");
+        var bankRef = "SIMULATED-PAYOS-" + DateTime.UtcNow.Ticks.ToString("x");
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var orderCode = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        await Exec("""
+            INSERT INTO eport_service_payments(id,draft_id,request_id,number,method,order_code,status,amount,currency,created_by,bank_reference,gateway_status,gateway_error,reason,created_at,updated_at)
+            VALUES(@p0,@p1,@p0,@p2,'PAYOS',@p3,'SUCCEEDED',@p4,'VND',@p5,@p6,'PAID','', 'Thanh toán thử nghiệm thành công (Test Mode)',now(),now())
+            """, ct, paymentId, id, paymentNo, orderCode, amount, Actor, bankRef);
+
+        await PaymentState(id, "PAID", ct);
+        await AddEvent(id, "PAYMENT_SUCCEEDED", S(order, "status"), S(order, "status"), "Xác nhận thanh toán thử nghiệm thành công", ct, Guid.NewGuid(), "SIMULATED", new JsonObject
+        {
+            ["paymentId"] = paymentId.ToString(),
+            ["amount"] = amount,
+            ["reference"] = bankRef
+        });
+
+        var updated = await OrderRow(id, null, ct);
+        await QueueServiceMail(updated, "PAYMENT_RECEIPT", ct);
+        await tx.CommitAsync(ct);
+        return new { success = true, message = "Thanh toán thành công!", order = OrderView(updated, null) };
+    }
 }
