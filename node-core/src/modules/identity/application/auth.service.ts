@@ -1,4 +1,6 @@
 import bcrypt from 'bcryptjs';
+import { randomUUID } from 'crypto';
+import { query } from '../../../infrastructure/database/db';
 import jwt from 'jsonwebtoken';
 import { UserRepository } from '../infrastructure/user.repository';
 import { DbUser, LoginResult, SafeUser } from '../domain/user.types';
@@ -19,6 +21,7 @@ export class AuthService {
       role: u.role,
       fullName: u.full_name,
       isActive: u.is_active,
+      emailVerified: !!u.email_verified_at,
       createdAt: u.created_at,
       updatedAt: u.updated_at,
     };
@@ -34,6 +37,9 @@ export class AuthService {
       throw new UnauthorizedError('Tài khoản không tồn tại!');
     }
 
+    if (user.role === 'Driver' && (!user.email_verified_at || user.invitation_pending)) {
+      throw new ForbiddenError('Tài khoản tài xế chưa xác minh email. Vui lòng mở link trong email và tạo mật khẩu.');
+    }
     if (!user.is_active) {
       throw new ForbiddenError('Tài khoản đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.');
     }
@@ -49,7 +55,10 @@ export class AuthService {
       carrierId = await this.userRepo.findCarrierIdByUserId(user.id);
     }
 
+    const sessionId = randomUUID();
+    await query('UPDATE users SET session_id=$2 WHERE id=$1', [user.id, sessionId]);
     const payload: Record<string, unknown> = {
+      sessionId,
       id: user.id,
       sub: user.id,
       'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier': user.id,

@@ -2,7 +2,7 @@ import { getClient, query } from '../../../infrastructure/database/db';
 import { AppError } from '../../../shared/errors/app-error';
 import { ContainerIdentitySearchDto } from '../application/container.dto';
 
-export type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier' | 'Shipping Line' | 'Driver' | 'Berth Staff';
+export type ContainerRole = 'Administrator' | 'Dispatcher' | 'Yard Staff' | 'Gate Officer' | 'Carrier' | 'Shipping Line' | 'Driver';
 
 interface YardVisitReader {
   id: string;
@@ -121,8 +121,7 @@ export class ContainerJourneyRepository {
     } else if (reader?.role === 'Shipping Line') {
       add(`COALESCE(c.shipping_line_id,(SELECT p.shipping_line_id FROM shipping_line_prefixes p WHERE p.prefix=left(c.container_no,4)))
         = (${ownShippingLine})`, reader.id);
-    } else if (reader?.role === 'Berth Staff') {
-      where.push('v.vessel_call_id IS NOT NULL');
+
     }
     if (number) add('c.container_no LIKE ?', number + '%');
     if (customer) add("v.customer_name ILIKE ? ESCAPE '\\'", '%' + customer.replace(/[\\%_]/g, '\\$&') + '%');

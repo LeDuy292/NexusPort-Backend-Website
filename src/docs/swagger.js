@@ -31,7 +31,6 @@ const options = {
         '| dispatcher01 | Dispatcher | NexusPort@2026 |\n' +
         '| gate01 | Gate Officer | NexusPort@2026 |\n' +
         '| yard01 | Yard Operator | NexusPort@2026 |\n' +
-        '| berth01 | Berth Staff | NexusPort@2026 |\n' +
         '| carrier01 | Transport Company | NexusPort@2026 |\n' +
         '| driver01 | Driver | NexusPort@2026 |\n\n' +
         shippingLineAccounts,
@@ -82,7 +81,6 @@ const options = {
                 'Dispatcher',
                 'Gate Officer',
                 'Yard Operator',
-                'Berth Staff',
                 'Shipping Line',
               ],
               example: 'Dispatcher',

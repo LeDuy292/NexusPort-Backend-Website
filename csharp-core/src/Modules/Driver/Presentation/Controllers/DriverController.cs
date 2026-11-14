@@ -81,8 +81,7 @@ public class DriverController : ControllerBase
              c.Value.Equals("Gate Officer", StringComparison.OrdinalIgnoreCase) ||
              c.Value.Equals("Gate", StringComparison.OrdinalIgnoreCase) ||
              c.Value.Equals("Yard Operator", StringComparison.OrdinalIgnoreCase) ||
-             c.Value.Equals("Yard Staff", StringComparison.OrdinalIgnoreCase) ||
-             c.Value.Equals("Berth Staff", StringComparison.OrdinalIgnoreCase)));
+             c.Value.Equals("Yard Staff", StringComparison.OrdinalIgnoreCase)));
     }
 
     [HttpPost("extract-cccd")]
@@ -341,65 +340,7 @@ public class DriverController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<ActionResult<DriverDto>> Create([FromBody] CreateDriverDto dto, [FromQuery] Guid? carrierId, CancellationToken cancellationToken)
-    {
-        Guid targetCarrierId;
-        if (IsPortStaff())
-        {
-            if (carrierId.HasValue && carrierId.Value != Guid.Empty)
-            {
-                targetCarrierId = carrierId.Value;
-            }
-            else
-            {
-                var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-                var conn = db.Database.GetDbConnection();
-                bool openedByUs = false;
-                if (conn.State != System.Data.ConnectionState.Open)
-                {
-                    await db.Database.OpenConnectionAsync(cancellationToken);
-                    openedByUs = true;
-                }
-                object result;
-                try
-                {
-                    using (var command = conn.CreateCommand())
-                    {
-                        command.CommandText = "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1";
-                        result = await command.ExecuteScalarAsync(cancellationToken);
-                    }
-                }
-                finally
-                {
-                    if (openedByUs)
-                    {
-                        await db.Database.CloseConnectionAsync();
-                    }
-                }
-                if (result == null) 
-                {
-                    return BadRequest(new { message = "Không tìm thấy công ty 'Cảng Tiên Sa' trong hệ thống. Vui lòng tạo một Công ty Vận tải tên là 'Cảng Tiên Sa' trước!" });
-                }
-                targetCarrierId = (Guid)result;
-            }
-        }
-        else
-        {
-            var userCarrierId = GetCarrierIdFromToken();
-            if (userCarrierId == null) return Forbid();
-            targetCarrierId = userCarrierId.Value;
-        }
-
-        try
-        {
-            var item = await _service.CreateAsync(targetCarrierId, dto, cancellationToken);
-            return CreatedAtAction(nameof(GetById), new { id = item.Id }, item);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
+    public ActionResult Create() => StatusCode(410, new { message = "Vui lòng tạo tài khoản từ trang quản lý tài xế của công ty vận tải." });
 
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<DriverDto>> Update(Guid id, [FromBody] UpdateDriverDto dto, CancellationToken cancellationToken)

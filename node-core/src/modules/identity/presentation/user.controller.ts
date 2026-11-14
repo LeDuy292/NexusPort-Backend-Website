@@ -3,6 +3,7 @@ import jwt, { JwtPayload } from 'jsonwebtoken';
 import { UserService } from '../application/user.service';
 import { UserRepository } from '../infrastructure/user.repository';
 import { UnauthorizedError, ForbiddenError } from '../../../shared/errors/app-error';
+import { authenticateAccountManager } from './driver-account.controller';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!';
 
@@ -109,9 +110,14 @@ export class UserController {
 export const createUserRouter = (): Router => {
   const router = Router();
   const controller = new UserController();
+  router.use(authenticateAccountManager);
 
   router.get('/carrier-staff', controller.getCarrierStaffs);
   router.post('/carrier-staff', controller.createCarrierStaff);
+  router.use((req, _res, next) => {
+    if ((req as Request & {actor?:{role:string}}).actor?.role !== 'Administrator') return next(new ForbiddenError());
+    next();
+  });
   router.patch('/:id/activate', controller.activateUser);
   router.patch('/:id/deactivate', controller.deactivateUser);
   router.get('/', controller.listUsers);

@@ -103,7 +103,8 @@ export const routeDestinationKey = (row: DriverRouteRow) => `${row.operationId ?
 
 export class DriverRouteRepository {
   async resolveDriverId(accountId: string): Promise<string | null> {
-    const result = await query(`SELECT d.id FROM drivers d WHERE (d.user_id=$1 OR (d.id=$1 AND d.user_id IS NULL))
+    const result = await query(`SELECT d.id FROM drivers d JOIN users u ON u.id=d.user_id
+      WHERE d.user_id=$1 AND u.role='Driver' AND u.is_active AND u.email_verified_at IS NOT NULL AND NOT u.invitation_pending
       AND d.status::text NOT IN ('inactive','banned') LIMIT 1`, [accountId]);
     return result.rows[0]?.id ?? null;
   }

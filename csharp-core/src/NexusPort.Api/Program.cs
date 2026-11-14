@@ -5,6 +5,8 @@ using NexusPort.Api.Middleware;
 using NexusPort.Modules.Carrier;
 
 var builder = WebApplication.CreateBuilder(args);
+if (builder.Environment.IsDevelopment())
+    builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true).AddEnvironmentVariables();
 ApplyDeploymentConfigFallbacks(builder.Configuration);
 
 // Fix Npgsql DateTime timezone conversion error

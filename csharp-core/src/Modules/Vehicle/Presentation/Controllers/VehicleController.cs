@@ -40,8 +40,7 @@ public class VehicleController : ControllerBase
                role.Equals("Gate Officer", StringComparison.OrdinalIgnoreCase) ||
                role.Equals("Gate", StringComparison.OrdinalIgnoreCase) ||
                role.Equals("Yard Operator", StringComparison.OrdinalIgnoreCase) ||
-               role.Equals("Yard Staff", StringComparison.OrdinalIgnoreCase) ||
-               role.Equals("Berth Staff", StringComparison.OrdinalIgnoreCase);
+               role.Equals("Yard Staff", StringComparison.OrdinalIgnoreCase);
     }
 
     private Guid? GetCarrierIdFromToken()

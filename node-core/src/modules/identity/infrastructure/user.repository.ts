@@ -5,7 +5,7 @@ export class UserRepository {
   async findByUsernameOrEmail(identifier: string): Promise<DbUser | null> {
     const res = await query(
       `SELECT id, username, email, password, role, full_name, is_active,
-              reset_token, reset_token_exp, created_at, updated_at
+              email_verified_at, invitation_pending, reset_token, reset_token_exp, created_at, updated_at
          FROM users
         WHERE LOWER(username) = LOWER($1) OR LOWER(email) = LOWER($1)
         LIMIT 1`,
@@ -17,7 +17,7 @@ export class UserRepository {
   async findById(id: string): Promise<DbUser | null> {
     const res = await query(
       `SELECT id, username, email, password, role, full_name, is_active,
-              reset_token, reset_token_exp, created_at, updated_at
+              email_verified_at, invitation_pending, reset_token, reset_token_exp, created_at, updated_at
          FROM users
         WHERE id = $1
         LIMIT 1`,
