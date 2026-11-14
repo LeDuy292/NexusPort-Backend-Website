@@ -1,6 +1,7 @@
 using Amazon;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Amazon.Runtime;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -13,12 +14,15 @@ public interface IS3StorageService
     string GetPresignedUrl(string? keyOrUrl, int expireDays = 7);
 }
 
-public class S3StorageService : IS3StorageService
+public class S3StorageService : IS3StorageService, IDisposable
 {
     private readonly string _bucketName;
     private readonly string _region;
     private readonly IAmazonS3 _s3Client;
     private readonly ILogger<S3StorageService> _logger;
+    private readonly object _signingLock = new();
+    private DateTime _credentialRetryAfter;
+    private readonly bool _ownsClient;
 
     private readonly string _defaultFolder;
 
@@ -32,6 +36,7 @@ public class S3StorageService : IS3StorageService
         _defaultFolder = configuration["AWS:Folder"] ?? "NexusPort/drivers";
 
         var regionEndpoint = RegionEndpoint.GetBySystemName(_region);
+        _ownsClient = s3Client == null;
         
         if (s3Client != null)
         {
@@ -80,21 +85,38 @@ public class S3StorageService : IS3StorageService
             key = keyOrUrl.TrimStart('/');
         }
 
-        try
+        lock (_signingLock)
         {
-            var request = new GetPreSignedUrlRequest
+            // A missing provider can spend tens of seconds probing metadata.
+            // Do not repeat that discovery for every image and every request.
+            if (DateTime.UtcNow < _credentialRetryAfter) return keyOrUrl;
+            try
             {
-                BucketName = _bucketName,
-                Key = key,
-                Expires = DateTime.UtcNow.AddDays(expireDays)
-            };
-            return _s3Client.GetPreSignedURL(request);
+                var request = new GetPreSignedUrlRequest
+                {
+                    BucketName = _bucketName,
+                    Key = key,
+                    Expires = DateTime.UtcNow.AddDays(expireDays)
+                };
+                return _s3Client.GetPreSignedURL(request);
+            }
+            catch (AmazonClientException ex) when (ex.Message.Contains("credential", StringComparison.OrdinalIgnoreCase))
+            {
+                _credentialRetryAfter = DateTime.UtcNow.AddMinutes(1);
+                _logger.LogWarning("S3 credentials are unavailable. Configure AWS credentials; presigning will retry in one minute.");
+                return keyOrUrl;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to generate presigned URL for key: {Key}", key);
+                return keyOrUrl;
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to generate presigned URL for key: {Key}", key);
-            return keyOrUrl;
-        }
+    }
+
+    public void Dispose()
+    {
+        if (_ownsClient) _s3Client.Dispose();
     }
 
     public async Task<string> UploadFileAsync(Stream stream, string fileName, string contentType, string folder = "NexusPort/drivers", CancellationToken cancellationToken = default)

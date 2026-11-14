@@ -251,6 +251,7 @@ public class CancelBookingDto
 
 public class BookingFilterParams
 {
+    public Guid? DriverId { get; set; }
     public Guid? CarrierId { get; set; }
     public string? Search { get; set; }
     public BookingStatus? Status { get; set; }

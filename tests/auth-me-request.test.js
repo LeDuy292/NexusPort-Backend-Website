@@ -21,8 +21,15 @@ test('me reuses middleware account: one fresh DB lookup per request, no secrets 
 });
 test('disabling the account takes effect on the very next heartbeat',async()=>{
   User.findByPk.mockResolvedValue({id:'account',is_active:false});
-  expect((await request(app).get('/me').set('Authorization','Bearer valid')).status).toBe(401);
+  const res=await request(app).get('/me').set('Authorization','Bearer valid');
+  expect(res.status).toBe(401);expect(res.body.code).toBe('ACCOUNT_DISABLED');
   expect(User.findByPk).toHaveBeenCalledTimes(1);
+});
+
+test('the login authority identifies a replaced session explicitly',async()=>{
+  User.findByPk.mockResolvedValue({id:'account',is_active:true,session_id:'new-session'});
+  const res=await request(app).get('/me').set('Authorization','Bearer valid');
+  expect(res.status).toBe(401);expect(res.body.code).toBe('SESSION_KICKED');
 });
 test('anonymous requests do not access the DB',async()=>{
   expect((await request(app).get('/me')).status).toBe(401);

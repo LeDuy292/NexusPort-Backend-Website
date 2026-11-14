@@ -43,55 +43,16 @@ public class VehicleController : ControllerBase
                role.Equals("Yard Staff", StringComparison.OrdinalIgnoreCase);
     }
 
-    private Guid? GetCarrierIdFromToken()
-    {
-        var carrierIdStr = User.FindFirst("CarrierId")?.Value 
-            ?? User.Claims.FirstOrDefault(c => c.Type.Equals("CarrierId", StringComparison.OrdinalIgnoreCase) || c.Type.Equals("carrier_id", StringComparison.OrdinalIgnoreCase))?.Value;
-        if (Guid.TryParse(carrierIdStr, out var carrierId)) return carrierId;
-
-        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? User.Claims.FirstOrDefault(c => c.Type.Equals("sub", StringComparison.OrdinalIgnoreCase) || c.Type.Equals("id", StringComparison.OrdinalIgnoreCase))?.Value;
-        if (Guid.TryParse(userIdStr, out var userId))
-        {
-            var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-            var conn = db.Database.GetDbConnection();
-            bool opened = false;
-            if (conn.State != System.Data.ConnectionState.Open)
-            {
-                db.Database.OpenConnection();
-                opened = true;
-            }
-            try
-            {
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = "SELECT carrier_id FROM carrier_users WHERE user_id = @userId LIMIT 1";
-                var param = cmd.CreateParameter();
-                param.ParameterName = "@userId";
-                param.Value = userId;
-                cmd.Parameters.Add(param);
-                var result = cmd.ExecuteScalar();
-                if (result != null && Guid.TryParse(result.ToString(), out var dbCarrierId))
-                {
-                    return dbCarrierId;
-                }
-            }
-            finally
-            {
-                if (opened)
-                {
-                    db.Database.CloseConnection();
-                }
-            }
-        }
-        return null;
-    }
+    private Task<Guid?> GetCarrierIdAsync(CancellationToken token) =>
+        NexusPort.Infrastructure.Authentication.CarrierAccess.ResolveAsync(
+            HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>(), User, token);
 
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<VehicleDto>>> GetAll([FromQuery] VehicleFilterDto filter, CancellationToken cancellationToken)
     {
         if (!IsPortStaff())
         {
-            var userCarrierId = GetCarrierIdFromToken();
+            var userCarrierId = await GetCarrierIdAsync(cancellationToken);
             if (userCarrierId == null) return StatusCode(403, new { message = "You don't have a valid Carrier Profile." });
             filter.CarrierId = userCarrierId; // Force filter
         }
@@ -114,7 +75,9 @@ public class VehicleController : ControllerBase
         {
             using (var command = conn.CreateCommand())
             {
-                command.CommandText = "SELECT id, full_name FROM drivers";
+                var driverIds = command.CreateParameter(); driverIds.ParameterName = "driverIds";
+                driverIds.Value = items.Where(x => x.DriverId.HasValue).Select(x => x.DriverId!.Value).Distinct().ToArray(); command.Parameters.Add(driverIds);
+                command.CommandText = "SELECT id, full_name FROM drivers WHERE id=ANY(@driverIds)";
                 using (var reader = await command.ExecuteReaderAsync(cancellationToken))
                 {
                     while (await reader.ReadAsync(cancellationToken))
@@ -126,7 +89,10 @@ public class VehicleController : ControllerBase
                     }
                 }
 
-                command.CommandText = "SELECT id, company_name FROM carriers";
+                command.Parameters.Clear();
+                var carrierIds = command.CreateParameter(); carrierIds.ParameterName = "carrierIds";
+                carrierIds.Value = items.Select(x => x.CarrierId).Distinct().ToArray(); command.Parameters.Add(carrierIds);
+                command.CommandText = "SELECT id, company_name FROM carriers WHERE id=ANY(@carrierIds)";
                 using (var carrierReader = await command.ExecuteReaderAsync(cancellationToken))
                 {
                     while (await carrierReader.ReadAsync(cancellationToken))
@@ -162,6 +128,25 @@ public class VehicleController : ControllerBase
         return Ok(items);
     }
 
+    [HttpGet("photos")]
+    public async Task<IActionResult> GetPhotos([FromQuery] Guid[] ids, CancellationToken ct)
+    {
+        if (ids.Length > 100) return BadRequest(new { message = "Mỗi lần chỉ tải tối đa 100 ảnh." });
+        var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
+        var company = IsPortStaff() ? null : await GetCarrierIdAsync(ct);
+        if (!IsPortStaff() && company == null) return Forbid();
+        var rows = await db.Set<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>().AsNoTracking()
+            .Where(v => ids.Contains(v.Id) && (company == null || v.CarrierId == company))
+            .Select(v => new { v.Id, v.PhotoUrl }).ToListAsync(ct);
+        var photos = new Dictionary<Guid, string>();
+        foreach (var row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!string.IsNullOrWhiteSpace(row.PhotoUrl)) photos[row.Id] = _s3StorageService.GetPresignedUrl(row.PhotoUrl);
+        }
+        return Ok(photos);
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<VehicleDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
@@ -170,7 +155,7 @@ public class VehicleController : ControllerBase
 
         if (!IsPortStaff())
         {
-            var userCarrierId = GetCarrierIdFromToken();
+            var userCarrierId = await GetCarrierIdAsync(cancellationToken);
             if (userCarrierId == null || item.CarrierId != userCarrierId) return StatusCode(403, new { message = "Access denied." });
         }
 
@@ -199,7 +184,7 @@ public class VehicleController : ControllerBase
         }
         else
         {
-            var userCarrierId = GetCarrierIdFromToken();
+            var userCarrierId = await GetCarrierIdAsync(cancellationToken);
             if (userCarrierId == null) return StatusCode(403, new { message = "You don't have a valid Carrier Profile." });
             targetCarrierId = userCarrierId.Value;
         }
@@ -285,7 +270,7 @@ public class VehicleController : ControllerBase
         }
         else
         {
-            var userCarrierId = GetCarrierIdFromToken();
+            var userCarrierId = await GetCarrierIdAsync(cancellationToken);
             if (userCarrierId == null || existing.CarrierId != userCarrierId) return StatusCode(403, new { message = "Bạn chỉ được phép sửa xe của công ty mình." });
         }
 
@@ -320,7 +305,7 @@ public class VehicleController : ControllerBase
         }
         else
         {
-            var userCarrierId = GetCarrierIdFromToken();
+            var userCarrierId = await GetCarrierIdAsync(cancellationToken);
             if (userCarrierId == null || existing.CarrierId != userCarrierId) return StatusCode(403, new { message = "Bạn chỉ được phép sửa xe của công ty mình." });
         }
 
@@ -347,47 +332,8 @@ public class VehicleController : ControllerBase
         }
         else
         {
-            var userCarrierId = GetCarrierIdFromToken();
+            var userCarrierId = await GetCarrierIdAsync(cancellationToken);
             if (userCarrierId == null || existing.CarrierId != userCarrierId) return StatusCode(403, new { message = "Bạn chỉ được phép sửa xe của công ty mình." });
-        }
-
-        if (dto.DriverId.HasValue)
-        {
-            var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-            var conn = db.Database.GetDbConnection();
-            bool openedByUs = false;
-            if (conn.State != System.Data.ConnectionState.Open)
-            {
-                await db.Database.OpenConnectionAsync(cancellationToken);
-                openedByUs = true;
-            }
-            object driverStatusObj;
-            try
-            {
-                using (var command = conn.CreateCommand())
-                {
-                    command.CommandText = "SELECT status FROM drivers WHERE id = @id";
-                    var param = command.CreateParameter();
-                    param.ParameterName = "@id";
-                    param.Value = dto.DriverId.Value;
-                    command.Parameters.Add(param);
-                    driverStatusObj = await command.ExecuteScalarAsync(cancellationToken);
-                }
-            }
-            finally
-            {
-                if (openedByUs)
-                {
-                    await db.Database.CloseConnectionAsync();
-                }
-            }
-            if (driverStatusObj == null) return NotFound(new { message = "Không tìm thấy tài xế." });
-            
-            var driverStatus = driverStatusObj.ToString()?.ToLower();
-            if (driverStatus == "inactive" || driverStatus == "banned")
-            {
-                return BadRequest(new { message = "Tài xế đang ở trạng thái tạm nghỉ hoặc bị đình chỉ. Không thể phân công!" });
-            }
         }
 
         try
