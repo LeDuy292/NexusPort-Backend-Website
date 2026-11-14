@@ -72,7 +72,7 @@ public partial class BookingService : IBookingService
         // Tenant Isolation Check
         if (userCarrierId.HasValue && userCarrierId.Value != Guid.Empty && entity.CarrierId != userCarrierId.Value)
         {
-            throw new UnauthorizedException("Access denied. You do not have permission to view this Booking.");
+            throw new ForbiddenException("Access denied. You do not have permission to view this Booking.");
         }
 
         var dto = MapToDto(entity);
@@ -377,7 +377,7 @@ public partial class BookingService : IBookingService
         // Tenant Isolation Check
         if (userCarrierId.HasValue && userCarrierId.Value != Guid.Empty && entity.CarrierId != userCarrierId.Value)
         {
-            throw new UnauthorizedException("Access denied. You can only update Bookings belonging to your company.");
+            throw new ForbiddenException("Access denied. You can only update Bookings belonging to your company.");
         }
 
         // Business Rule Check: Only Pending bookings can be updated by Transport Company
@@ -454,7 +454,7 @@ public partial class BookingService : IBookingService
         // Tenant Isolation Check
         if (userCarrierId.HasValue && userCarrierId.Value != Guid.Empty && entity.CarrierId != userCarrierId.Value)
         {
-            throw new UnauthorizedException("Access denied. You can only cancel Bookings belonging to your company.");
+            throw new ForbiddenException("Access denied. You can only cancel Bookings belonging to your company.");
         }
 
         // Business Rule Check: Cannot cancel if already checked-in or completed
@@ -799,13 +799,17 @@ public partial class BookingService : IBookingService
 
         if (userCarrierId.HasValue && userCarrierId.Value != Guid.Empty && entity.CarrierId != userCarrierId.Value)
         {
-            throw new UnauthorizedException("Access denied. You can only assign resources to Bookings belonging to your company.");
+            throw new ForbiddenException("Bạn chỉ được phân công booking thuộc công ty mình.");
         }
 
         if (entity.Status is not (BookingStatus.Pending or BookingStatus.Ready or BookingStatus.Approved))
         {
             throw new ValidationException("Status", $"Lịch hẹn ở trạng thái '{entity.Status}' không thể điều phối lại phương tiện.");
         }
+
+        if (entity.TripStatus is "Arrived" or "Processing" or "PartiallyCompleted" or "Completed")
+            throw new ValidationException("TripStatus", "Chuyến đã vào cảng hoặc đang xử lý không thể đổi phân công tại đây.");
+        await EnsureBookingNotDispatchedAsync(id, cancellationToken);
 
         // Validate Driver
         var driver = await _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
@@ -893,7 +897,7 @@ public partial class BookingService : IBookingService
             entity.AppointmentStart.ToUniversalTime(), entity.AppointmentEnd.ToUniversalTime(), entity.Id, cancellationToken);
 
         await CaptureFleetDetailsAsync(entity,cancellationToken);
-        entity.MarkReady();
+        if (entity.Status != BookingStatus.Approved) entity.MarkReady();
 
         await _repository.UpdateAsync(entity, cancellationToken);
         await fleetTransaction.CommitAsync(cancellationToken);
@@ -937,7 +941,7 @@ public partial class BookingService : IBookingService
         if (bookingId.HasValue)
         {
             var booking = await _repository.GetByIdAsync(bookingId.Value, cancellationToken);
-            if (booking == null || booking.CarrierId != carrierId) throw new UnauthorizedException("Booking không thuộc công ty.");
+            if (booking == null || booking.CarrierId != carrierId) throw new ForbiddenException("Booking không thuộc công ty.");
             start = booking.AppointmentStart.ToUniversalTime();
             end = booking.AppointmentEnd.ToUniversalTime();
         }

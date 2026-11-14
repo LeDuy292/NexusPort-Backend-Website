@@ -1,140 +1,91 @@
-# Company-managed driver accounts
+# Driver accounts and fleet management
 
-Branch: `fix/driver-account-approval`, based on `origin/develop`.
-The previous admin-approval implementation was committed and pushed first:
-backend `e864e5c`, frontend `582faaa`. The current implementation removes that
-approval workflow. No administrator action is required to create driver accounts.
+Driver account provisioning, linking, email activation and resending are owned by C#.
+The frontend uses the C# /api/v1 proxy. Node still serves the existing general login,
+heartbeat and driver journey workflows, but no longer exposes driver-account writes.
 
-## User flow
+## Stored account state
 
-The Transport Company's existing **Thêm Tài Xế Mới** dialog keeps its identity
-document uploads/OCR and license fields, and includes **Tên đăng nhập** and
-**Email nhận xác nhận**. Clicking **Tạo tài khoản** immediately creates the driver,
-an inactive login and company membership, then sends a verification email through
-the existing C# mail service. Company staff never choose or see the password.
+GET /api/v1/Driver reads users.invitation_pending, users.email_verified_at and
+users.is_active together with the company-scoped driver list. There is no extra
+Node request to recheck email state. Lists do not update license statuses or scan
+and ban drivers belonging to other companies. License expiry is checked when
+selecting/assigning resources; the UI also shows expiry warnings.
 
-The driver opens the email link and creates a password within 24 hours. Successful
-activation records email verification, consumes the link, enables login, activates
-new driver profiles and revokes prior login sessions. Expired/used links cannot be
-accepted. The company can send a fresh link from **Gửi lại link** on that driver's
-card or detail; the previous link is revoked. The page offers **Làm mới trạng thái**.
-
-Each linked driver's card/detail shows **Đã xác minh** or **Chưa xác minh** based
-on `users.email_verified_at`, immediately after the name. Unverified drivers have
-the resend action and cannot log in or restore old sessions. A resend never
-changes their password. Exactly three explicitly approved legacy test accounts
-are administratively marked verified: Gia Huy\8k, Nguyen Dinh Tien (`tiendriver`)
-and Phan Nguyen Gia Huy with license `660225020133` in the displayed company.
-Every other driver must confirm email through an invitation. Suspended accounts outside invitation onboarding
-cannot be reactivated through resend. Profiles without a login show **Chưa có tài
-khoản** and have no resend action. The account fields on editing an unlinked
-profile can also provision its login without creating a duplicate driver.
-
-The admin request queue and company request list are removed. Other existing
-admin user management is retained. The legacy direct Driver creation endpoints
-remain retired, so password provisioning cannot bypass email activation.
-
-## Data and API
-
-`users` owns authentication/contact/session state and the single controlled role
-string. `drivers` owns identity documents, license and operational information,
-with an explicit unique `user_id`. `carrier_users` owns company membership;
-`shipping_line_accounts` separately owns shipping-line membership. A dynamic
-role/permission catalog is not required for the current single-role model.
-
-The existing `account_requests` table is retained for historical compatibility and
-as the parent for invitation/audit records. Self-service provisioning inserts its
-record with status `approved`, `requested_by` set to the company actor, and no
-reviewer. It never queues a request. Prior migrations remain unchanged.
-
-Node `/api/v1` endpoints (frontend proxy `/node-api`):
-
-| Endpoint | Access | Result |
+| C# endpoint | Access | Result |
 | --- | --- | --- |
-| POST `/driver-accounts` | Transport Company | Create inactive Driver login/profile and send confirmation email |
-| GET `/driver-accounts/driver-links` | Company / Administrator | Allowed profiles' login links, email proof and invitation expiry |
-| POST `/driver-accounts/:driverId/resend` | Owning company / Administrator | Send a new 24-hour email link for an unverified account |
-| POST `/auth/activate-account` | Invitation holder | Confirm email, set password and enable login |
+| POST /api/v1/driver-accounts | Transport Company | Create an inactive account and profile, or link an existing unlinked profile, then send confirmation email |
+| POST /api/v1/driver-accounts/{driverId}/resend | Owning company / Administrator | Replace an unverified account's invitation with a new 24-hour link |
+| POST /api/v1/driver-accounts/activate | Invitation holder | Verify email, set password and activate the account |
 
-Company identity comes from active DB membership, never a submitted carrier ID.
-Creating/linking and resending are scoped to that company. Duplicate account
-creation is serialized and rejected. Email failure rolls back account, driver and
-invitation changes. A successful email followed by a failed DB commit can leave an
-unusable email; retry creation/resend in that rare case. A mail outbox can replace
-this transaction/delivery coupling later.
+Company identity comes from active DB membership. Account status is distinct from
+session authentication: a missing/ambiguous company returns 403, while an invalid
+login session returns 401. The frontend ignores an old request's 401 after a new
+login, and keeps sessions on timeouts, network failures and 403 responses.
 
-Invitation tokens contain 256 random bits; DB stores SHA-256 hashes only. Links
-are single-use and expire exactly 24 hours after issue. The frontend reads the
-token from the URL fragment and removes the fragment after mounting. Activation
-also checks the account's current email against the invitation recipient.
-Passwords use bcrypt cost 12 (10 characters minimum, 72 UTF-8 bytes maximum).
-A DB guard prevents manually activating accounts still pending invitation.
+The existing account_requests and account_invitations tables remain the audit and
+invitation storage. No new migration or backfill is required beyond the develop
+schema through 20261114_048_require_driver_verification.sql. Existing emailed links
+remain valid because token hashing, expiry, URL fragments and password format are
+unchanged. Creation is serialized, username/email collisions are rejected, and
+email delivery failure rolls back account/profile/invitation changes. A delivery
+succeeded immediately before a failed commit can still produce an unusable email;
+resending recovers that rare case.
 
-## Migration and configuration
+Activation checks the stored invitation against the current account email, expiry,
+used flag and blocked/pending state. Passwords use bcrypt cost 12, compatible with
+the existing login service. The library is [BCrypt.Net-Next](https://github.com/BcryptNet/bcrypt.net).
+No email or login checks are performed as side effects of loading a list.
 
-Apply every missing migration in filename order before starting Node Core.
-`20261114_047_driver_email_verification.sql` adds nullable `email_verified_at`;
-it does not change legacy account activation, passwords, bookings or company
-links. Earlier 044–046 provide invitations, restored driver/user FK integrity and
-the explicit nine-account legacy unblock. The previous data repair preserved all
-33 bookings and linked all nine retained driver profiles to users and companies.
-Subsequent explicitly requested cleanup backed up and removed five invalid/test
-drivers and their ten bookings; 23 other bookings and all physical containers
-were preserved. Migration `20261114_048_require_driver_verification.sql` supersedes
-the earlier blanket legacy unblock: only the three approved legacy IDs are marked
-verified with the requested test password. Other unverified drivers are inactive
-and awaiting email activation. DB guards, Express/TS login and session checks,
-Socket.IO authentication, and C# Driver token validation all enforce this rule.
+## C# configuration
 
-Node `.env`:
+Set AccountInvitations__FrontendOrigin to the frontend origin, and configure the
+existing EmailSettings__SmtpHost, SmtpPort, SmtpUser, SmtpPass and EnableSsl settings.
+Development uses ignored appsettings.Local.json. Run ./csharp-core/run.ps1 or dotnet run --project csharp-core/src/NexusPort.Api; the local launch profile sets Development so AWS/mail settings are loaded. Production uses environment variables/role credentials and does not load local secrets. SMTP delivery is called directly
+inside C#: ACCOUNT_EMAIL_SERVICE_URL, ACCOUNT_EMAIL_SERVICE_KEY and the old
+/internal/account-email relay are no longer needed. Never commit mail credentials.
 
-```
-ACCOUNT_ACTIVATION_ORIGIN=http://localhost:5173
-ACCOUNT_EMAIL_SERVICE_URL=http://localhost:5000/internal/account-email
-ACCOUNT_EMAIL_SERVICE_KEY=<random shared service secret>
-```
+## Fleet schedule and assignments
 
-C# environment/configuration:
+GET /api/v1/Booking/fleet-schedule?from=<UTC>&to=<UTC> accepts a positive window up
+to 24 hours. The UI provides a Vietnam-time date with full-day, morning and afternoon
+windows. It includes company bookings, live transport trips and service draft
+reservations. Unfinished trips and an unclosed physical gate entry stay busy after
+the planned end. Free resources use the same conflict policy as booking validation;
+maintenance, disabled, unverified linked accounts and invalid licenses are excluded.
+The response omits document images and booking snapshots.
 
-```
-AccountInvitations__FrontendOrigin=http://localhost:5173
-AccountInvitations__ServiceKey=<same shared service secret>
-EmailSettings__SmtpHost=smtp.gmail.com
-EmailSettings__SmtpPort=587
-EmailSettings__SmtpUser=<configured mailbox>
-EmailSettings__SmtpPass=<configured app password>
-EmailSettings__EnableSsl=true
-```
-
-Development may also use ignored `appsettings.Local.json`; environment variables
-override it. Local mail settings and the shared service key are configured in this
-worktree without committing them. Use the real HTTPS frontend origin and internal
-service endpoint in deployment. C# sends mail using the existing `IEmailService`;
-it returns 503 if SMTP credentials are missing. All account workflow logic is TS.
-
-The main backend/frontend repository directories are now on
-`fix/driver-account-approval`; their development services run from those main
-directories on C# :5000, Express :3001, Node :4000 and frontend :5173. The old
-authen worktrees are detached snapshots. Apply migrations before startup;
-Sequelize development sync is opt-in through `DB_SYNC=true` so restarting Express
-cannot silently change shared migration-owned tables or driver login links.
+GET /api/v1/Booking/{id}/fleet-options returns lightweight available choices for
+editing a company's booking. POST /api/v1/Booking/{id}/assign rechecks conflicts
+under resource locks and preserves Approved status. Checked-in/operational trips
+are not reassigned here. Default vehicle-driver assignments are separate from
+booking assignments: PATCH /api/v1/Vehicle/{id}/assign-driver validates company,
+verified account, license and existing default assignments in one transaction;
+it does not change the driver's transport workflow status.
 
 ## Verification
 
-```
-npm run build
-```
+- Build frontend with npm run build; run node --test tests/fleetApiClient.test.mjs.
+- Build C# tests/FleetManagementChecks and run its DLL. --postgres additionally
+  requires an isolated PostgreSQL instance at 127.0.0.1:55440, database/user
+  fleet_check, with database comment isolated-fleet-checks-20261114.
+- The PostgreSQL runner refuses an unmarked database, uses a unique schema with
+  synthetic accounts/resources, captures emails in memory, and removes that schema
+  afterward. It never loads application credentials or sends real messages.
+- Rebuild/restart the C# API and frontend together when testing the migrated routes.
 
-Real HTTP/SQL integration uses only the isolated test database, a local email
-receiver and disposable fixtures. No email is sent to real recipients:
+Fleet lists request includeDocuments=false and includePhotos=false: the data-list path
+never signs image URLs. HasPhoto indicates whether an optional avatar exists. After
+rendering the data, the frontend requests company-scoped GET /api/v1/Driver/photos
+or /api/v1/Vehicle/photos with repeated ids parameters (maximum 100 per batch).
+Avatar errors leave the list and counters usable. Document images load when a
+detail is opened. AWS S3 remains the storage backend. The S3 client is shared, and
+a credential lookup failure is retried after one minute instead of once per image.
+The two data requests each use four SQL commands, including membership and
+name/account enrichment; optional photos are separate requests.
 
-```powershell
-$env:DATABASE_URL='postgresql://postgres@127.0.0.1:55438/nxp038_test'
-$env:DB_SSL='false'
-npm run db:migrate
-npx tsx src/scripts/check-driver-account-provisioning.ts
-```
-
-The check covers company creation with no admin, duplicate races, mail rollback,
-tenant isolation, actual verification metadata, company resend, expiry/revocation,
-single use, password login, manual-activation guards and legacy account access.
+Only the login authority can end the frontend session. Business-service 401s are
+checked against /api/auth/me before clearing credentials. The authority must return
+an explicit TOKEN_EXPIRED, TOKEN_INVALID, SESSION_KICKED, SESSION_LOGGED_OUT or
+ACCOUNT_DISABLED code. Unknown proxy responses and network failures preserve the
+session; expired, replaced and disabled sessions remain rejected by the backend.

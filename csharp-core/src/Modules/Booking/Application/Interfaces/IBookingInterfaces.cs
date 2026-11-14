@@ -16,6 +16,8 @@ public interface IBookingRepository
 
 public interface IBookingService
 {
+    Task<FleetScheduleDto> GetFleetScheduleAsync(Guid company, DateTime from, DateTime to, CancellationToken token);
+    Task<BookingFleetOptions> GetAssignmentOptionsAsync(Guid id, Guid company, CancellationToken token);
     Task<IReadOnlyList<BookingCargoSource>> GetBatchContainerOptionsAsync(Guid carrierId, string bookingType, BookingPlanningLeg? anchor, CancellationToken token);
     Task<BookingBatchPlan> PlanBatchAsync(BookingBatchRequest request,CancellationToken token,bool allowSingle = false);
     Task<BookingBatchDto> CreateBatchAsync(BookingBatchRequest request,CancellationToken token);
