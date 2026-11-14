@@ -25,6 +25,9 @@ export const createApp = (): Application => {
       allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma', 'Expires', 'X-Requested-With'],
     })
   );
+  // A reviewed Excel Manifest may contain thousands of cargo descriptions.
+  // Keep the larger JSON allowance scoped to Manifest save routes.
+  app.use(['/api/v1/shipping-line/manifests', '/api/shipping-line/manifests'], express.json({ limit: '32mb' }));
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   app.use(requestLogger);
