@@ -3,6 +3,17 @@ using System.Text.RegularExpressions;
 
 namespace NexusPort.Modules.ServiceCatalog.Domain;
 
+public sealed record ServiceDocumentItem
+{
+    public string DocumentType { get; init; } = "";
+    public string Title { get; init; } = "";
+    public string FileName { get; init; } = "";
+    public string FileUrl { get; init; } = "";
+    public long FileSizeBytes { get; init; }
+    public string ContentType { get; init; } = "";
+    public string? UploadedAt { get; init; }
+}
+
 public sealed record ServiceDeliveryInput
 {
     public string TransportMode { get; init; } = "TRUCK";
@@ -16,6 +27,7 @@ public sealed record ServiceDeliveryInput
     public string? OrderValidUntil { get; init; }
     public bool CustomsCheckSkipped { get; init; }
     public string CustomsConfirmationScope { get; init; } = "";
+    public ServiceDocumentItem[] Documents { get; init; } = [];
 }
 public sealed record ServiceInvoiceBuyer
 {
@@ -72,7 +84,8 @@ public static class ServiceDeliveryRules
         }
         return value with { Trips = value.TransportMode == "TRUCK" ? trips : [], TruckPlate = Text(value.TruckPlate, 20, "Biển số xe").ToUpperInvariant(), DriverName = Text(value.DriverName, 120, "Tài xế"),
             DriverPhone = Text(value.DriverPhone, 30, "Điện thoại tài xế"), BargeName = Text(value.BargeName, 150, "Tên sà lan"),
-            BargeVoyage = Text(value.BargeVoyage, 80, "Chuyến sà lan"), OrderValidUntil = until };
+            BargeVoyage = Text(value.BargeVoyage, 80, "Chuyến sà lan"), OrderValidUntil = until,
+            Documents = value.Documents ?? [] };
     }
     public static ServiceInvoiceBuyer NormalizeBuyer(ServiceInvoiceBuyer? value)
     {
