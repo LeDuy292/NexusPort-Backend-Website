@@ -22,11 +22,44 @@ public sealed partial class ServiceDraftService
     {
         Require(input.WorkflowVersion is 0 or 2, "Phiên bản quy trình không hợp lệ.");
         if (input.WorkflowVersion != 2) return input;
+        var plannedInstant = At(input.PlannedAt);
+        var plannedDate = plannedInstant == null ? null : TimeZoneInfo.ConvertTime(plannedInstant.Value, PortZone).ToString("yyyy-MM-dd");
         var until = input.Delivery.OrderValidUntil ?? input.Source.ValidUntil;
+        if (plannedDate != null && (until == null || string.CompareOrdinal(until, plannedDate) < 0))
+            until = plannedDate;
         var end = until == null ? null : DateTimeOffset.Parse(until + "T23:59:59+07:00", CultureInfo.InvariantCulture).ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
         var timed = (await Rows("SELECT id FROM eport_services WHERE code IN ('STORAGE_EXTENSION','REEFER_POWER') AND unit IN ('DAY','HOUR')", ct)).Select(row => G(row, "id")).ToHashSet();
-        return input with { Lines = input.Lines.Select(line => line with { Services = line.Services.Select(usage =>
-            timed.Contains(usage.ServiceId) ? usage with { StartsAt = usage.StartsAt ?? input.PlannedAt, EndsAt = usage.EndsAt ?? end } : usage).ToArray() }).ToArray() };
+        var lines = input.Lines.Select(line => line with {
+            Services = line.Services.Select(usage => {
+                if (!timed.Contains(usage.ServiceId)) return usage;
+                var start = usage.StartsAt ?? input.PlannedAt;
+                if (start != null && input.PlannedAt != null && string.CompareOrdinal(start, input.PlannedAt) < 0)
+                    start = input.PlannedAt;
+                var endsAt = usage.EndsAt ?? end;
+                if (start != null && (endsAt == null || string.CompareOrdinal(endsAt, start) <= 0))
+                    endsAt = DateTimeOffset.Parse(start, CultureInfo.InvariantCulture).AddHours(24).ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+                return usage with { StartsAt = start, EndsAt = endsAt };
+            }).ToArray()
+        }).ToArray();
+        var trips = input.Delivery.Trips;
+        if (plannedInstant != null && input.Delivery.TransportMode == "TRUCK" && trips.Length > 0)
+        {
+            var pAt = plannedInstant.Value;
+            trips = trips.Select(t => {
+                var s = DateTimeOffset.TryParse(t.AppointmentStart, CultureInfo.InvariantCulture, DateTimeStyles.None, out var st) ? st : pAt;
+                if (s < pAt) s = pAt;
+                var e = DateTimeOffset.TryParse(t.AppointmentEnd, CultureInfo.InvariantCulture, DateTimeStyles.None, out var et) ? et : s.AddHours(2);
+                if (e <= s) e = s.AddHours(2);
+                return t with {
+                    AppointmentStart = s.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+                    AppointmentEnd = e.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)
+                };
+            }).ToArray();
+        }
+        return input with {
+            Lines = lines,
+            Delivery = input.Delivery with { OrderValidUntil = until, Trips = trips }
+        };
     }
     public async Task<object> RegistrationEmailStatus(Guid id, ServiceDraftInput request, CancellationToken ct)
     {
@@ -94,7 +127,13 @@ public sealed partial class ServiceDraftService
         if (delivery.OrderValidUntil != null && input.PlannedAt != null)
         {
             var plannedDate = TimeZoneInfo.ConvertTime(DateTimeOffset.Parse(input.PlannedAt, CultureInfo.InvariantCulture), PortZone).ToString("yyyy-MM-dd");
-            if (string.CompareOrdinal(delivery.OrderValidUntil, plannedDate) < 0) Add("DELIVERY_ORDER_EXPIRED", "Hạn lệnh phải từ ngày dự kiến thực hiện trở đi.", "delivery.orderValidUntil");
+            if (string.CompareOrdinal(delivery.OrderValidUntil, plannedDate) < 0)
+            {
+                if (input.Flow == "EXPORT")
+                    Add("DELIVERY_ORDER_EXPIRED", "Hạn lệnh giao nhận trước ngày dự kiến thực hiện. Điều phối viên sẽ đối chiếu theo hạn Booking.", "delivery.orderValidUntil", warning: true);
+                else
+                    Add("DELIVERY_ORDER_EXPIRED", "Hạn lệnh phải từ ngày dự kiến thực hiện trở đi.", "delivery.orderValidUntil");
+            }
             if (input.Flow == "IMPORT" && input.Source.ValidUntil != null && string.CompareOrdinal(delivery.OrderValidUntil, input.Source.ValidUntil) > 0)
                 Add("DELIVERY_AFTER_EDO", "Hạn giao nhận không được vượt quá hạn DO/eDO.", "delivery.orderValidUntil");
         }

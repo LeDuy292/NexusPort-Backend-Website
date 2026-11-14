@@ -13,6 +13,7 @@ public sealed record ServiceDeliveryTrip
 }
 
 public sealed record ServiceTripVehicle(Guid Id, string PlateNumber, string VehicleType, string Status,
-    string? CurrentLocation, string? RfidTag, string? Description);
+    string? CurrentLocation, string? RfidTag, string? Description, string? PhotoUrl = null, string? RegistrationImageUrl = null);
 public sealed record ServiceTripDriver(Guid Id, string FullName, string? Phone, string LicenseNumber,
-    string Status, DateTime? LicenseExpiryDate, string? IdCardNumber, DateTime? IdCardExpiryDate);
+    string Status, DateTime? LicenseExpiryDate, string? IdCardNumber, DateTime? IdCardExpiryDate,
+    string? PhotoUrl = null, string? IdCardFrontUrl = null, string? IdCardBackUrl = null, string? LicenseImageUrl = null, string? LicenseBackImageUrl = null);
