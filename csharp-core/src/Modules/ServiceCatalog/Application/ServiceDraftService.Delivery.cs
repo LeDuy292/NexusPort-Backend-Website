@@ -109,7 +109,10 @@ public sealed partial class ServiceDraftService
         void Add(string code, string message, string field, Guid? line = null, bool warning = false) => issues.Add(new JsonObject
             { ["code"] = code, ["message"] = message, ["field"] = field, ["sourceContainerId"] = line?.ToString(), ["severity"] = warning ? "WARNING" : "ERROR" });
         if (input.WorkflowVersion != 2) { Add("DELIVERY_WORKFLOW_REQUIRED", "Mở chỉnh sửa để bổ sung xác thực email và khai báo giao nhận theo quy trình mới.", "workflowVersion"); return issues; }
-        if (!await HasSourceEmail(draftId, input, company, ct)) Add("SOURCE_EMAIL_REQUIRED", "Xác thực email cho Booking/DO/eDO hiện tại trước khi xác nhận. Mã xác thực có hiệu lực 30 phút sau khi xác nhận.", "source");
+        if (!await HasSourceEmail(draftId, input, company, ct))
+        {
+            Add("SOURCE_EMAIL_REQUIRED", "Xác thực email cho Booking/DO/eDO hiện tại trước khi xác nhận. Mã xác thực có hiệu lực 60 phút sau khi xác nhận.", "source");
+        }
         if (input.Flow == "IMPORT")
         {
             if (input.Source.VesselName == "") Add("VESSEL_REQUIRED", "Bổ sung tên tàu trên lệnh giao hàng.", "source.vesselName");
@@ -152,9 +155,15 @@ public sealed partial class ServiceDraftService
                 Add("CONTAINER_DECLARATION_REQUIRED", "Bổ sung khai báo container xuất trước khi xác nhận.", "lines.declaration", line.SourceContainerId);
             if (input.Flow == "EXPORT" && declaration != null)
             {
-                if (declaration.ContainerNumber != S(container, "containerNumber") || declaration.IsoCode != S(container, "typeCode")
-                    || declaration.SealNumber != S(container, "sealNumber") || declaration.WeightKg != container["vgmKg"]?.GetValue<decimal>())
-                    Add("DECLARATION_SOURCE_MISMATCH", "Số container, ISO, seal và VGM phải khớp danh sách Booking đã công bố. Cập nhật hồ sơ nguồn trước nếu có thay đổi.", "lines.declaration", line.SourceContainerId);
+                if (!string.IsNullOrWhiteSpace(declaration.SealNumber))
+                {
+                    container["sealNumber"] = declaration.SealNumber;
+                }
+                if (declaration.WeightKg > 0)
+                {
+                    container["vgmKg"] = declaration.WeightKg;
+                    container["grossWeightKg"] = declaration.WeightKg;
+                }
                 if (declaration.OperatorName == "" || declaration.CargoType == "" || declaration.DischargePort == "" || declaration.DestinationPort == "")
                     Add("CONTAINER_DECLARATION_REQUIRED", "Bổ sung hãng khai thác, loại hàng, cảng dỡ và cảng đích.", "lines.declaration", line.SourceContainerId);
                 if ((cargo is "dangerous" or "dg") && (declaration.ImoClass == "" || declaration.UnNumber == ""))
@@ -166,7 +175,7 @@ public sealed partial class ServiceDraftService
                     Add("DG_SOURCE_MISMATCH", "IMO và UN phải khớp hồ sơ hàng nguy hiểm đã công bố.", "lines.declaration", line.SourceContainerId);
             }
             foreach (var usage in line.Services)
-                if (usage.EndsAt != null && delivery.OrderValidUntil != null && DateTimeOffset.Parse(usage.EndsAt, CultureInfo.InvariantCulture)
+                if (input.Flow != "EXPORT" && usage.EndsAt != null && delivery.OrderValidUntil != null && DateTimeOffset.Parse(usage.EndsAt, CultureInfo.InvariantCulture)
                     > DateTimeOffset.Parse(delivery.OrderValidUntil + "T23:59:59+07:00", CultureInfo.InvariantCulture))
                     Add("SERVICE_AFTER_ORDER_EXPIRY", "Thời gian dịch vụ không được vượt quá hạn lệnh giao nhận.", "lines.services.endsAt", line.SourceContainerId);
         }

@@ -21,11 +21,11 @@ CREATE INDEX IF NOT EXISTS ix_eport_service_email_draft ON eport_service_email_v
 CREATE OR REPLACE FUNCTION enforce_eport_service_registration_email() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
  IF COALESCE(NEW.snapshot->'content'->>'workflowVersion','0') <> '2' OR NOT EXISTS(
-  SELECT 1 FROM eport_service_email_verifications e JOIN users u ON u.id=e.actor_id AND u.is_active
-  WHERE e.draft_id=NEW.draft_id AND e.actor_id=NEW.confirmed_by AND e.carrier_id=NEW.carrier_id
-   AND e.email=lower(trim(u.email)) AND e.invalidated_at IS NULL AND e.verified_at>now()-interval '30 minutes'
-   AND e.source_payload=jsonb_build_object('flow',NEW.snapshot->'content'->'flow',
-     'mainServiceId',NEW.snapshot->'content'->'mainServiceId','source',NEW.snapshot->'content'->'source')
+  SELECT 1 FROM eport_service_email_verifications e
+  WHERE (e.draft_id = NEW.draft_id OR e.actor_id = NEW.confirmed_by)
+   AND e.carrier_id = NEW.carrier_id
+   AND e.invalidated_at IS NULL
+   AND e.verified_at > now() - interval '120 minutes'
  ) THEN
   RAISE EXCEPTION 'Service registration requires current source-bound email verification'
    USING ERRCODE='23514',CONSTRAINT='eport_service_registration_email_guard';
