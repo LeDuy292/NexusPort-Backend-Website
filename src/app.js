@@ -30,37 +30,53 @@ app.use(
 );
 
 // ─── Reverse Proxies (Chuyển tiếp /api/v1 sang C# Core & /node-api sang Node Core) ──
-const csharpTarget = process.env.CSHARP_CORE_URL
-  || process.env.RAILWAY_SERVICE_CSHARP_CORE_URL
-  || (nodeEnv === 'production'
-      ? 'https://csharp-core-production.up.railway.app'
-      : 'http://localhost:5000');
+const normalizeTargetUrl = (url, fallback) => {
+  const target = (url || fallback || '').trim();
+  if (!target) return fallback;
+  if (!target.startsWith('http://') && !target.startsWith('https://')) {
+    return `https://${target}`;
+  }
+  return target;
+};
 
-const nodeCoreTarget = process.env.NODE_CORE_URL
-  || process.env.RAILWAY_SERVICE_NODE_CORE_URL
-  || (nodeEnv === 'production'
-      ? 'https://node-core-production.up.railway.app'
-      : 'http://localhost:4000');
-
-app.use(
-  ['/api/v1', '/v1'],
-  createProxyMiddleware({
-    target: csharpTarget,
-    changeOrigin: true,
-    pathRewrite: (path) => `/api/v1${path}`,
-    logLevel: 'warn',
-  })
+const csharpTarget = normalizeTargetUrl(
+  process.env.CSHARP_CORE_URL || process.env.RAILWAY_SERVICE_CSHARP_CORE_URL,
+  'https://csharp-core-production.up.railway.app'
 );
 
-app.use(
-  ['/api/node-api', '/node-api'],
-  createProxyMiddleware({
-    target: nodeCoreTarget,
-    changeOrigin: true,
-    pathRewrite: (path) => `/api/v1${path}`,
-    logLevel: 'warn',
-  })
+const nodeCoreTarget = normalizeTargetUrl(
+  process.env.NODE_CORE_URL || process.env.RAILWAY_SERVICE_NODE_CORE_URL,
+  'https://node-core-production.up.railway.app'
 );
+
+const csharpProxy = createProxyMiddleware({
+  target: csharpTarget,
+  changeOrigin: true,
+  pathRewrite: (path) => `/api/v1${path}`,
+  logLevel: 'debug',
+  on: {
+    error: (err, req, res) => {
+      console.error('[CSharp Proxy Error]', err);
+    },
+  },
+});
+
+const nodeProxy = createProxyMiddleware({
+  target: nodeCoreTarget,
+  changeOrigin: true,
+  pathRewrite: (path) => `/api/v1${path}`,
+  logLevel: 'debug',
+  on: {
+    error: (err, req, res) => {
+      console.error('[NodeCore Proxy Error]', err);
+    },
+  },
+});
+
+app.use('/api/v1', csharpProxy);
+app.use('/v1', csharpProxy);
+app.use('/api/node-api', nodeProxy);
+app.use('/node-api', nodeProxy);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
