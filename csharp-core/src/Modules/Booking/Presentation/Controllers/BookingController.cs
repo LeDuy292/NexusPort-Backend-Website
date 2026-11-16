@@ -56,6 +56,20 @@ public class BookingController : ControllerBase
         return Ok(result);
     }
 
+    [Authorize(Roles = "Transport Company,Carrier,Carrier Staff")]
+    [HttpGet("fleet-schedule")]
+    public async Task<ActionResult<FleetScheduleDto>> GetFleetSchedule([FromQuery] DateTime from, [FromQuery] DateTime to, CancellationToken ct)
+        => Ok(await _service.GetFleetScheduleAsync(GetUserCarrierId()!.Value, from, to, ct));
+
+    [Authorize(Roles = "Transport Company,Carrier,Carrier Staff")]
+    [HttpGet("{id:guid}/fleet-options")]
+    public async Task<IActionResult> GetAssignmentOptions(Guid id, CancellationToken ct)
+    {
+        var options = await _service.GetAssignmentOptionsAsync(id, GetUserCarrierId()!.Value, ct);
+        return Ok(new { drivers = options.Drivers.Select(d => new { d.Id, d.FullName }),
+            trucks = options.Trucks.Select(t => new { t.Id, t.PlateNumber }) });
+    }
+
     /// <summary>
     /// Xem chi tiết thông tin Booking theo ID
     /// </summary>
@@ -510,7 +524,7 @@ public class BookingController : ControllerBase
         if (!_currentUser.UserId.HasValue) throw new UnauthorizedException("Vui lòng đăng nhập.");
         var memberships = _context.Database.SqlQueryRaw<Guid>(
             "SELECT carrier_id AS \"Value\" FROM carrier_users WHERE user_id={0}", _currentUser.UserId.Value).ToList();
-        if (memberships.Count != 1) throw new UnauthorizedException("Tài khoản cần thuộc đúng một công ty vận tải.");
+          if (memberships.Count != 1) throw new ForbiddenException("Tài khoản cần thuộc đúng một công ty vận tải.");
         return memberships[0];
     }
 }

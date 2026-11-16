@@ -198,7 +198,7 @@ public partial class BookingService
     }
 
     private async Task<BookingFleetOptions> LoadBookingFleetAsync(Guid carrierId, DateTime start, DateTime end,
-        Guid? excludeId, CancellationToken token)
+        Guid? excludeId, CancellationToken token, bool signDocuments = true)
     {
         BookingFleetPolicy.ValidateWindow(start, end);
         // Live trips and an unclosed physical Gate In remain busy, even after the planned end.
@@ -243,10 +243,15 @@ public partial class BookingService
             .Where(t => t.CarrierId == carrierId).ToListAsync(token);
         var drivers = await _context.Set<Driver.Domain.Entities.Driver>().AsNoTracking()
             .Where(d => d.CarrierId == carrierId).ToListAsync(token);
+        var blockedAccounts = (await _context.Database.SqlQueryRaw<Guid>("""
+            SELECT d.id AS "Value" FROM drivers d LEFT JOIN users u ON u.id=d.user_id
+            WHERE d.carrier_id={0} AND d.user_id IS NOT NULL
+              AND (u.id IS NULL OR NOT u.is_active OR u.invitation_pending OR u.email_verified_at IS NULL)
+            """, carrierId).ToListAsync(token)).ToHashSet();
         var activeTrucks = trucks.Where(t=>t.Status == Vehicle.Domain.Enums.TruckStatus.active).ToList();
         var freeTrucks = activeTrucks.Where(t=>!truckIds.Contains(t.Id)).ToList();
         var eligibleTrucks = freeTrucks.Select(VehicleDetails).ToList();
-        var eligibleDrivers = drivers.Where(d => !driverIds.Contains(d.Id) && !string.IsNullOrWhiteSpace(d.LicenseNumber)
+        var eligibleDrivers = drivers.Where(d => !blockedAccounts.Contains(d.Id) && !driverIds.Contains(d.Id) && !string.IsNullOrWhiteSpace(d.LicenseNumber)
             && BookingFleetPolicy.IsAvailableDriver(d.Status.ToString(), d.LicenseExpiryDate, end))
             .Select(DriverDetails).ToList();
 
@@ -273,12 +278,12 @@ public partial class BookingService
         foreach(var truck in eligibleTrucks)
         {
             truck.ActiveTripCount = truckUsage.GetValueOrDefault(truck.Id, 0);
-            SignFleetDocuments(truck,null);
+            if (signDocuments) SignFleetDocuments(truck,null);
         }
         foreach(var driver in eligibleDrivers)
         {
             driver.ActiveTripCount = driverUsage.GetValueOrDefault(driver.Id, 0);
-            SignFleetDocuments(null,driver);
+            if (signDocuments) SignFleetDocuments(null,driver);
         }
         var result = BookingFleetPolicy.Rank(eligibleTrucks, eligibleDrivers);
         result.CompanyTruckCount=trucks.Count; result.CompanyDriverCount=drivers.Count;

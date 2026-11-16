@@ -67,6 +67,9 @@ public class BookingRepository : IBookingRepository
             query = query.Where(b => b.Status == filter.Status.Value);
         }
 
+        if (filter.DriverId.HasValue)
+            query = query.Where(b => b.DriverId == filter.DriverId.Value);
+
         if (filter.BookingType.HasValue)
         {
             query = query.Where(b => b.BookingType == filter.BookingType.Value);

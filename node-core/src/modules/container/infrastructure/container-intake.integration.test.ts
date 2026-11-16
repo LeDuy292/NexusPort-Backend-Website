@@ -73,7 +73,6 @@ const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_U
       const filters = { containerNumber: row.containerNumber };
       const staff = { id: userA, role: 'Dispatcher' } as const;
       const carrier = { id: userB, role: 'Carrier' } as const;
-      const berth = { id: userA, role: 'Berth Staff' } as const;
       const driver = { id: randomUUID(), role: 'Driver' } as const;
       const lineUser = { id: randomUUID(), role: 'Shipping Line' } as const;
       const lineId = randomUUID();
@@ -97,7 +96,6 @@ const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_U
         bookings: [expect.objectContaining({ id: inbound.id, bookingType: 'dropoff' })] })]);
       expect(new Date(planned.items[0].bookings[0].appointmentStart).toISOString()).toBe('2030-01-01T08:00:00.000Z');
       expect((await journeys.searchYardVisits(filters, carrier)).items).toEqual([]);
-      expect((await journeys.searchYardVisits(filters, berth)).items).toEqual([]);
       expect((await journeys.searchYardVisits(filters, { ...driver, id: userB })).items).toEqual([]);
       expect((await journeys.searchYardVisits(filters, { ...lineUser, id: userB })).items).toEqual([]);
       expect((await journeys.listOwnIdentities(lineUser.id, { ...filters, page: 1, limit: 20 })).total).toBe(1);
@@ -116,7 +114,6 @@ const enabled = process.env.NXP038_INTEGRATION === '1' && process.env.DATABASE_U
       await c.query('UPDATE container_visits SET vessel_call_id=$1 WHERE id=$2', [callId, inbound.visit]);
       await c.query(`INSERT INTO eir_transactions(reference_no,container_visit_id,activity,eir_status,check_in_at)
         VALUES($1,$2,'out','draft','2030-01-02T08:00Z')`, [randomUUID(), inbound.visit]);
-      expect((await journeys.searchYardVisits(filters, berth)).items[0]).toMatchObject({ id: inbound.visit, customerName: null, receipts: null });
       await rejected(()=>c.query('UPDATE container_declarations SET customer_name=\'Overwrite\' WHERE id=$1',[declarationA]),'Bản khai');
       await rejected(()=>book('dropoff',carrierB,declarationB,'2030-01-04T08:00Z','2030-01-04T09:00Z'),'chồng');
       await rejected(()=>book('pickup',carrierB,declarationB,'2030-01-02T08:00Z','2030-01-02T09:00Z',inbound.visit),'cấp quyền');

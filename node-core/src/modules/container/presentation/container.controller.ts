@@ -21,7 +21,7 @@ const roleAliases: Record<string, ContainerRole> = {
     'yard staff': 'Yard Staff', 'yard operator': 'Yard Staff', yard: 'Yard Staff',
     'gate officer': 'Gate Officer', gate: 'Gate Officer', carrier: 'Carrier',
     'carrier staff': 'Carrier', 'transport company': 'Carrier', 'transportcompany': 'Carrier',
-    'shipping line': 'Shipping Line', shippingline: 'Shipping Line', driver: 'Driver', 'berth staff': 'Berth Staff',
+    'shipping line': 'Shipping Line', shippingline: 'Shipping Line', driver: 'Driver',
 };
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const shippingLineSchema = z.object({
@@ -182,7 +182,7 @@ export const createContainerRouter = (): Router => {
     const router = Router();
     const controller = new ContainerController();
     const readers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer', 'Carrier'];
-    const identityReaders: ContainerRole[] = [...readers, 'Shipping Line', 'Driver', 'Berth Staff'];
+    const identityReaders: ContainerRole[] = [...readers, 'Shipping Line', 'Driver'];
     const writers: ContainerRole[] = ['Administrator', 'Dispatcher', 'Gate Officer'];
     router.use(authenticateContainerUser);
     router.get('/types', allowRoles(...identityReaders), controller.getTypes);

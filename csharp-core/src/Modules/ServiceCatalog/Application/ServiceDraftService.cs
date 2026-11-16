@@ -81,9 +81,10 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                 COALESCE(b.port_of_discharge,v.port_of_discharge,'Singapore') AS "portOfDischarge",
                 COALESCE(v.port_of_loading,'Cảng Hải Phòng') AS "portOfLoading",
                 'ONE / MAERSK'::text AS "operatorName",
-                v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",count(e.id)::int AS "containerCount"
+                v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",
+                v.etd AS "etd",v.eta AS "eta",count(e.id)::int AS "containerCount"
             """ + ExportJoins + " WHERE b.id=@p0 AND b.carrier_id=@p1 AND " + ExportEligible + """
-             GROUP BY b.id,b.booking_no,b.bl_number,b.status,b.port_status,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff
+             GROUP BY b.id,b.booking_no,b.bl_number,b.status,b.port_status,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff,v.etd,v.eta
             """, ct, id, company);
         Require(rows.Count == 1, "Booking chưa có danh sách container hàng được công bố để đăng ký dịch vụ, hoặc đã quá hạn CY Cut-off / đang bị giữ.");
         rows[0]["verificationStatus"] = "SOURCE_LINKED";
@@ -104,6 +105,7 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                     COALESCE((SELECT bk.booking_code FROM bookings bk JOIN booking_containers bc ON bc.booking_id=bk.id WHERE bc.container_visit_id=v.id AND bk.carrier_id=@p0 ORDER BY bk.created_at DESC LIMIT 1), COALESCE(v.source_reference,'')) AS "bookingNumber",
                     'DEMO EPORT BLUEWAVE'::text AS "vesselName",
                     '001E'::text AS "voyageNumber",
+                    v.started_at AS "eta",
                     COALESCE(to_char(v.valid_to AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD'), to_char((now() + interval '14 days') AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')) AS "validUntil",
                     'Depot Tân Cảng - Hải Phòng'::text AS "emptyReturnDepot",
                     c.container_no AS "containerNumber",
@@ -139,10 +141,11 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                 COALESCE(b.port_of_discharge,v.port_of_discharge,'Singapore') AS "portOfDischarge",
                 COALESCE(v.port_of_loading,'Cảng Hải Phòng') AS "portOfLoading",
                 'ONE / MAERSK'::text AS "operatorName",
-                v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",count(e.id)::int AS "containerCount"
+                v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",
+                v.etd AS "etd",v.eta AS "eta",count(e.id)::int AS "containerCount"
             """ + ExportJoins + " WHERE b.carrier_id=@p0 AND " + ExportEligible + """
              AND (b.booking_no ILIKE @p1 OR v.vessel_name ILIKE @p1 OR v.voyage_number ILIKE @p1)
-             GROUP BY b.id,b.booking_no,b.bl_number,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff,b.created_at
+             GROUP BY b.id,b.booking_no,b.bl_number,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff,v.etd,v.eta,b.created_at
              ORDER BY b.created_at DESC,b.id LIMIT 50
             """, ct, company, "%" + term + "%");
         return new { flow, referenceMode = "BOOKING", items = rows };
@@ -337,7 +340,7 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         Require(id != Guid.Empty, "Mã bản nháp không hợp lệ.");
         var company = await Company(ct);
         var input = await DeliveryDefaults(ServiceDraftRules.Normalize(request), ct);
-        input = await CaptureFleet(company, input, ct);
+        input = await CaptureFleet(company, id, input, ct);
         var content = Content(input);
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await Exec("SELECT pg_advisory_xact_lock(hashtext(@p0))", ct, "eport-service-draft:" + id.ToString("N"));

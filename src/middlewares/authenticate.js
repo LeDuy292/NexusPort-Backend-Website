@@ -41,9 +41,10 @@ async function authenticate(req, res, next) {
 
     // Kiểm tra user vẫn còn tồn tại và đang active
     const user = await User.findByPk(decoded.id);
-    if (!user || !user.is_active) {
+    if (!user || !user.is_active || (user.role === 'Driver' && (!user.email_verified_at || user.invitation_pending))) {
       return res.status(401).json({
         success: false,
+        code: 'ACCOUNT_DISABLED',
         message: 'Tài khoản không tồn tại hoặc đã bị vô hiệu hóa.',
       });
     }

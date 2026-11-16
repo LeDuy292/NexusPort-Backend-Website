@@ -28,7 +28,7 @@ internal static class PostgresPlanningChecks
             CREATE TYPE truck_status AS ENUM ('active','inactive','maintenance');
             CREATE TYPE booking_type AS ENUM ('pickup','dropoff');
             CREATE TYPE booking_status AS ENUM ('pending','ready','approved','rejected','canceled','checked_in','completed','expired');
-            CREATE TABLE users(id uuid PRIMARY KEY);
+            CREATE TABLE users(id uuid PRIMARY KEY,is_active boolean DEFAULT true,invitation_pending boolean DEFAULT false,email_verified_at timestamptz DEFAULT now());
             CREATE TABLE carriers(id uuid PRIMARY KEY,company_name text);
             CREATE TABLE nexusport_schema_versions(version text PRIMARY KEY,description text);
             CREATE TABLE trucks(id uuid PRIMARY KEY,carrier_id uuid,driver_id uuid,plate_number text,vehicle_type text,status truck_status,
@@ -151,7 +151,7 @@ internal static class PostgresPlanningChecks
         catch(NexusPort.Shared.Exceptions.ValidationException) {count++;}
         var vehicleService = new NexusPort.Modules.Vehicle.Application.Services.VehicleService(
             new NexusPort.Modules.Vehicle.Infrastructure.Repositories.VehicleRepository(context),null!,
-            NullLogger<NexusPort.Modules.Vehicle.Application.Services.VehicleService>.Instance,new TestStorage());
+            NullLogger<NexusPort.Modules.Vehicle.Application.Services.VehicleService>.Instance,new TestStorage(),context);
         var create = new NexusPort.Modules.Vehicle.Application.DTOs.CreateVehicleDto {PlateNumber="TEST-30T",VehicleType="ROAD_TRUCK",RegistrationImageUrl=document};
         var created=await vehicleService.CreateAsync(carrier,create);
         Check(created.PlateNumber=="TEST-30T","vehicle creation works without payload fields");

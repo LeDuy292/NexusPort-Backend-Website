@@ -49,6 +49,7 @@ public sealed record ServiceDraftInput
     public int WorkflowVersion { get; init; }
     public ServiceDeliveryInput Delivery { get; init; } = new();
     public ServiceInvoiceBuyer InvoiceBuyer { get; init; } = new();
+    public ServiceDocumentItem[] Documents { get; init; } = [];
 }
 
 public static class ServiceDraftRules
@@ -133,8 +134,10 @@ public static class ServiceDraftRules
             PlannedAt = Instant(input.PlannedAt, "Ngày dự kiến thực hiện"),
             ContactName = Text(input.ContactName, 120, "Tên người liên hệ"),
             ContactPhone = Text(input.ContactPhone, 30, "Số điện thoại"),
-            Note = Text(input.Note, 1000, "Ghi chú")
-            ,Delivery = ServiceDeliveryRules.Normalize(input.Delivery), InvoiceBuyer = ServiceDeliveryRules.NormalizeBuyer(input.InvoiceBuyer)
+            Note = Text(input.Note, 1000, "Ghi chú"),
+            Delivery = ServiceDeliveryRules.Normalize(input.Delivery),
+            InvoiceBuyer = ServiceDeliveryRules.NormalizeBuyer(input.InvoiceBuyer),
+            Documents = input.Documents ?? input.Delivery?.Documents ?? []
         };
     }
 }

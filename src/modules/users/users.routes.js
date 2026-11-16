@@ -119,7 +119,7 @@ router.get('/carrier-staff', carrierGuard, getCarrierStaffs);
  *         name: role
  *         schema:
  *           type: string
- *           enum: [Administrator, Transport Company, Driver, Dispatcher, Gate Officer, Yard Operator, Berth Staff]
+ *           enum: [Administrator, Transport Company, Driver, Dispatcher, Gate Officer, Yard Operator]
  *         description: Lọc theo role
  *       - in: query
  *         name: status
@@ -250,7 +250,7 @@ router.get('/:id', adminGuard, getUserById);
  *                 example: NexusPort@2026
  *               role:
  *                 type: string
- *                 enum: [Administrator, Transport Company, Driver, Dispatcher, Gate Officer, Yard Operator, Berth Staff]
+ *                 enum: [Administrator, Transport Company, Driver, Dispatcher, Gate Officer, Yard Operator]
  *                 example: Yard Operator
  *               fullName:
  *                 type: string
@@ -362,7 +362,7 @@ router.put('/:id', adminGuard, updateUserValidator, updateUser);
  *             properties:
  *               role:
  *                 type: string
- *                 enum: [Administrator, Transport Company, Driver, Dispatcher, Gate Officer, Yard Operator, Berth Staff]
+ *                 enum: [Administrator, Transport Company, Driver, Dispatcher, Gate Officer, Yard Operator]
  *                 example: Dispatcher
  *     responses:
  *       200:

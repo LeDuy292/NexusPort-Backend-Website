@@ -182,7 +182,7 @@ public sealed partial class ServiceDraftService
                 var receive = At(S(source, "receiveFrom"));
                 var cutoff = At(S(source, "cyCutoff"));
                 if (cutoff == null || cutoff <= now) Issue("CY_CUTOFF_CLOSED", "Chuyến tàu đã hết hạn CY cut-off hoặc chưa có hạn hợp lệ.", "source.bookingId");
-                if (planned != null && (receive == null || cutoff == null || planned < receive || planned > cutoff))
+                if (planned != null && ((receive != null && planned < receive) || (cutoff != null && planned > cutoff)))
                     Issue("OUTSIDE_RECEIVING_WINDOW", "Thời gian dự kiến phải nằm trong khoảng tiếp nhận đến CY cut-off của chuyến tàu.", "plannedAt");
             }
             catch (CatalogException error) when (error.StatusCode < 500) { Issue("SOURCE_UNAVAILABLE", error.Message, "source.bookingId"); }
@@ -276,7 +276,7 @@ public sealed partial class ServiceDraftService
                         if (plannedAfterDropoff) needsApproval = true;
                     }
                     if (start != null && planned != null && start < planned)
-                        Issue("USAGE_BEFORE_PLANNED", $"{number}: thời gian dịch vụ không được trước thời gian thực hiện dự kiến.", "lines.services.startsAt", line.SourceContainerId, usage.ServiceId);
+                        Issue("USAGE_BEFORE_PLANNED", "Thời gian dịch vụ không được trước thời gian thực hiện dự kiến.", "lines.services.startsAt", line.SourceContainerId, usage.ServiceId, warning: true);
                 }
                 decimal? quantity = usage.Quantity;
                 if (unit == "CONTAINER") quantity = 1;
@@ -299,7 +299,7 @@ public sealed partial class ServiceDraftService
         if (deliverySchema)
             foreach (var issue in await DeliveryIssues(G(draft, "id"), input, company, byContainer, byService, byOperational, ct)) issues.Add(issue!.DeepClone());
         else if (input.WorkflowVersion == 2) Issue("DELIVERY_SCHEMA_REQUIRED", "Cần triển khai migration 20261110_041 để xác thực email và đăng ký giao nhận.", "workflowVersion");
-        foreach (var issue in await FleetIssues(input, company, source, ct)) issues.Add(issue!.DeepClone());
+        foreach (var issue in await FleetIssues(G(draft, "id"), input, company, source, ct)) issues.Add(issue!.DeepClone());
         var canConfirm = !issues.Any(issue => S(issue, "severity") == "ERROR");
         var validation = new JsonObject
         {

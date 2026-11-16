@@ -32,7 +32,7 @@ public sealed partial class ExportBookingService
     private bool Carrier => new[] { "Transport Company", "Carrier", "Carrier Staff" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
     private bool Line => string.Equals(_user.Role, "Shipping Line", StringComparison.OrdinalIgnoreCase);
     private bool Admin => new[] { "Administrator", "Admin" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
-    private bool Port => Admin || new[] { "Dispatcher", "Gate Officer", "Gate", "Yard Operator", "Berth Staff" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
+    private bool Port => Admin || new[] { "Dispatcher", "Gate Officer", "Gate", "Yard Operator" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
     private Guid Actor => _user.UserId ?? throw new UnauthorizedException("Vui lòng đăng nhập.");
     private static object[] Args(params object?[] values) => values.Select((value, index) => (object)(value == null
         ? new NpgsqlParameter("p" + index, NpgsqlDbType.Unknown) { Value = DBNull.Value }

@@ -27,49 +27,9 @@ public class DriverController : ControllerBase
         _s3StorageService = s3StorageService;
     }
 
-    private Guid? GetCarrierIdFromToken()
-    {
-        var carrierIdClaim = User.Claims.FirstOrDefault(c => 
-            c.Type.Equals("CarrierId", StringComparison.OrdinalIgnoreCase) ||
-            c.Type.Equals("carrier_id", StringComparison.OrdinalIgnoreCase))?.Value;
-        if (Guid.TryParse(carrierIdClaim, out var carrierId)) return carrierId;
-
-        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? User.Claims.FirstOrDefault(c => c.Type.Equals("sub", StringComparison.OrdinalIgnoreCase) || c.Type.Equals("id", StringComparison.OrdinalIgnoreCase))?.Value;
-        if (Guid.TryParse(userIdStr, out var userId))
-        {
-            var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-            var conn = db.Database.GetDbConnection();
-            bool opened = false;
-            if (conn.State != System.Data.ConnectionState.Open)
-            {
-                db.Database.OpenConnection();
-                opened = true;
-            }
-            try
-            {
-                using var cmd = conn.CreateCommand();
-                cmd.CommandText = "SELECT carrier_id FROM carrier_users WHERE user_id = @userId LIMIT 1";
-                var param = cmd.CreateParameter();
-                param.ParameterName = "@userId";
-                param.Value = userId;
-                cmd.Parameters.Add(param);
-                var result = cmd.ExecuteScalar();
-                if (result != null && Guid.TryParse(result.ToString(), out var dbCarrierId))
-                {
-                    return dbCarrierId;
-                }
-            }
-            finally
-            {
-                if (opened)
-                {
-                    db.Database.CloseConnection();
-                }
-            }
-        }
-        return null;
-    }
+    private Task<Guid?> GetCarrierIdAsync(CancellationToken token) =>
+        NexusPort.Infrastructure.Authentication.CarrierAccess.ResolveAsync(
+            HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>(), User, token);
 
     private bool IsPortStaff()
     {
@@ -81,8 +41,7 @@ public class DriverController : ControllerBase
              c.Value.Equals("Gate Officer", StringComparison.OrdinalIgnoreCase) ||
              c.Value.Equals("Gate", StringComparison.OrdinalIgnoreCase) ||
              c.Value.Equals("Yard Operator", StringComparison.OrdinalIgnoreCase) ||
-             c.Value.Equals("Yard Staff", StringComparison.OrdinalIgnoreCase) ||
-             c.Value.Equals("Berth Staff", StringComparison.OrdinalIgnoreCase)));
+             c.Value.Equals("Yard Staff", StringComparison.OrdinalIgnoreCase)));
     }
 
     [HttpPost("extract-cccd")]
@@ -279,12 +238,31 @@ public class DriverController : ControllerBase
     {
         if (!IsPortStaff())
         {
-            var userCarrierId = GetCarrierIdFromToken();
-            if (userCarrierId == null) return Forbid();
+            var userCarrierId = await GetCarrierIdAsync(cancellationToken);
+            if (userCarrierId == null) return StatusCode(403, new { message = "Tài khoản cần liên kết đúng một công ty vận tải." });
             filter.CarrierId = userCarrierId; // Force filter by their own company
         }
 
         var items = await _service.GetAllAsync(filter, cancellationToken);
+
+        var accountLinks = await HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>()
+            .Database.SqlQueryRaw<DriverAccountLink>("""
+                SELECT d.id AS "Id", d.user_id AS "UserId",u.username AS "Username",u.email AS "Email",u.is_active AS "AccountActive",
+                  (SELECT b.booking_code FROM bookings b WHERE b.carrier_id=d.carrier_id AND b.driver_id=d.id
+                    AND b.status::text NOT IN ('completed','canceled','rejected','expired') ORDER BY b.appointment_start LIMIT 1) AS "ActiveBookingCode",
+                  u.invitation_pending AS "InvitationPending",u.email_verified_at AS "EmailVerifiedAt",
+                  (SELECT i.expires_at FROM account_invitations i WHERE i.user_id=u.id AND i.used_at IS NULL
+                    ORDER BY i.created_at DESC LIMIT 1) AS "InvitationExpiresAt"
+                FROM drivers d LEFT JOIN users u ON u.id=d.user_id WHERE d.id=ANY({0})
+                """, items.Select(x => x.Id).ToArray()).ToDictionaryAsync(x => x.Id, cancellationToken);
+        foreach (var item in items)
+        {
+            if (!accountLinks.TryGetValue(item.Id, out var link)) continue;
+            item.UserId = link.UserId; item.Username = link.Username; item.Email = link.Email;
+            item.AccountActive = link.AccountActive; item.ActiveBookingCode = link.ActiveBookingCode;
+            item.InvitationPending = link.InvitationPending; item.EmailVerifiedAt = link.EmailVerifiedAt;
+            item.EmailVerified = link.EmailVerifiedAt.HasValue; item.InvitationExpiresAt = link.InvitationExpiresAt;
+        }
 
         // Map Carrier Name
         var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
@@ -298,7 +276,10 @@ public class DriverController : ControllerBase
         try
         {
             using var command = conn.CreateCommand();
-            command.CommandText = "SELECT id, company_name FROM carriers";
+            command.Parameters.Clear();
+            var carrierIds = command.CreateParameter(); carrierIds.ParameterName = "carrierIds";
+            carrierIds.Value = items.Select(x => x.CarrierId).Distinct().ToArray(); command.Parameters.Add(carrierIds);
+            command.CommandText = "SELECT id, company_name FROM carriers WHERE id=ANY(@carrierIds)";
             using var reader = await command.ExecuteReaderAsync(cancellationToken);
             var carrierMap = new Dictionary<Guid, string>();
             while (await reader.ReadAsync(cancellationToken))
@@ -325,6 +306,25 @@ public class DriverController : ControllerBase
         return Ok(items);
     }
 
+    [HttpGet("photos")]
+    public async Task<IActionResult> GetPhotos([FromQuery] Guid[] ids, CancellationToken ct)
+    {
+        if (ids.Length > 100) return BadRequest(new { message = "Mỗi lần chỉ tải tối đa 100 ảnh." });
+        var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
+        var company = IsPortStaff() ? null : await GetCarrierIdAsync(ct);
+        if (!IsPortStaff() && company == null) return Forbid();
+        var rows = await db.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>().AsNoTracking()
+            .Where(d => ids.Contains(d.Id) && (company == null || d.CarrierId == company))
+            .Select(d => new { d.Id, d.PhotoUrl }).ToListAsync(ct);
+        var photos = new Dictionary<Guid, string>();
+        foreach (var row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!string.IsNullOrWhiteSpace(row.PhotoUrl)) photos[row.Id] = _s3StorageService.GetPresignedUrl(row.PhotoUrl);
+        }
+        return Ok(photos);
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<DriverDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
@@ -333,7 +333,7 @@ public class DriverController : ControllerBase
 
         if (!IsPortStaff())
         {
-            var userCarrierId = GetCarrierIdFromToken();
+            var userCarrierId = await GetCarrierIdAsync(cancellationToken);
             if (item.CarrierId != userCarrierId) return Forbid();
         }
 
@@ -341,65 +341,7 @@ public class DriverController : ControllerBase
     }
 
     [HttpPost]
-    public async Task<ActionResult<DriverDto>> Create([FromBody] CreateDriverDto dto, [FromQuery] Guid? carrierId, CancellationToken cancellationToken)
-    {
-        Guid targetCarrierId;
-        if (IsPortStaff())
-        {
-            if (carrierId.HasValue && carrierId.Value != Guid.Empty)
-            {
-                targetCarrierId = carrierId.Value;
-            }
-            else
-            {
-                var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
-                var conn = db.Database.GetDbConnection();
-                bool openedByUs = false;
-                if (conn.State != System.Data.ConnectionState.Open)
-                {
-                    await db.Database.OpenConnectionAsync(cancellationToken);
-                    openedByUs = true;
-                }
-                object result;
-                try
-                {
-                    using (var command = conn.CreateCommand())
-                    {
-                        command.CommandText = "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1";
-                        result = await command.ExecuteScalarAsync(cancellationToken);
-                    }
-                }
-                finally
-                {
-                    if (openedByUs)
-                    {
-                        await db.Database.CloseConnectionAsync();
-                    }
-                }
-                if (result == null) 
-                {
-                    return BadRequest(new { message = "Không tìm thấy công ty 'Cảng Tiên Sa' trong hệ thống. Vui lòng tạo một Công ty Vận tải tên là 'Cảng Tiên Sa' trước!" });
-                }
-                targetCarrierId = (Guid)result;
-            }
-        }
-        else
-        {
-            var userCarrierId = GetCarrierIdFromToken();
-            if (userCarrierId == null) return Forbid();
-            targetCarrierId = userCarrierId.Value;
-        }
-
-        try
-        {
-            var item = await _service.CreateAsync(targetCarrierId, dto, cancellationToken);
-            return CreatedAtAction(nameof(GetById), new { id = item.Id }, item);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
+    public ActionResult Create() => StatusCode(410, new { message = "Vui lòng tạo tài khoản từ trang quản lý tài xế của công ty vận tải." });
 
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<DriverDto>> Update(Guid id, [FromBody] UpdateDriverDto dto, CancellationToken cancellationToken)
@@ -409,7 +351,7 @@ public class DriverController : ControllerBase
 
         if (!IsPortStaff())
         {
-            var userCarrierId = GetCarrierIdFromToken();
+            var userCarrierId = await GetCarrierIdAsync(cancellationToken);
             if (existing.CarrierId != userCarrierId) return Forbid();
         }
 
@@ -432,7 +374,7 @@ public class DriverController : ControllerBase
 
         if (!IsPortStaff())
         {
-            var userCarrierId = GetCarrierIdFromToken();
+            var userCarrierId = await GetCarrierIdAsync(cancellationToken);
             if (existing.CarrierId != userCarrierId) return Forbid();
         }
 

@@ -7,6 +7,8 @@ import { sendCreated, sendSuccess } from '../../shared/utils/response';
 import { manifestSchema } from './manifest.schema';
 import { ManifestRepository } from './manifest.repository';
 import { isValidIso6346, normalizeContainerNumber } from '../container/application/container.validator';
+import multer from 'multer';
+import { ManifestImportService } from './manifest-import.service';
 
 type ManifestRequest = Request & { manifestOwner?: string };
 export function createManifestRouter(repository = new ManifestRepository()): Router {
@@ -28,6 +30,17 @@ export function createManifestRouter(repository = new ManifestRepository()): Rou
   });
   router.get('/', async (req: ManifestRequest, res, next) => {
     try { sendSuccess(res, await repository.list(req.manifestOwner!, String(req.query.direction || ''))); } catch (e) { next(e); }
+  });
+  const importer = new ManifestImportService(repository);
+  router.get('/import/template', (_req, res, next) => {
+    try {
+      res.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.attachment('Manifest_mau.xlsx').send(importer.buildTemplate());
+    } catch (e) { next(e); }
+  });
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 0, parts: 1 } });
+  router.post('/import/preview', upload.single('file'), async (req: ManifestRequest, res, next) => {
+    try { sendSuccess(res, await importer.preview(req.file, req.manifestOwner!)); } catch (e) { next(e); }
   });
   router.get('/container-lookup', async (req: ManifestRequest, res, next) => {
     try {

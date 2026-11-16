@@ -44,12 +44,6 @@ const SEED_USERS = [
     full_name: 'Phạm Bãi Hàng',
   },
   {
-    username: 'berth01',
-    email: 'berth01@nexusport.vn',
-    role: 'Berth Staff',
-    full_name: 'Hoàng Cầu Tàu',
-  },
-  {
     username: 'shipping01',
     email: 'shipping01@nexusport.vn',
     role: 'Shipping Line',

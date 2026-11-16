@@ -13,6 +13,7 @@ public class VehicleDto
     public string? Description { get; set; }
     public string? RegistrationImageUrl { get; set; }
     public string? PhotoUrl { get; set; }
+    public bool HasPhoto { get; set; }
     public string? CurrentLocation { get; set; }
     public DateTime CreatedAt { get; set; }
 }
@@ -44,6 +45,8 @@ public class AssignDriverDto
 
 public class VehicleFilterDto
 {
+    public bool IncludePhotos { get; set; } = true;
+    public bool IncludeDocuments { get; set; } = true;
     public Guid? CarrierId { get; set; }
     public string? Status { get; set; }
     public string? SearchTerm { get; set; }

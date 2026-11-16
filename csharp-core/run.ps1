@@ -86,5 +86,10 @@ foreach ($listenPort in $listenPorts) {
 }
 
 Write-Host "Starting NexusPort.Api with Aiven PostgreSQL ($database)..."
-& dotnet run --project $projectPath
+# This script loads the checkout's local settings. A deployed API can explicitly
+# choose Production and --no-launch-profile instead.
+if ([string]::IsNullOrWhiteSpace($env:ASPNETCORE_ENVIRONMENT)) {
+    $env:ASPNETCORE_ENVIRONMENT = 'Development'
+}
+& dotnet run --project $projectPath --no-launch-profile
 exit $LASTEXITCODE

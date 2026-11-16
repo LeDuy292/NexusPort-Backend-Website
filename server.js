@@ -21,7 +21,7 @@ async function startServer() {
     await connectDB();
 
     // 2. Sync schema (chỉ dùng trong dev — dùng migrations ở production)
-    if (nodeEnv !== 'production') {
+    if (nodeEnv !== 'production' && process.env.DB_SYNC === 'true') {
       try {
         // Migrations also own columns on tables shared with Sequelize models.
         await syncDB({ alter: { drop: false } });

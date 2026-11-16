@@ -23,7 +23,7 @@ public class VehicleRepository : IVehicleRepository
 
     public async Task<IReadOnlyList<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>> GetAllAsync(VehicleFilterDto filter, CancellationToken cancellationToken = default)
     {
-        var query = _dbSet.AsQueryable();
+        var query = _dbSet.AsNoTracking();
 
         if (filter.CarrierId.HasValue)
         {

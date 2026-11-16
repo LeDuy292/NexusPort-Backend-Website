@@ -29,13 +29,26 @@ var calls=recorder.Uploads.Count;
 recorder.FailUploads=true;
 try{await service.UploadBytesAsync(image,"fail.jpg","image/jpeg","vehicles");throw new Exception("S3 error was hidden");}
 catch(AmazonS3Exception){Check(recorder.Uploads.Count==calls,"S3 failure propagates; no local fallback or false success URL");}
+recorder.MissingCredentials=true;
+var signingCalls=recorder.SigningCalls;
+service.GetPresignedUrl("NexusPort/vehicles/missing-credentials-1.jpg");
+service.GetPresignedUrl("NexusPort/vehicles/missing-credentials-2.jpg");
+Check(recorder.SigningCalls==signingCalls+1,"missing AWS credentials are not rediscovered for every image in the same minute");
 Console.WriteLine($"PASS {count} S3 upload checks; mocked S3 client only, no database, files or live AWS requests.");
 
-sealed class RecordingS3:AmazonS3Client
+sealed class RecordingS3:AmazonS3Client,IAmazonS3
 {
     public List<(string Bucket,string Key,string ContentType,long Size)> Uploads {get;}=new();
     public bool FailUploads {get;set;}
+    public bool MissingCredentials {get;set;}
+    public int SigningCalls {get;private set;}
     public RecordingS3():base("test-access","test-secret",RegionEndpoint.USEast1){}
+    string IAmazonS3.GetPreSignedURL(GetPreSignedUrlRequest request)
+    {
+        SigningCalls++;
+        if(MissingCredentials)throw new Amazon.Runtime.AmazonClientException("No AWS credentials available");
+        return base.GetPreSignedURL(request);
+    }
     public override Task<PutObjectResponse> PutObjectAsync(PutObjectRequest request,CancellationToken token=default)
     {
         if(FailUploads)throw new AmazonS3Exception("Simulated S3 denial");

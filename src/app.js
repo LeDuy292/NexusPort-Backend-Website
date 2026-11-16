@@ -5,6 +5,7 @@ const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const { createProxyMiddleware } = require('http-proxy-middleware');
 const swaggerUi = require('swagger-ui-express');
 const { swaggerSpec } = require('./docs/swagger');
 const { errorHandler } = require('./middlewares/errorHandler');
@@ -25,6 +26,39 @@ app.use(
     origin: process.env.CORS_ORIGIN || '*',
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Cache-Control', 'Pragma', 'Expires', 'X-Requested-With'],
+  })
+);
+
+// ─── Reverse Proxies (Chuyển tiếp /api/v1 sang C# Core & /node-api sang Node Core) ──
+const csharpTarget = process.env.CSHARP_CORE_URL
+  || process.env.RAILWAY_SERVICE_CSHARP_CORE_URL
+  || (nodeEnv === 'production'
+      ? 'https://csharp-core-production.up.railway.app'
+      : 'http://localhost:5000');
+
+const nodeCoreTarget = process.env.NODE_CORE_URL
+  || process.env.RAILWAY_SERVICE_NODE_CORE_URL
+  || (nodeEnv === 'production'
+      ? 'https://node-core-production.up.railway.app'
+      : 'http://localhost:4000');
+
+app.use(
+  ['/api/v1', '/v1'],
+  createProxyMiddleware({
+    target: csharpTarget,
+    changeOrigin: true,
+    pathRewrite: (path) => `/api/v1${path}`,
+    logLevel: 'warn',
+  })
+);
+
+app.use(
+  ['/api/node-api', '/node-api'],
+  createProxyMiddleware({
+    target: nodeCoreTarget,
+    changeOrigin: true,
+    pathRewrite: (path) => `/api/v1${path}`,
+    logLevel: 'warn',
   })
 );
 

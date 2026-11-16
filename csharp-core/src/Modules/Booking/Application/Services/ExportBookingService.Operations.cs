@@ -73,7 +73,7 @@ public sealed partial class ExportBookingService
         }
         else if(request.EventType=="Loaded")
         {
-            Require(Admin||string.Equals(_user.Role,"Berth Staff",StringComparison.OrdinalIgnoreCase)||string.Equals(_user.Role,"Yard Operator",StringComparison.OrdinalIgnoreCase),"Role","Chỉ nhân viên xếp tàu được ghi nhận Loaded.");
+            Require(Admin||string.Equals(_user.Role,"Yard Operator",StringComparison.OrdinalIgnoreCase),"Role","Chỉ nhân viên xếp tàu được ghi nhận Loaded.");
             Require(S(v,"status")=="Loading"&&S(c,"status")=="GateIn"&&c["customsCleared"]!.GetValue<bool>(),"Status","Chỉ xếp container đã qua cổng, đã thông quan và thuộc danh sách được chốt.");
             Require(request.OccurredAt>=D(c,"gateInAt"),"OccurredAt","Thời điểm xếp tàu không thể trước Gate In.");
             var positions=await Rows("""
@@ -137,7 +137,7 @@ public sealed partial class ExportBookingService
     }
     public async Task<JsonObject> VoyageEvent(Guid id,ExportPortEventRequest request,CancellationToken ct)
     {
-        Require(Admin||string.Equals(_user.Role,"Berth Staff",StringComparison.OrdinalIgnoreCase),"Role","Chỉ nhân viên cầu bến được ghi nhận tàu xếp hàng/rời cầu.");EventShape(request);
+        Require(Admin,"Role","Chỉ nhân viên cầu bến được ghi nhận tàu xếp hàng/rời cầu.");EventShape(request);
         await using var tx=await _db.Database.BeginTransactionAsync(ct);
         var v=await Voyage(id,true,ct);
         if(await EventReplay(request,null,id,ct)){await tx.CommitAsync(ct);return await Voyage(id,false,ct);}

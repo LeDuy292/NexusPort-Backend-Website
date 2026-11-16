@@ -27,23 +27,28 @@ public class DriverService : IDriverService
     public async Task<IReadOnlyList<DriverDto>> GetAllAsync(DriverFilterDto filter, CancellationToken cancellationToken = default)
     {
         var entities = await _repository.GetAllAsync(filter, cancellationToken);
-        return entities.Select(e => new DriverDto
+        return entities.Select(e =>
         {
-            Id = e.Id,
-            CarrierId = e.CarrierId,
-            FullName = e.FullName,
-            Phone = e.Phone,
-            IdCardNumber = e.IdCardNumber,
-            LicenseNumber = e.LicenseNumber,
-            Status = e.Status.ToString(),
-            PhotoUrl = _s3StorageService.GetPresignedUrl(e.PhotoUrl),
-            IdCardFrontUrl = _s3StorageService.GetPresignedUrl(e.IdCardFrontUrl),
-            LicenseImageUrl = _s3StorageService.GetPresignedUrl(e.LicenseImageUrl),
-            IdCardBackUrl = _s3StorageService.GetPresignedUrl(e.IdCardBackUrl),
-            LicenseBackImageUrl = _s3StorageService.GetPresignedUrl(e.LicenseBackImageUrl),
-            IdCardExpiryDate = e.IdCardExpiryDate,
-            LicenseExpiryDate = e.LicenseExpiryDate,
-            CreatedAt = e.CreatedAt
+            cancellationToken.ThrowIfCancellationRequested();
+            return new DriverDto
+            {
+                Id = e.Id,
+                CarrierId = e.CarrierId,
+                FullName = e.FullName,
+                Phone = e.Phone,
+                IdCardNumber = e.IdCardNumber,
+                LicenseNumber = e.LicenseNumber,
+                Status = e.Status.ToString(),
+                HasPhoto = !string.IsNullOrWhiteSpace(e.PhotoUrl),
+                PhotoUrl = filter.IncludePhotos ? _s3StorageService.GetPresignedUrl(e.PhotoUrl) : null,
+                IdCardFrontUrl = filter.IncludeDocuments ? _s3StorageService.GetPresignedUrl(e.IdCardFrontUrl) : null,
+                LicenseImageUrl = filter.IncludeDocuments ? _s3StorageService.GetPresignedUrl(e.LicenseImageUrl) : null,
+                IdCardBackUrl = filter.IncludeDocuments ? _s3StorageService.GetPresignedUrl(e.IdCardBackUrl) : null,
+                LicenseBackImageUrl = filter.IncludeDocuments ? _s3StorageService.GetPresignedUrl(e.LicenseBackImageUrl) : null,
+                IdCardExpiryDate = e.IdCardExpiryDate,
+                LicenseExpiryDate = e.LicenseExpiryDate,
+                CreatedAt = e.CreatedAt
+            };
         }).ToList();
     }
 

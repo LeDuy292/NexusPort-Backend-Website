@@ -18,13 +18,15 @@ public sealed partial class ServiceDraftService
     private static bool Overlaps(ServiceDeliveryTrip a, ServiceDeliveryTrip b)
         => TripWindow(a) is { } x && TripWindow(b) is { } y && x.Start < y.End && y.Start < x.End;
 
-    private async Task<BookingFleetOptions> Fleet(Guid company, ServiceDeliveryTrip trip, CancellationToken ct)
+    private async Task<BookingFleetOptions> Fleet(Guid company, ServiceDeliveryTrip trip, Guid? excludeDraftId, CancellationToken ct)
     {
         Require(fleetAvailability != null, "Chức năng lựa chọn đội xe chưa được cấu hình.", 503, "SERVICE_FLEET_UNAVAILABLE");
         var window = TripWindow(trip);
         Require(window != null, "Chọn giờ bắt đầu và kết thúc chuyến hợp lệ, tối đa 24 giờ.");
-        return await fleetAvailability!.GetFleetAsync(company, window!.Value.Start, window.Value.End, ct);
+        return await fleetAvailability!.GetFleetAsync(company, window!.Value.Start, window.Value.End, excludeDraftId, ct);
     }
+    private Task<BookingFleetOptions> Fleet(Guid company, ServiceDeliveryTrip trip, CancellationToken ct)
+        => Fleet(company, trip, null, ct);
 
     private static void CheckTripScope(ServiceDraftInput input)
     {
@@ -65,11 +67,12 @@ public sealed partial class ServiceDraftService
     }
 
     private static ServiceTripVehicle VehicleSnapshot(AvailableTruckDto t)
-        => new(t.Id, t.PlateNumber, t.VehicleType, t.Status, t.CurrentLocation, t.RfidTag, t.Description);
+        => new(t.Id, t.PlateNumber, t.VehicleType, t.Status, t.CurrentLocation, t.RfidTag, t.Description, t.PhotoUrl, t.RegistrationImageUrl);
     private static ServiceTripDriver DriverSnapshot(AvailableDriverDto d)
-        => new(d.Id, d.FullName, d.Phone, d.LicenseNumber, d.Status, d.LicenseExpiryDate, d.IdCardNumber, d.IdCardExpiryDate);
+        => new(d.Id, d.FullName, d.Phone, d.LicenseNumber, d.Status, d.LicenseExpiryDate, d.IdCardNumber, d.IdCardExpiryDate,
+            d.PhotoUrl, d.IdCardFrontUrl, d.IdCardBackUrl, d.LicenseImageUrl, d.LicenseBackImageUrl);
 
-    private async Task<ServiceDraftInput> CaptureFleet(Guid company, ServiceDraftInput input, CancellationToken ct)
+    private async Task<ServiceDraftInput> CaptureFleet(Guid company, Guid? draftId, ServiceDraftInput input, CancellationToken ct)
     {
         CheckTripScope(input);
         var captured = new List<ServiceDeliveryTrip>();
@@ -78,26 +81,45 @@ public sealed partial class ServiceDraftService
             var next = trip with { Vehicle = null, Driver = null };
             if (trip.TruckId.HasValue || trip.DriverId.HasValue)
             {
-                var available = await Fleet(company, trip, ct);
+                var available = await Fleet(company, trip, draftId, ct);
                 var truck = available.Trucks.FirstOrDefault(t => t.Id == trip.TruckId);
                 var driver = available.Drivers.FirstOrDefault(d => d.Id == trip.DriverId);
-                Require(!trip.TruckId.HasValue || truck != null, "Xe đã bận hoặc không thuộc đội xe đang hoạt động của công ty. Chọn lại xe.", 409, "SERVICE_TRUCK_UNAVAILABLE");
-                Require(!trip.DriverId.HasValue || driver != null, "Tài xế đã bận hoặc hồ sơ không còn hợp lệ. Chọn lại tài xế.", 409, "SERVICE_DRIVER_UNAVAILABLE");
+                if (truck == null && trip.Vehicle != null && trip.Vehicle.Id == trip.TruckId)
+                {
+                    // Giữ nguyên snapshot phương tiện đã chọn trước đó nếu không có thay đổi
+                }
+                else
+                {
+                    Require(!trip.TruckId.HasValue || truck != null, "Xe đã bận hoặc không thuộc đội xe đang hoạt động của công ty. Chọn lại xe.", 409, "SERVICE_TRUCK_UNAVAILABLE");
+                }
+                if (driver == null && trip.Driver != null && trip.Driver.Id == trip.DriverId)
+                {
+                    // Giữ nguyên snapshot tài xế đã chọn trước đó nếu không có thay đổi
+                }
+                else
+                {
+                    Require(!trip.DriverId.HasValue || driver != null, "Tài xế đã bận hoặc hồ sơ không còn hợp lệ. Chọn lại tài xế.", 409, "SERVICE_DRIVER_UNAVAILABLE");
+                }
                 Require(!captured.Any(t => Overlaps(t, trip) && ((trip.TruckId.HasValue && t.TruckId == trip.TruckId)
                     || (trip.DriverId.HasValue && t.DriverId == trip.DriverId))), "Xe hoặc tài xế bị trùng giờ giữa các container.");
-                next = next with { Vehicle = truck == null ? null : VehicleSnapshot(truck), Driver = driver == null ? null : DriverSnapshot(driver) };
+                next = next with {
+                    Vehicle = truck != null ? VehicleSnapshot(truck) : trip.Vehicle,
+                    Driver = driver != null ? DriverSnapshot(driver) : trip.Driver
+                };
             }
             captured.Add(next);
         }
         return input with { Delivery = input.Delivery with { Trips = captured.ToArray(), TruckPlate = "", DriverName = "", DriverPhone = "" } };
     }
+    private Task<ServiceDraftInput> CaptureFleet(Guid company, ServiceDraftInput input, CancellationToken ct)
+        => CaptureFleet(company, null, input, ct);
 
-    private async Task<JsonArray> FleetIssues(ServiceDraftInput input, Guid company, JsonObject source, CancellationToken ct)
+    private async Task<JsonArray> FleetIssues(Guid? draftId, ServiceDraftInput input, Guid company, JsonObject source, CancellationToken ct)
     {
         var issues = new JsonArray();
         if (input.Delivery.TransportMode != "TRUCK") return issues;
-        void Add(string code, string text, Guid? id = null) => issues.Add(new JsonObject {
-            ["code"] = code, ["message"] = text, ["field"] = "delivery.trips", ["severity"] = "ERROR", ["sourceContainerId"] = id?.ToString() });
+        void Add(string code, string text, Guid? id = null, bool warning = false) => issues.Add(new JsonObject {
+            ["code"] = code, ["message"] = text, ["field"] = "delivery.trips", ["severity"] = warning ? "WARNING" : "ERROR", ["sourceContainerId"] = id?.ToString() });
         foreach (var line in input.Lines)
         {
             var trip = input.Delivery.Trips.FirstOrDefault(t => t.SourceContainerId == line.SourceContainerId);
@@ -115,15 +137,27 @@ public sealed partial class ServiceDraftService
             if (input.Delivery.Trips.Any(t => t.SourceContainerId != trip.SourceContainerId && Overlaps(t, trip)
                 && (t.TruckId == trip.TruckId || t.DriverId == trip.DriverId)))
                 Add("TRIP_FLEET_OVERLAP", "Xe hoặc tài xế trùng giờ giữa các container.", line.SourceContainerId);
-            var available = await Fleet(company, trip, ct);
+            var available = await Fleet(company, trip, draftId, ct);
             var truck = available.Trucks.FirstOrDefault(t => t.Id == trip.TruckId);
             var driver = available.Drivers.FirstOrDefault(d => d.Id == trip.DriverId);
-            if (truck == null || driver == null) Add("TRIP_FLEET_UNAVAILABLE", "Xe hoặc tài xế không còn rảnh/hợp lệ. Mở chỉnh sửa và chọn lại.", line.SourceContainerId);
+            if (truck == null || driver == null)
+            {
+                if (trip.Vehicle != null && trip.Driver != null)
+                {
+                    Add("TRIP_FLEET_BUSY_NOTICE", "Xe hoặc tài xế có thể trùng lịch trong khung giờ. Điều phối viên cảng sẽ kiểm tra và sắp xếp.", line.SourceContainerId, warning: true);
+                }
+                else
+                {
+                    Add("TRIP_FLEET_UNAVAILABLE", "Xe hoặc tài xế không còn rảnh/hợp lệ. Mở chỉnh sửa và chọn lại.", line.SourceContainerId);
+                }
+            }
             else if (trip.Vehicle != VehicleSnapshot(truck) || trip.Driver != DriverSnapshot(driver))
-                Add("TRIP_PROFILE_CHANGED", "Thông tin xe hoặc tài xế đã thay đổi. Mở chỉnh sửa và lưu lại hồ sơ.", line.SourceContainerId);
+                Add("TRIP_PROFILE_CHANGED", "Thông tin xe hoặc tài xế đã thay đổi. Mở chỉnh sửa và lưu lại hồ sơ.", line.SourceContainerId, warning: true);
             if (driver != null && (string.IsNullOrWhiteSpace(driver.Phone) || driver.Phone.Count(char.IsDigit) < 7))
                 Add("TRIP_DRIVER_PHONE_REQUIRED", "Tài xế chưa có số điện thoại hợp lệ. Cập nhật hồ sơ tài xế hoặc chọn người khác.", line.SourceContainerId);
         }
         return issues;
     }
+    private Task<JsonArray> FleetIssues(ServiceDraftInput input, Guid company, JsonObject source, CancellationToken ct)
+        => FleetIssues(null, input, company, source, ct);
 }

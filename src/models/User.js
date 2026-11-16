@@ -14,7 +14,6 @@ const VALID_ROLES = [
   'Dispatcher',
   'Gate Officer',
   'Yard Operator',
-  'Berth Staff',
   'Shipping Line',
 ];
 
@@ -30,6 +29,7 @@ class User extends Model {
       role: this.role,
       fullName: this.full_name,
       isActive: this.is_active,
+      emailVerified: !!this.email_verified_at,
       createdAt: this.created_at,
     };
   }
@@ -91,6 +91,15 @@ User.init(
       type: DataTypes.BOOLEAN,
       defaultValue: true,
       allowNull: false,
+    },
+    invitation_pending: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      allowNull: false,
+    },
+    email_verified_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
     },
     reset_token: {
       type: DataTypes.STRING(255),

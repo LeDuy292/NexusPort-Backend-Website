@@ -137,7 +137,7 @@ export const createDriverRouter = (): Router => {
   router.get('/me/destinations', authenticateDriver, controller.getMyDestinations);
   router.get('/', controller.getAll);
   router.get('/:id', controller.getById);
-  router.post('/', controller.create);
+  router.post('/', (_req, res) => { res.status(410).json({success:false,message:'Vui lòng tạo tài khoản từ trang quản lý tài xế của công ty vận tải.'}); });
 
   return router;
 };

@@ -100,6 +100,7 @@ async function getUserById(id) {
  * @throws {{ statusCode: 409 }} Trùng email/username
  */
 async function createUser({ username, email, password, role, fullName, isActive = true, carrierId, driverId }) {
+  if (role === 'Driver') throw Object.assign(new Error('Vui lòng tạo tài khoản từ trang quản lý tài xế của công ty vận tải.'), {statusCode:409});
   // Kiểm tra username trùng
   const existingUsername = await User.findOne({
     where: { username: { [Op.iLike]: username } },
@@ -219,6 +220,7 @@ async function updateUser(id, { fullName, email, username, carrierId, driverId }
  * @throws {{ statusCode: 400 | 404 }}
  */
 async function assignRole(id, role, { carrierId, driverId } = {}) {
+  if (role === 'Driver') throw Object.assign(new Error('Vui lòng tạo tài khoản từ trang quản lý tài xế của công ty vận tải.'), {statusCode:409});
   if (!VALID_ROLES.includes(role)) {
     const err = new Error(`Role không hợp lệ. Phải là một trong: ${VALID_ROLES.join(', ')}`);
     err.statusCode = 400;
@@ -348,94 +350,8 @@ async function getCarrierStaffs(carrierId) {
 /**
  * Tạo và cấp tài khoản đăng nhập cho tài xế (vai trò Driver).
  */
-async function createDriverAccount({ email, username, password, fullName, driverId, carrierId }) {
-  const DEFAULT_SYSTEM_PASS = 'Driver@123';
-  const effectivePassword = password || DEFAULT_SYSTEM_PASS;
-  const rawId = (username || email || '').trim();
-  const isEmail = rawId.includes('@');
-  const normEmail = isEmail ? rawId.toLowerCase() : `${rawId.toLowerCase()}@nexusport.vn`;
-  
-  // Format clean base username
-  let baseUsername = isEmail ? rawId.split('@')[0].toLowerCase() : rawId.toLowerCase();
-  baseUsername = baseUsername.replace(/[^a-z0-9._-]/g, '') || `driver_${Date.now().toString().slice(-4)}`;
-
-  let finalCarrierId = carrierId;
-  let finalDriverId = driverId;
-
-  if (finalDriverId) {
-    const [driverRow] = await sequelize.query(
-      'SELECT id, carrier_id, full_name, user_id FROM drivers WHERE id = :driverId LIMIT 1',
-      { replacements: { driverId: finalDriverId }, type: sequelize.QueryTypes.SELECT }
-    );
-    if (driverRow) {
-      finalCarrierId = driverRow.carrier_id;
-      if (!fullName) fullName = driverRow.full_name;
-    }
-  }
-
-  if (!finalCarrierId) {
-    const [carrierRow] = await sequelize.query(
-      "SELECT id FROM carriers WHERE company_name ILIKE '%Tiên Sa%' OR company_name ILIKE '%Cảng%' LIMIT 1",
-      { type: sequelize.QueryTypes.SELECT }
-    );
-    if (carrierRow) finalCarrierId = carrierRow.id;
-  }
-
-  const existingUser = await User.findOne({
-    where: {
-      [Op.or]: [
-        { email: { [Op.iLike]: normEmail } },
-        { username: { [Op.iLike]: normEmail } },
-        { username: { [Op.iLike]: baseUsername } },
-      ],
-    },
-  });
-
-  if (existingUser) {
-    if (existingUser.role === 'Driver') {
-      const hashedPassword = await bcrypt.hash(effectivePassword, bcryptConfig.saltRounds);
-      existingUser.password = hashedPassword;
-      existingUser.is_active = true;
-      if (fullName) existingUser.full_name = fullName;
-      await existingUser.save();
-      if (finalDriverId && finalCarrierId) {
-        await assignDriverProfile(existingUser.id, { carrierId: finalCarrierId, driverId: finalDriverId });
-      }
-      return {
-        user: existingUser.toSafeObject(),
-        created: false,
-        message: 'Đã kích hoạt và cập nhật tài khoản tài xế thành công!',
-      };
-    } else {
-      const err = new Error('Email hoặc Tên đăng nhập ' + rawId + ' đã tồn tại cho tài khoản vai trò "' + existingUser.role + '". Vui lòng chọn email khác.');
-      err.statusCode = 409;
-      throw err;
-    }
-  }
-
-  // Ensure unique username for new driver user
-  let finalUsername = baseUsername;
-  const usernameTaken = await User.findOne({ where: { username: { [Op.iLike]: finalUsername } } });
-  if (usernameTaken && usernameTaken.email.toLowerCase() !== normEmail.toLowerCase()) {
-    finalUsername = `${baseUsername}_${Math.floor(1000 + Math.random() * 9000)}`;
-  }
-
-  const createdUser = await createUser({
-    username: finalUsername,
-    email: normEmail,
-    password: effectivePassword,
-    role: 'Driver',
-    fullName: fullName || 'Tài xế',
-    isActive: true,
-    carrierId: finalCarrierId,
-    driverId: finalDriverId,
-  });
-
-  return {
-    user: createdUser,
-    created: true,
-    message: 'Đã cấp tài khoản và mật khẩu thành công cho tài xế!',
-  };
+async function createDriverAccount() {
+  throw Object.assign(new Error('Vui lòng tạo tài khoản từ trang quản lý tài xế của công ty vận tải.'), {statusCode:410});
 }
 
 /**

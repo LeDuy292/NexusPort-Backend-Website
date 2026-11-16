@@ -5,6 +5,8 @@ using NexusPort.Api.Middleware;
 using NexusPort.Modules.Carrier;
 
 var builder = WebApplication.CreateBuilder(args);
+if (builder.Environment.IsDevelopment())
+    builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true).AddEnvironmentVariables();
 ApplyDeploymentConfigFallbacks(builder.Configuration);
 
 // Fix Npgsql DateTime timezone conversion error
@@ -56,6 +58,9 @@ if (!Directory.Exists(webRoot)) {
 
 builder.Services.AddRateLimiter(options => {
     options.RejectionStatusCode = 429;
+    options.AddPolicy("account-activation", context => RateLimitPartition.GetFixedWindowLimiter(
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("booking-create", context => RateLimitPartition.GetFixedWindowLimiter(
         context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
             ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",

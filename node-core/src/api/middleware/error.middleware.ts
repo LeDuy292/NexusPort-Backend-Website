@@ -5,6 +5,9 @@ import { logger } from '../../shared/utils/logger';
 import multer from 'multer';
 
 export const errorHandler = (err: Error, req: Request, res: Response, _next: NextFunction) => {
+  if ((err as Error & { type?: string }).type === 'entity.too.large') {
+    return sendError(res, 'Dữ liệu yêu cầu quá lớn. Vui lòng giảm số container hoặc độ dài mô tả hàng hóa.', 413, 'PAYLOAD_TOO_LARGE');
+  }
   if ((err as Error & { code?: string }).code === '53300') {
     logger.warn(`Database connection capacity reached for ${req.method} ${req.path}.`);
     res.setHeader('Retry-After', '3');
