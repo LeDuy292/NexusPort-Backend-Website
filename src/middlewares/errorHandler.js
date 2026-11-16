@@ -8,12 +8,8 @@ const { nodeEnv } = require('../config/env');
  */
 // eslint-disable-next-line no-unused-vars
 function errorHandler(err, req, res, next) {
-  // Log lỗi đầy đủ ở môi trường dev
-  if (nodeEnv === 'development') {
-    console.error('[ErrorHandler]', err);
-  } else {
-    console.error('[ErrorHandler]', err.message);
-  }
+  // Log lỗi đầy đủ
+  console.error('[ErrorHandler]', err.stack || err);
 
   // Sequelize validation errors
   if (err.name === 'SequelizeValidationError' || err.name === 'SequelizeUniqueConstraintError') {
