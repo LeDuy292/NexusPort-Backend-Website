@@ -203,7 +203,7 @@ class HardwareGateService:
 
     def _camera_loop(self):
         """Vòng lặp đọc khung hình camera liên tục trong nền."""
-        reconnect_interval = 5.0
+        reconnect_interval = 30.0
         last_reconnect_check = time.time()
 
         while self._running:
@@ -424,6 +424,13 @@ class HardwareGateService:
         if self.esp32:
             self.esp32.send_open()
             return {"success": True, "message": "Đã gửi lệnh OPEN xuống ESP32"}
+        return {"success": False, "message": "ESP32 chưa kết nối"}
+
+    def manual_close(self) -> Dict[str, Any]:
+        """Cưỡng bức đóng cổng từ giao diện Web."""
+        if self.esp32:
+            self.esp32.send_close()
+            return {"success": True, "message": "Đã gửi lệnh CLOSE xuống ESP32"}
         return {"success": False, "message": "ESP32 chưa kết nối"}
 
     def manual_fail(self) -> Dict[str, Any]:
