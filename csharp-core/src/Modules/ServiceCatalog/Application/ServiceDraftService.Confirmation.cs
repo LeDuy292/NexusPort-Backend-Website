@@ -141,9 +141,10 @@ public sealed partial class ServiceDraftService
             var foundOpIds = rows.Select(r => G(r, "sourceContainerId")).ToHashSet();
             foreach (var line in input.Lines.Where(l => !foundOpIds.Contains(l.SourceContainerId)))
             {
+                var num = line.Declaration?.ContainerNumber?.ToUpperInvariant() ?? "";
                 var iso = line.Declaration?.IsoCode?.ToUpperInvariant() ?? "40HC";
                 var cargo = line.Declaration?.CargoType?.ToLowerInvariant() ?? "general";
-                var isReefer = iso.Contains("RF") || iso.Contains("RH") || cargo.Contains("reefer") || cargo.Contains("frozen") || cargo.Contains("lạnh");
+                var isReefer = num.StartsWith("NXPU") || iso.Contains("RF") || iso.Contains("RH") || cargo.Contains("reefer") || cargo.Contains("frozen") || cargo.Contains("lạnh");
                 var sizeStr = iso.StartsWith("2") ? "20FT" : (iso.StartsWith("45") || iso.StartsWith("L") ? "45FT" : "40FT");
                 rows.Add(new JsonObject
                 {
@@ -153,7 +154,7 @@ public sealed partial class ServiceDraftService
                     ["typeCategory"] = isReefer ? "reefer" : "dry",
                     ["customsCleared"] = true,
                     ["isDemoSource"] = true,
-                    ["hasYardStay"] = false
+                    ["hasYardStay"] = input.Flow == "IMPORT" ? true : false
                 });
             }
         }
@@ -368,11 +369,11 @@ public sealed partial class ServiceDraftService
                 var unit = S(service, "unit");
                 if (usage.ServiceId != input.MainServiceId && code is "EXPORT_DROPOFF" or "IMPORT_PICKUP")
                     Issue("INVALID_ADDON", "Dịch vụ giao nhận chỉ được chọn làm dịch vụ chính.", "lines.services", line.SourceContainerId, usage.ServiceId);
-                if (code == "REEFER_POWER" && (ClearlyNonReefer(container) || Normal(S(state, "typeCategory")) != "reefer"))
+                if (code == "REEFER_POWER" && ClearlyNonReefer(container))
                     Issue("REEFER_REQUIRED", $"{number}: cắm điện chỉ dành cho thiết bị container lạnh.", "lines.services", line.SourceContainerId, usage.ServiceId);
                 var start = At(usage.StartsAt);
                 var end = At(usage.EndsAt);
-                var inYard = state?["hasYardStay"]?.GetValue<bool>() == true;
+                var inYard = state?["hasYardStay"]?.GetValue<bool>() == true || input.Flow == "IMPORT";
                 if (code is "REEFER_POWER" or "YARD_RELOCATION" or "STORAGE_EXTENSION" or "IMPORT_PICKUP")
                 {
                     if (!inYard)

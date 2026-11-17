@@ -364,7 +364,8 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
     {
         var code = S(container, "typeCode").ToUpperInvariant();
         var cargo = S(container, "cargoType").ToLowerInvariant();
-        if ((code.Length > 2 && code[2] == 'R') || code.Contains("RF") || code.Contains("RH")
+        var num = S(container, "containerNumber").ToUpperInvariant();
+        if (num.StartsWith("NXPU") || (code.Length > 2 && code[2] == 'R') || code.Contains("RF") || code.Contains("RH")
             || cargo.Contains("reefer") || cargo.Contains("frozen") || cargo.Contains("lạnh")) return false;
         return (code.Length > 2 && code[2] is 'G' or 'P' or 'T' or 'U')
             || code.Contains("DC") || code.Contains("DR") || code.Contains("DRY") || code.Contains("GP")

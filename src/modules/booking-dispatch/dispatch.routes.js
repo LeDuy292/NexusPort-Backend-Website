@@ -10,7 +10,7 @@ const handler = fn => async (req,res,next) => {
   catch(error) { if(error.statusCode) res.status(error.statusCode).json({success:false,message:error.message}); else next(error); }
 };
 router.use(authenticate);
-router.get('/board', authorize('Dispatcher','Administrator'), handler(req => service.getBoard(req.query.date)));
+router.get('/board', authorize('Dispatcher', 'Administrator', 'Transport Company', 'Carrier', 'Carrier Staff'), handler(req => service.getBoard(req.query.date)));
 router.post('/:id/:action', authorize('Driver','Dispatcher','Administrator'), handler(async req => {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.id)) {
     throw Object.assign(new Error('Mã booking không hợp lệ.'), {statusCode:422});
