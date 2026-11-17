@@ -539,6 +539,35 @@ describe('Người 1: Cargo Notification & Document Tracking Module Tests', () =
       expect(res.notification.message).toContain('trả vỏ');
     });
 
+    it('Sự kiện ServiceOrderApproved và ServiceOrderRejected', async () => {
+      const orderCode = `ORD-TEST-${Date.now()}`;
+      const approvedRes = await cargoNotificationService.ingestEvent({
+        eventId: `evt-ord-app-${Date.now()}`,
+        eventCode: 'ServiceOrderApproved',
+        direction: 'import',
+        payload: {
+          orderCode,
+          serviceType: 'Lệnh lấy container',
+          shipperTaxCode: '0401889988',
+        },
+      });
+      expect(approvedRes.notification.priority).toBe('normal');
+      expect(approvedRes.notification.action_label).toBe('Xem lệnh');
+
+      const rejectedRes = await cargoNotificationService.ingestEvent({
+        eventId: `evt-ord-rej-${Date.now()}`,
+        eventCode: 'ServiceOrderRejected',
+        direction: 'import',
+        payload: {
+          orderCode: `${orderCode}-REJ`,
+          reason: 'Container chưa hoàn tất hải quan',
+          shipperTaxCode: '0401889988',
+        },
+      });
+      expect(rejectedRes.notification.priority).toBe('urgent');
+      expect(rejectedRes.notification.action_label).toBe('Xem lệnh');
+    });
+
     it('Xử lý claimConsignee gán người nhận thành công', async () => {
       // Đưa một item vào hàng đợi
       await sequelize.query(`
