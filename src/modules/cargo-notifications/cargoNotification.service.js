@@ -27,54 +27,95 @@ function formatDate(dt) {
 /**
  * Tra cứu thông tin người nhận (Company / User) dựa theo MST hoặc Tên công ty
  */
+/**
+ * Tra cứu thông tin người nhận (Company / Carrier / User)
+ * Nghiệp vụ: Chủ hàng không cần tài khoản user cá nhân trong hệ thống.
+ * Mọi thông báo liên quan đến lô hàng được chuyển tiếp về Công ty Vận tải (Carrier)
+ * phụ trách giao nhận. Thông báo đồng thời lưu Tên chủ hàng và MST để dễ đối soát.
+ */
 async function resolveRecipient({ companyId, taxCode, companyName, userId }) {
+  let matchedCarrier = null;
+
+  // 1. Tìm theo companyId
   if (companyId) {
     const [c] = await sequelize.query('SELECT id, company_name, tax_code FROM carriers WHERE id = :companyId', {
       replacements: { companyId },
       type: sequelize.QueryTypes.SELECT,
     });
-    if (c) return { companyId: c.id, companyName: c.company_name, taxCode: c.tax_code, userId: userId || null };
+    if (c) matchedCarrier = c;
   }
 
-  if (taxCode) {
+  // 2. Tìm theo taxCode
+  if (!matchedCarrier && taxCode) {
     const [c] = await sequelize.query('SELECT id, company_name, tax_code FROM carriers WHERE tax_code ILIKE :taxCode LIMIT 1', {
       replacements: { taxCode: taxCode.trim() },
       type: sequelize.QueryTypes.SELECT,
     });
-    if (c) return { companyId: c.id, companyName: c.company_name, taxCode: c.tax_code, userId: userId || null };
+    if (c) matchedCarrier = c;
   }
 
-  if (companyName) {
+  // 3. Tìm theo companyName
+  if (!matchedCarrier && companyName) {
     const [c] = await sequelize.query('SELECT id, company_name, tax_code FROM carriers WHERE company_name ILIKE :companyName LIMIT 1', {
       replacements: { companyName: `%${companyName.trim()}%` },
       type: sequelize.QueryTypes.SELECT,
     });
-    if (c) return { companyId: c.id, companyName: c.company_name, taxCode: c.tax_code, userId: userId || null };
+    if (c) matchedCarrier = c;
   }
 
-  return { companyId: null, companyName: companyName || null, taxCode: taxCode || null, userId: userId || null };
+  // 4. Nếu MST / Tên thuộc về Chủ hàng (không phải công ty vận tải)
+  // Gán cho Công ty vận tải quản lý (hoặc công ty vận tải mặc định của cảng)
+  const isDirectCarrierMatch = !!matchedCarrier;
+  if (!matchedCarrier) {
+    const [defaultCarrier] = await sequelize.query('SELECT id, company_name, tax_code FROM carriers ORDER BY created_at ASC LIMIT 1', {
+      type: sequelize.QueryTypes.SELECT,
+    });
+    matchedCarrier = defaultCarrier;
+  }
+
+  // 5. Xác định user_id nhận thông báo (lấy từ carrier_users của carrier này nếu chưa có userId)
+  let resolvedUserId = userId || null;
+  if (matchedCarrier && !resolvedUserId) {
+    const [cu] = await sequelize.query('SELECT user_id FROM carrier_users WHERE carrier_id = :carrierId LIMIT 1', {
+      replacements: { carrierId: matchedCarrier.id },
+      type: sequelize.QueryTypes.SELECT,
+    });
+    if (cu) resolvedUserId = cu.user_id;
+  }
+
+  return {
+    companyId: matchedCarrier ? matchedCarrier.id : null,
+    companyName: matchedCarrier ? matchedCarrier.company_name : (companyName || null),
+    taxCode: taxCode || (matchedCarrier ? matchedCarrier.tax_code : null),
+    carrierTaxCode: matchedCarrier ? matchedCarrier.tax_code : null,
+    customerName: companyName || null,
+    customerTaxCode: taxCode || null,
+    userId: resolvedUserId,
+    isDirectCarrierMatch,
+  };
 }
 
 /**
  * Phát socket realtime tới client
  */
-function emitRealtimeNotification(notification, recipient) {
+function emitRealtimeNotification(notification, recipient = {}) {
   try {
     const io = getIO();
     if (!io) return;
-    if (recipient.userId) {
+    if (recipient?.userId) {
       io.to(`user:${recipient.userId}`).emit('cargo_notification:new', notification);
     }
-    if (recipient.companyId) {
+    if (recipient?.companyId) {
       io.to(`company:${recipient.companyId}`).emit('cargo_notification:new', notification);
     }
-    // Also broadcast to general cargo channel
+    // Phát tới tất cả client đang kết nối trên portal
+    io.emit('cargo_notification:new', notification);
     io.emit('cargo_notification:broadcast', {
       id: notification.id,
       title: notification.title,
       priority: notification.priority,
-      recipientCompanyId: recipient.companyId,
-      companyTaxCode: recipient.taxCode,
+      recipientCompanyId: recipient?.companyId,
+      companyTaxCode: recipient?.taxCode,
     });
   } catch (err) {
     console.warn('[CargoNotification] Lỗi phát socket notification:', err.message);
@@ -204,7 +245,7 @@ class CargoNotificationService {
         
         let changeDesc = '';
         if (payload.changes && Array.isArray(payload.changes)) {
-          changeDesc = payload.changes.map(c => `${c.field || 'Hạng mục'}: cũ [${formatDate(c.oldValue) || c.oldValue}] -> mới [${formatDate(c.newValue) || c.newValue}]`).join('; ');
+          changeDesc = payload.changes.map(c => `${c.field || 'Hạng mục'}: giá trị cũ [${formatDate(c.oldValue) || c.oldValue}] -> giá trị mới [${formatDate(c.newValue) || c.newValue}]`).join('; ');
         } else if (payload.oldValues && payload.newValues) {
           const keys = Object.keys(payload.newValues);
           changeDesc = keys.map(k => `${k}: giá trị cũ [${payload.oldValues[k]}] -> giá trị mới [${payload.newValues[k]}]`).join('; ');
@@ -374,6 +415,39 @@ class CargoNotificationService {
         documentType = 'BL';
         documentId = payload.blNumber;
 
+        // Lưu / Cập nhật vào bảng bills_of_lading trong PostgreSQL với status = 'DRAFT'
+        try {
+          await sequelize.query(`
+            INSERT INTO bills_of_lading (
+              bl_number, booking_no, carrier_id, direction, shipper_name, shipper_tax_code,
+              consignee_name, vessel_name, confirmation_deadline, status, draft_version, qr_data
+            ) VALUES (
+              :blNumber, :bookingNo, :carrierId, 'export', :shipperName, :shipperTaxCode,
+              :consigneeName, :vesselName, :deadline, 'DRAFT', :draftVersion, :qrData
+            )
+            ON CONFLICT (bl_number) DO UPDATE SET
+              status = 'DRAFT',
+              confirmation_deadline = EXCLUDED.confirmation_deadline,
+              draft_version = bills_of_lading.draft_version + 1,
+              updated_at = now()
+          `, {
+            replacements: {
+              blNumber: payload.blNumber,
+              bookingNo: payload.bookingNo || null,
+              carrierId: recipient.companyId || null,
+              shipperName: rawCompanyName || 'Công ty Cổ phần Thép Hòa Phát',
+              shipperTaxCode: rawTaxCode || null,
+              consigneeName: payload.consignee || 'Consignee',
+              vesselName: payload.vesselName || null,
+              deadline: payload.confirmationDeadline ? new Date(payload.confirmationDeadline).toISOString() : null,
+              draftVersion: payload.draftVersion || 1,
+              qrData: `NXP-BL-DRAFT|${payload.blNumber}|${payload.bookingNo}`,
+            },
+          });
+        } catch (dbErr) {
+          console.warn('[CargoNotification] Lỗi lưu bills_of_lading DRAFT:', dbErr.message);
+        }
+
         if (payload.confirmationDeadline) {
           await this.createReminder({
             recipientCompanyId: recipient.companyId,
@@ -400,6 +474,35 @@ class CargoNotificationService {
         documentType = 'BL';
         documentId = payload.blNumber;
 
+        // Cập nhật trạng thái bills_of_lading trong PostgreSQL sang 'ISSUED'
+        try {
+          await sequelize.query(`
+            INSERT INTO bills_of_lading (
+              bl_number, booking_no, carrier_id, direction, shipper_name, shipper_tax_code,
+              shipped_on_board_date, status, qr_data
+            ) VALUES (
+              :blNumber, :bookingNo, :carrierId, 'export', :shipperName, :shipperTaxCode,
+              :shippedDate, 'ISSUED', :qrData
+            )
+            ON CONFLICT (bl_number) DO UPDATE SET
+              status = 'ISSUED',
+              shipped_on_board_date = EXCLUDED.shipped_on_board_date,
+              updated_at = now()
+          `, {
+            replacements: {
+              blNumber: payload.blNumber,
+              bookingNo: payload.bookingNo || null,
+              carrierId: recipient.companyId || null,
+              shipperName: rawCompanyName || 'Công ty Cổ phần Thép Hòa Phát',
+              shipperTaxCode: rawTaxCode || null,
+              shippedDate: payload.shippedOnBoardDate ? new Date(payload.shippedOnBoardDate).toISOString() : new Date().toISOString(),
+              qrData: `NXP-BL|${payload.blNumber}|${payload.shippedOnBoardDate}`,
+            },
+          });
+        } catch (dbErr) {
+          console.warn('[CargoNotification] Lỗi lưu bills_of_lading ISSUED:', dbErr.message);
+        }
+
         if (payload.blNumber) {
           await this.cancelRemindersByTarget('DRAFT_BL_CONFIRM', payload.blNumber);
         }
@@ -412,7 +515,7 @@ class CargoNotificationService {
       case 'ManifestSent': {
         notifDirection = 'import';
         priority = 'normal';
-        if (!recipient.companyId && !recipient.userId) {
+        if (!recipient.isDirectCarrierMatch && !rawCompanyId) {
           await this.enqueueUnclaimedConsignee({
             manifestId: payload.manifestId || payload.voyageNo,
             blNumber: payload.blNumber || 'N/A',
@@ -460,6 +563,40 @@ class CargoNotificationService {
         documentType = 'EDO';
         documentId = payload.doNumber;
 
+        // Lưu / Cập nhật vào bảng delivery_orders trong PostgreSQL
+        try {
+          await sequelize.query(`
+            INSERT INTO delivery_orders (
+              do_number, bl_number, carrier_id, consignee_name, consignee_tax_code,
+              vessel_name, voyage_no, valid_until, empty_return_depot, containers, status, qr_data
+            ) VALUES (
+              :doNumber, :blNumber, :carrierId, :consigneeName, :consigneeTaxCode,
+              :vesselName, :voyageNo, :validUntil, :emptyReturnDepot, :containers, 'RELEASED', :qrData
+            )
+            ON CONFLICT (do_number) DO UPDATE SET
+              valid_until = EXCLUDED.valid_until,
+              empty_return_depot = EXCLUDED.empty_return_depot,
+              status = 'RELEASED',
+              updated_at = now()
+          `, {
+            replacements: {
+              doNumber: payload.doNumber,
+              blNumber: payload.blNumber || 'BL-N/A',
+              carrierId: recipient.companyId || null,
+              consigneeName: rawCompanyName || 'Công ty Cổ phần Thép Hòa Phát',
+              consigneeTaxCode: rawTaxCode || null,
+              vesselName: payload.vesselName || null,
+              voyageNo: payload.voyageNo || null,
+              validUntil: payload.validUntil ? new Date(payload.validUntil).toISOString() : null,
+              emptyReturnDepot: payload.emptyReturnDepot || 'Depot Tân Cảng Đà Nẵng',
+              containers: JSON.stringify(payload.containers || []),
+              qrData: `NXP-EDO|${payload.doNumber}|${payload.blNumber}|${payload.validUntil}`,
+            },
+          });
+        } catch (dbErr) {
+          console.warn('[CargoNotification] Lỗi lưu delivery_orders:', dbErr.message);
+        }
+
         if (payload.validUntil) {
           await this.createReminder({
             recipientCompanyId: recipient.companyId,
@@ -484,6 +621,22 @@ class CargoNotificationService {
         actionUrl = `/cargo/documents/EDO/${encodeURIComponent(payload.doNumber || '')}`;
         documentType = 'EDO';
         documentId = payload.doNumber;
+
+        // Cập nhật trạng thái delivery_orders sang HELD
+        try {
+          await sequelize.query(`
+            UPDATE delivery_orders
+            SET status = 'HELD', hold_reason = :reason, updated_at = now()
+            WHERE do_number = :doNumber
+          `, {
+            replacements: {
+              doNumber: payload.doNumber,
+              reason: payload.reason || 'Tạm giữ từ Hãng tàu',
+            },
+          });
+        } catch (dbErr) {
+          console.warn('[CargoNotification] Lỗi cập nhật HELD delivery_orders:', dbErr.message);
+        }
         break;
       }
 
@@ -497,6 +650,19 @@ class CargoNotificationService {
         actionUrl = `/cargo/documents/EDO/${encodeURIComponent(payload.doNumber || '')}`;
         documentType = 'EDO';
         documentId = payload.doNumber;
+
+        // Cập nhật trạng thái delivery_orders sang RELEASED
+        try {
+          await sequelize.query(`
+            UPDATE delivery_orders
+            SET status = 'RELEASED', hold_reason = null, updated_at = now()
+            WHERE do_number = :doNumber
+          `, {
+            replacements: { doNumber: payload.doNumber },
+          });
+        } catch (dbErr) {
+          console.warn('[CargoNotification] Lỗi cập nhật RELEASED delivery_orders:', dbErr.message);
+        }
         break;
       }
 
@@ -509,6 +675,22 @@ class CargoNotificationService {
         actionLabel = 'Liên hệ hãng tàu';
         documentType = 'EDO';
         documentId = payload.doNumber;
+
+        // Cập nhật trạng thái delivery_orders sang CANCELLED
+        try {
+          await sequelize.query(`
+            UPDATE delivery_orders
+            SET status = 'CANCELLED', hold_reason = :reason, updated_at = now()
+            WHERE do_number = :doNumber
+          `, {
+            replacements: {
+              doNumber: payload.doNumber,
+              reason: payload.reason || 'Hủy từ Hãng tàu',
+            },
+          });
+        } catch (dbErr) {
+          console.warn('[CargoNotification] Lỗi cập nhật CANCELLED delivery_orders:', dbErr.message);
+        }
         break;
       }
 
@@ -564,6 +746,26 @@ class CargoNotificationService {
         title = `Lệnh dịch vụ [${payload.orderCode || ''}] ĐÃ TẠO (Chờ thanh toán)`;
         message = `Dịch vụ: ${payload.serviceName || payload.serviceType || 'Cảng'}. Số tiền: ${Number(payload.amount || 0).toLocaleString('vi-VN')} VND. Vui lòng thanh toán để Cảng lên kế hoạch thực thi.`;
         actionType = 'pay_order';
+        actionLabel = 'Xem lệnh';
+        actionUrl = `/billing?orderCode=${encodeURIComponent(payload.orderCode || '')}`;
+        break;
+      }
+
+      case 'ServiceOrderApproved': {
+        priority = 'normal';
+        title = `Lệnh dịch vụ [${payload.orderCode || ''}] ĐÃ ĐƯỢC PHÊ DUYỆT`;
+        message = `Cảng đã phê duyệt lệnh thực hiện dịch vụ ${payload.serviceName || payload.serviceType || 'Cảng'}. Lô hàng đã đủ điều kiện vào bãi / nhận container.`;
+        actionType = 'view_order';
+        actionLabel = 'Xem lệnh';
+        actionUrl = `/billing?orderCode=${encodeURIComponent(payload.orderCode || '')}`;
+        break;
+      }
+
+      case 'ServiceOrderRejected': {
+        priority = 'urgent';
+        title = `Lệnh dịch vụ [${payload.orderCode || ''}] BỊ TỪ CHỐI`;
+        message = `Lý do từ chối: ${payload.reason || 'Thông tin container không khớp hoặc chưa hoàn tất thủ tục liên quan'}. Vui lòng kiểm tra lại lệnh.`;
+        actionType = 'view_order';
         actionLabel = 'Xem lệnh';
         actionUrl = `/billing?orderCode=${encodeURIComponent(payload.orderCode || '')}`;
         break;
@@ -893,43 +1095,47 @@ class CargoNotificationService {
       }
     }
 
-    // 2. Việc Nhập Khẩu: Lấy từ e-D/O và Hàng đến trong shippingLine data
+    // 2. Việc Nhập Khẩu: Lấy từ e-D/O lưu trong database và EIR Gate-Out
     if (type === 'all' || type === 'import') {
       try {
-        const manifests = shippingLineService.manifests || [];
-        const dos = shippingLineService.deliveryOrders || [];
+        const dos = await sequelize.query(`
+          SELECT id, do_number, bl_number, consignee_name, consignee_tax_code, valid_until, status, empty_return_depot
+          FROM delivery_orders
+          WHERE status IN ('RELEASED', 'HELD')
+          ORDER BY valid_until ASC LIMIT 20
+        `, { type: sequelize.QueryTypes.SELECT });
 
         // e-D/O đã cấp nhưng chưa đặt lệnh lấy hàng
         for (const edo of dos) {
           if (edo.status === 'RELEASED') {
-            const validUntil = new Date(edo.validUntil);
+            const validUntil = new Date(edo.valid_until);
             const hoursLeft = (validUntil - now) / (1000 * 3600);
             todos.push({
-              id: `todo-edo-${edo.id || edo.doNumber}`,
+              id: `todo-edo-${edo.id || edo.do_number}`,
               taskType: 'ORDER_PICKUP_SERVICE',
               direction: 'import',
               priority: hoursLeft <= 6 ? 'urgent' : 'normal',
-              title: `Đặt lệnh lấy container nhập cho e-D/O ${edo.doNumber}`,
-              description: `Vận đơn: ${edo.blNumber}. Hạn lấy trước: ${formatDate(edo.validUntil)} (${Math.max(0, Math.round(hoursLeft))} giờ còn lại).`,
-              doNumber: edo.doNumber,
-              blNumber: edo.blNumber,
-              deadline: edo.validUntil,
+              title: `Đặt lệnh lấy container nhập cho e-D/O ${edo.do_number}`,
+              description: `Vận đơn: ${edo.bl_number}. Hạn lấy trước: ${formatDate(edo.valid_until)} (${Math.max(0, Math.round(hoursLeft))} giờ còn lại).`,
+              doNumber: edo.do_number,
+              blNumber: edo.bl_number,
+              deadline: edo.valid_until,
               actionLabel: 'Đặt lệnh lấy hàng',
-              actionUrl: `/cargo/documents/EDO/${encodeURIComponent(edo.doNumber)}`,
+              actionUrl: `/cargo/documents/EDO/${encodeURIComponent(edo.do_number)}`,
             });
           } else if (edo.status === 'HELD') {
             todos.push({
-              id: `todo-edo-held-${edo.id || edo.doNumber}`,
+              id: `todo-edo-held-${edo.id || edo.do_number}`,
               taskType: 'RESOLVE_HELD_EDO',
               direction: 'import',
               priority: 'urgent',
-              title: `KHẨN: e-D/O ${edo.doNumber} đang BỊ TẠM GIỮ`,
-              description: `Hàng thuộc B/L ${edo.blNumber} đang bị hãng tàu khóa. Cần liên hệ hãng tàu để giải tỏa.`,
-              doNumber: edo.doNumber,
-              blNumber: edo.blNumber,
+              title: `KHẨN: e-D/O ${edo.do_number} đang BỊ TẠM GIỮ`,
+              description: `Hàng thuộc B/L ${edo.bl_number} đang bị hãng tàu khóa. Cần liên hệ hãng tàu để giải tỏa.`,
+              doNumber: edo.do_number,
+              blNumber: edo.bl_number,
               deadline: null,
               actionLabel: 'Liên hệ Hãng tàu',
-              actionUrl: `/cargo/support?doNumber=${encodeURIComponent(edo.doNumber)}`,
+              actionUrl: `/cargo/support?doNumber=${encodeURIComponent(edo.do_number)}`,
             });
           }
         }
@@ -1085,55 +1291,77 @@ class CargoNotificationService {
       }
     }
 
-    // 2. e-D/O (Electronic Delivery Order)
+    // 2. e-D/O (Electronic Delivery Order) - Lấy trực tiếp từ PostgreSQL
     if (type === 'all' || type === 'EDO') {
       try {
-        const dos = shippingLineService.deliveryOrders || [];
+        let edoSql = `
+          SELECT id, do_number, bl_number, consignee_name, consignee_tax_code,
+                 vessel_name, voyage_no, valid_until, issued_date, empty_return_depot,
+                 status, hold_reason, containers
+          FROM delivery_orders
+        `;
+        const repl = {};
+        if (s) {
+          edoSql += ` WHERE (do_number ILIKE :s OR bl_number ILIKE :s OR consignee_name ILIKE :s)`;
+          repl.s = `%${s}%`;
+        }
+        edoSql += ` ORDER BY issued_date DESC LIMIT 30`;
+        const dos = await sequelize.query(edoSql, { replacements: repl, type: sequelize.QueryTypes.SELECT });
+
         for (const d of dos) {
-          if (!s || d.doNumber.toLowerCase().includes(s) || d.blNumber.toLowerCase().includes(s) || (d.consignee && d.consignee.toLowerCase().includes(s))) {
-            docs.push({
-              id: d.id || d.doNumber,
-              documentType: 'EDO',
-              documentNumber: d.doNumber,
-              title: `Lệnh giao hàng điện tử (e-D/O) - ${d.doNumber}`,
-              direction: 'import',
-              status: d.status || 'RELEASED',
-              issueDate: d.issuedDate,
-              validUntil: d.validUntil,
-              relatedNumber: d.blNumber,
-              emptyDepot: d.emptyReturnDepot,
-              customerName: d.consignee,
-              summary: `Vận đơn: ${d.blNumber} · Hạn hiệu lực: ${formatDate(d.validUntil)} · Depot: ${d.emptyReturnDepot || 'Depot chỉ định'}`,
-            });
-          }
+          docs.push({
+            id: d.id || d.do_number,
+            documentType: 'EDO',
+            documentNumber: d.do_number,
+            title: `Lệnh giao hàng điện tử (e-D/O) - ${d.do_number}`,
+            direction: 'import',
+            status: d.status || 'RELEASED',
+            issueDate: d.issued_date,
+            validUntil: d.valid_until,
+            relatedNumber: d.bl_number,
+            emptyDepot: d.empty_return_depot,
+            customerName: d.consignee_name,
+            summary: `Vận đơn: ${d.bl_number} · Hạn hiệu lực: ${formatDate(d.valid_until)} · Depot: ${d.empty_return_depot || 'Depot chỉ định'}`,
+          });
         }
       } catch (err) {
-        console.warn('[CargoNotification] Lỗi lấy danh sách e-DO:', err.message);
+        console.warn('[CargoNotification] Lỗi lấy danh sách e-DO từ DB:', err.message);
       }
     }
 
-    // 3. Bill of Lading (B/L)
+    // 3. Bill of Lading (B/L) - Lấy trực tiếp từ PostgreSQL
     if (type === 'all' || type === 'BL') {
       try {
-        const bls = shippingLineService.billsOfLading || [];
+        let blSql = `
+          SELECT id, bl_number, booking_no, direction, shipper_name, consignee_name,
+                 vessel_name, voyage_number, pol, pod, shipped_on_board_date, confirmation_deadline,
+                 freight_status, status, containers, draft_version, created_at
+          FROM bills_of_lading
+        `;
+        const repl = {};
+        if (s) {
+          blSql += ` WHERE (bl_number ILIKE :s OR booking_no ILIKE :s OR shipper_name ILIKE :s OR consignee_name ILIKE :s)`;
+          repl.s = `%${s}%`;
+        }
+        blSql += ` ORDER BY created_at DESC LIMIT 30`;
+        const bls = await sequelize.query(blSql, { replacements: repl, type: sequelize.QueryTypes.SELECT });
+
         for (const b of bls) {
-          if (!s || b.blNumber.toLowerCase().includes(s) || (b.shipper && b.shipper.toLowerCase().includes(s)) || (b.consignee && b.consignee.toLowerCase().includes(s))) {
-            docs.push({
-              id: b.id || b.blNumber,
-              documentType: 'BL',
-              documentNumber: b.blNumber,
-              title: `Vận đơn đường biển (Bill of Lading) - ${b.blNumber}`,
-              direction: b.direction || 'export',
-              status: b.status || 'ISSUED',
-              issueDate: b.shippedOnBoardDate || b.createdAt,
-              relatedNumber: b.bookingNo,
-              customerName: b.consignee || b.shipper,
-              summary: `Tàu: ${b.vesselName || ''} · ${b.pol || 'DAD'} -> ${b.pod || 'SIN'} · ${(b.containers || []).length} container`,
-            });
-          }
+          docs.push({
+            id: b.id || b.bl_number,
+            documentType: 'BL',
+            documentNumber: b.bl_number,
+            title: `${b.status === 'DRAFT' ? 'Bản nháp vận đơn (Draft B/L)' : 'Vận đơn đường biển (Bill of Lading)'} - ${b.bl_number}`,
+            direction: b.direction || 'export',
+            status: b.status || 'ISSUED',
+            issueDate: b.shipped_on_board_date || b.created_at,
+            relatedNumber: b.booking_no,
+            customerName: b.consignee_name || b.shipper_name,
+            summary: `Tàu: ${b.vessel_name || ''} · ${b.pol || 'DAD'} -> ${b.pod || 'SIN'} · ${(b.containers || []).length} container`,
+          });
         }
       } catch (err) {
-        console.warn('[CargoNotification] Lỗi lấy danh sách BL:', err.message);
+        console.warn('[CargoNotification] Lỗi lấy danh sách BL từ DB:', err.message);
       }
     }
 
@@ -1254,8 +1482,10 @@ class CargoNotificationService {
       }
 
       case 'EDO': {
-        const dos = shippingLineService.deliveryOrders || [];
-        const edo = dos.find(x => x.doNumber === id || x.id === id);
+        const [edo] = await sequelize.query(`
+          SELECT * FROM delivery_orders WHERE do_number = :id OR id::text = :id LIMIT 1
+        `, { replacements: { id }, type: sequelize.QueryTypes.SELECT });
+
         if (!edo) {
           return { error: 'Không tìm thấy e-D/O với mã đã cho.', notFound: true };
         }
@@ -1263,50 +1493,59 @@ class CargoNotificationService {
         return {
           documentType: 'EDO',
           title: `Lệnh giao hàng điện tử (e-D/O)`,
-          doNumber: edo.doNumber,
-          blNumber: edo.blNumber,
+          doNumber: edo.do_number,
+          blNumber: edo.bl_number,
           status: edo.status,
           statusLabel: edo.status === 'RELEASED' ? 'Được phép giao hàng' : edo.status === 'HELD' ? 'Đang bị tạm giữ' : edo.status,
-          consignee: edo.consignee,
-          consigneeTaxCode: edo.consigneeTaxCode || '0401889988',
-          vesselName: edo.vesselName || 'EVER GLORY',
-          voyageNo: edo.voyageNo || '2601N',
-          issuedDate: edo.issuedDate,
-          validUntil: edo.validUntil,
-          emptyReturnDepot: edo.emptyReturnDepot || 'Depot Tân Cảng Đà Nẵng',
+          consignee: edo.consignee_name,
+          consigneeTaxCode: edo.consignee_tax_code || '0401889988',
+          vesselName: edo.vessel_name || 'EVER GLORY',
+          voyageNo: edo.voyage_no || '2601N',
+          issuedDate: edo.issued_date,
+          validUntil: edo.valid_until,
+          emptyReturnDepot: edo.empty_return_depot || 'Depot Tân Cảng Đà Nẵng',
           containers: edo.containers || ['MSKU9082134'],
-          qrData: `NXP-EDO|${edo.doNumber}|${edo.blNumber}|${edo.validUntil}`,
+          qrData: edo.qr_data || `NXP-EDO|${edo.do_number}|${edo.bl_number}|${edo.valid_until}`,
           actionRecommendation: edo.status === 'RELEASED'
             ? 'e-D/O đã sẵn sàng. Bạn có thể đặt lệnh lấy container trên e-Port để nhận hàng.'
-            : 'Lệnh đang bị tạm giữ. Vui lòng thanh toán cước hãng tàu hoặc liên hệ phòng chăm sóc khách hàng.',
+            : (edo.hold_reason || 'Lệnh đang bị tạm giữ. Vui lòng thanh toán cước hãng tàu hoặc liên hệ phòng chăm sóc khách hàng.'),
         };
       }
 
       case 'BL': {
-        const bls = shippingLineService.billsOfLading || [];
-        const bl = bls.find(x => x.blNumber === id || x.id === id);
+        const [bl] = await sequelize.query(`
+          SELECT * FROM bills_of_lading WHERE bl_number = :id OR id::text = :id LIMIT 1
+        `, { replacements: { id }, type: sequelize.QueryTypes.SELECT });
+
         if (!bl) {
           return { error: 'Không tìm thấy Vận đơn đường biển B/L.', notFound: true };
         }
 
         return {
           documentType: 'BL',
-          title: `Vận đơn đường biển (Bill of Lading)`,
-          blNumber: bl.blNumber,
-          bookingNo: bl.bookingNo,
-          shipper: bl.shipper,
-          consignee: bl.consignee,
-          notifyParty: bl.notifyParty || 'Same as consignee',
-          vesselName: bl.vesselName,
-          voyageNo: bl.voyageNumber,
+          title: bl.status === 'DRAFT' ? `Bản nháp vận đơn (Draft B/L)` : `Vận đơn đường biển (Bill of Lading)`,
+          blNumber: bl.bl_number,
+          bookingNo: bl.booking_no,
+          shipper: bl.shipper_name,
+          shipperTaxCode: bl.shipper_tax_code,
+          consignee: bl.consignee_name,
+          consigneeTaxCode: bl.consignee_tax_code,
+          notifyParty: bl.notify_party || 'Same as consignee',
+          vesselName: bl.vessel_name,
+          voyageNo: bl.voyage_number,
           pol: bl.pol || 'Da Nang Port (VNDAD)',
           pod: bl.pod || 'Singapore (SGSIN)',
-          shippedOnBoardDate: bl.shippedOnBoardDate,
-          freightStatus: bl.freightStatus || 'FREIGHT PREPAID',
+          shippedOnBoardDate: bl.shipped_on_board_date,
+          confirmationDeadline: bl.confirmation_deadline,
+          freightStatus: bl.freight_status || 'FREIGHT PREPAID',
           containers: bl.containers || [],
-          cargoDescription: bl.cargoDescription || 'General Containerized Cargo',
-          qrData: `NXP-BL|${bl.blNumber}|${bl.vesselName}|${bl.shippedOnBoardDate}`,
-          actionRecommendation: 'Vận đơn điện tử đã phát hành. Lưu giữ bản sao hoặc gửi cho đối tác nhận hàng.',
+          cargoDescription: bl.cargo_description || 'General Containerized Cargo',
+          draftVersion: bl.draft_version || 1,
+          status: bl.status,
+          qrData: bl.qr_data || `NXP-BL|${bl.bl_number}|${bl.vessel_name}|${bl.shipped_on_board_date}`,
+          actionRecommendation: bl.status === 'DRAFT'
+            ? 'Vui lòng kiểm tra kỹ thông tin hàng hóa, số container, số seal và nhấn Xác nhận Draft B/L.'
+            : 'Vận đơn điện tử đã phát hành. Lưu giữ bản sao hoặc gửi cho đối tác nhận hàng.',
         };
       }
 
