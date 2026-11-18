@@ -166,7 +166,6 @@ class ESP32Controller:
         if serial is None:
             return None
         try:
-            import serial.tools.list_ports
             ports = list(serial.tools.list_ports.comports())
             for p in ports:
                 desc = (p.description or "").upper()
@@ -248,8 +247,13 @@ class ESP32Controller:
         while self._running:
             if not self.connected:
                 logger.info("[ESP32] Attempting to connect to %s ...", self.port)
-                if not self._open_serial():
-                    time.sleep(5)  # Chờ 5s trước khi thử lại
+                try:
+                    if not self._open_serial():
+                        time.sleep(5)  # Chờ 5s trước khi thử lại
+                        continue
+                except Exception as e:
+                    logger.error("[ESP32] Error opening serial port: %s", e)
+                    time.sleep(5)
                     continue
 
             try:
