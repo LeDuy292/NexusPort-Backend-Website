@@ -210,6 +210,12 @@ public static class ServiceCollectionExtensions
         services.AddScoped<NexusPort.Modules.Yard.Application.Interfaces.IReeferMonitoringService, NexusPort.Modules.Yard.Application.Services.ReeferMonitoringService>();
         services.AddHostedService<NexusPort.Modules.Yard.Infrastructure.BackgroundServices.ReeferMonitoringSimulatorWorker>();
 
+        // Yard - Container Preparation Module
+        services.AddScoped<NexusPort.Modules.Yard.Preparation.Application.Services.IPreparationPlanner, NexusPort.Modules.Yard.Preparation.Application.Services.PreparationPlanner>();
+        services.AddScoped<NexusPort.Modules.Yard.Preparation.Application.Services.IPreparationService, NexusPort.Modules.Yard.Preparation.Application.Services.PreparationService>();
+        FluentValidation.ServiceCollectionExtensions.AddValidatorsFromAssemblyContaining(services, typeof(NexusPort.Modules.Yard.Preparation.Application.Validators.CancelTaskRequestValidator));
+        services.AddHostedService<NexusPort.Modules.Yard.Preparation.Infrastructure.BackgroundServices.PreparationMonitoringWorker>();
+
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();
         services.AddScoped<IGateService, GateService>();
