@@ -306,25 +306,61 @@ def trigger_gate_scan(lane: str = "IN"):
 @app.post("/api/v1/gate/barrier/open")
 def manual_barrier_open():
     """
-    Cưỡng bức mở Barrier từ Web UI (nút 'Mở Cổng').
+    Cưỡng bức mở Barrier từ Web UI (nút 'Mở Cổng') — Làn Vào (backward compat).
     """
-    return hw_service.manual_open()
+    return hw_service.manual_open_in()
+
+
+@app.post("/api/v1/gate/barrier/open/in")
+def manual_barrier_open_in():
+    """Cưỡng bức mở Barrier Làn Vào (IN)."""
+    return hw_service.manual_open_in()
+
+
+@app.post("/api/v1/gate/barrier/open/out")
+def manual_barrier_open_out():
+    """Cưỡng bức mở Barrier Làn Ra (OUT)."""
+    return hw_service.manual_open_out()
 
 
 @app.post("/api/v1/gate/barrier/close")
 def manual_barrier_close():
     """
-    Cưỡng bức đóng Barrier từ Web UI (nút 'Hạ barie').
+    Cưỡng bức đóng Barrier từ Web UI (nút 'Hạ barie') — Làn Vào (backward compat).
     """
-    return hw_service.manual_close()
+    return hw_service.manual_close_in()
+
+
+@app.post("/api/v1/gate/barrier/close/in")
+def manual_barrier_close_in():
+    """Cưỡng bức đóng Barrier Làn Vào (IN)."""
+    return hw_service.manual_close_in()
+
+
+@app.post("/api/v1/gate/barrier/close/out")
+def manual_barrier_close_out():
+    """Cưỡng bức đóng Barrier Làn Ra (OUT)."""
+    return hw_service.manual_close_out()
 
 
 @app.post("/api/v1/gate/barrier/fail")
 def manual_barrier_fail():
     """
-    Báo lỗi / từ chối xe từ Web UI (nút 'Đóng Cổng / Báo Lỗi').
+    Báo lỗi / từ chối xe từ Web UI — Làn Vào (backward compat).
     """
-    return hw_service.manual_fail()
+    return hw_service.manual_fail_in()
+
+
+@app.post("/api/v1/gate/barrier/fail/in")
+def manual_barrier_fail_in():
+    """Báo lỗi Làn Vào (IN)."""
+    return hw_service.manual_fail_in()
+
+
+@app.post("/api/v1/gate/barrier/fail/out")
+def manual_barrier_fail_out():
+    """Báo lỗi Làn Ra (OUT)."""
+    return hw_service.manual_fail_out()
 
 
 @app.get("/api/v1/gate/hardware-status")
