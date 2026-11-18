@@ -20,11 +20,12 @@ from services.esp32_controller import ESP32Controller
 from services.hardware_gate_service import HardwareGateService
 
 # Khởi tạo dịch vụ phần cứng quản lý ESP32 và Camera
+camera_index = int(os.getenv("GATE_CAMERA_INDEX", os.getenv("GATE_CAMERA_IN", "0")))
 hw_service = HardwareGateService(
     port=os.getenv("GATE_SERIAL_PORT", "COM8"),
     baud=int(os.getenv("GATE_BAUD_RATE", "115200")),
-    cam_in_idx=int(os.getenv("GATE_CAMERA_IN", "0")),
-    cam_out_idx=int(os.getenv("GATE_CAMERA_OUT", "1"))
+    cam_in_idx=camera_index,
+    cam_out_idx=camera_index
 )
 
 @asynccontextmanager
@@ -294,13 +295,22 @@ def get_video_feed(lane: str = "IN"):
     )
 
 
-@app.post("/api/v1/gate/trigger-scan")
-def trigger_gate_scan(lane: str = "IN"):
-    """
-    Kích hoạt chụp ảnh và OCR đọc biển số ngay lập tức từ Web UI
-    (phục vụ nút 'Chụp & Quét Biển Số' trên màn hình nhân viên cổng).
-    """
-    return hw_service.process_passage(lane=lane, source="WEB_MANUAL")
+@app.post("/api/v1/gate/camera/start")
+def start_gate_camera(lane: str = "IN"):
+    """Bật camera quan sát theo yêu cầu từ giao diện."""
+    try:
+        return hw_service.set_camera_preview(lane, True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/gate/camera/stop")
+def stop_gate_camera(lane: str = "IN"):
+    """Tắt camera quan sát từ giao diện."""
+    try:
+        return hw_service.set_camera_preview(lane, False)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/api/v1/gate/barrier/open")

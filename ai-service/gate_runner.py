@@ -59,8 +59,9 @@ logger = logging.getLogger("gate_runner")
 # ── Cấu hình ─────────────────────────────────────────────────────────────────
 SERIAL_PORT   = os.getenv("GATE_SERIAL_PORT",  "COM7")
 BAUD_RATE     = int(os.getenv("GATE_BAUD_RATE", "115200"))
-CAMERA_IN     = int(os.getenv("GATE_CAMERA_IN",  "0"))   # Webcam index cổng Vào
-CAMERA_OUT    = int(os.getenv("GATE_CAMERA_OUT", "1"))   # Webcam index cổng Ra
+CAMERA_INDEX  = int(os.getenv("GATE_CAMERA_INDEX", os.getenv("GATE_CAMERA_IN", "0")))
+CAMERA_IN     = CAMERA_INDEX
+CAMERA_OUT    = CAMERA_INDEX
 EXPRESS_URL   = os.getenv("EXPRESS_BASE_URL", "http://localhost:3001").rstrip("/")
 
 # Gate / Lane mặc định cho làn Vào
@@ -176,28 +177,10 @@ class GateRunner:
         self._pipeline = SmartPortGatePipeline()
         logger.info("[setup] Pipeline sẵn sàng.")
 
-        # 2. Mở Webcam cổng Vào
-        logger.info("[setup] Mở webcam cổng Vào (index %d)...", self.cam_in_idx)
-        self._cap_in = self._open_camera(self.cam_in_idx)
-        if self._cap_in is None or not self._cap_in.isOpened():
-            logger.error(
-                "[setup] Không mở được webcam index %d! "
-                "Kiểm tra lại cáp USB webcam đã cắm chắc chắn chưa.",
-                self.cam_in_idx
-            )
-            self._cap_in = None
+        # Camera chỉ được mở tạm thời khi có cảm biến hoặc lệnh quét.
+        logger.info("[setup] Camera đang chờ tín hiệu cảm biến/lệnh quét.")
 
-        # 3. Mở Webcam cổng Ra (tùy chọn — nếu chỉ có 1 camera thì bỏ qua)
-        logger.info("[setup] Mở webcam cổng Ra (index %d)...", self.cam_out_idx)
-        self._cap_out = self._open_camera(self.cam_out_idx)
-        if self._cap_out is None or not self._cap_out.isOpened():
-            logger.warning(
-                "[setup] Webcam index %d không tìm thấy — chỉ chạy 1 làn Vào.",
-                self.cam_out_idx,
-            )
-            self._cap_out = None
-
-        # 4. Kết nối ESP32
+        # 2. Kết nối ESP32
         self._esp32 = ESP32Controller(port=self.port, baud=self.baud)
         logger.info("[setup] Đang kết nối ESP32 tại %s ...", self.port)
         connected = self._esp32.start()
@@ -245,22 +228,28 @@ class GateRunner:
         with self._processing_lock:
             logger.info("[process] ── Bắt đầu xử lý CAPTURE (làn: %s) ──", lane)
 
-            # Chọn camera và metadata theo làn
+            # Chọn làn logic; một webcam vật lý được dùng lần lượt cho cả hai làn.
             if lane == "IN":
-                cap        = self._cap_in
+                camera_index = self.cam_in_idx
                 gate_code  = GATE_CODE_IN
                 lane_code  = LANE_CODE_IN
                 camera_id  = CAMERA_ID_IN
                 cam_label  = "Cổng Vào"
             else:
-                cap        = self._cap_out or self._cap_in  # Fallback về cam_in nếu không có cam_out
+                camera_index = self.cam_out_idx
                 gate_code  = GATE_CODE_OUT
                 lane_code  = LANE_CODE_OUT
                 camera_id  = CAMERA_ID_OUT
                 cam_label  = "Cổng Ra"
 
             # 1. Chụp ảnh từ Webcam
+            cap = self._open_camera(camera_index)
+            if cap is None or not cap.isOpened():
+                logger.error("[process] Không mở được webcam index %d — gửi FAIL", camera_index)
+                self._esp32.send_fail()
+                return
             image_bytes = self._grab_frame(cap, cam_label)
+            cap.release()
             if not image_bytes:
                 logger.error("[process] Không lấy được ảnh — gửi FAIL")
                 self._esp32.send_fail()
@@ -358,8 +347,8 @@ class GateRunner:
             logger.info("   [Manual Mode] Nhấn 'c' để giả lập tín hiệu CAPTURE từ cảm biến IR.")
         logger.info("")
 
-        # Mở cửa sổ preview (tùy chọn — bình luận dòng này nếu chạy headless)
-        show_preview = True
+        # Không mở camera preview liên tục; camera chỉ bật trong lần quét.
+        show_preview = False
 
         try:
             while True:
@@ -403,7 +392,7 @@ class GateRunner:
                     self._esp32.capture_event.clear()
                     threading.Thread(
                         target=self._process_capture,
-                        args=("IN",),   # Hiện tại dùng chung 1 ESP32 cho làn Vào
+                        args=(self._esp32.capture_lane,),
                         daemon=True,
                     ).start()
 

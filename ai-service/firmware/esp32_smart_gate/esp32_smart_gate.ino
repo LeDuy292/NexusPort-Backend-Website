@@ -1,6 +1,7 @@
 #include <ESP32Servo.h>
 
-const int irPin = 19;       // Cảm biến hồng ngoại
+const int irInPin = 19;     // Cảm biến làn vào
+const int irOutPin = 18;    // Cảm biến làn ra (để INPUT_PULLUP nếu chưa đấu nối)
 const int servoPin = 13;    // Động cơ Servo (Barrier)
 const int buzzerPin = 12;   // Còi Buzzer
 const int ledRedPin = 25;   // LED Đỏ
@@ -19,12 +20,14 @@ const unsigned long AUTO_CLOSE_MS = 30000;
 
 // Cooldown sau FAIL: chống spam còi
 unsigned long lastFailTime = 0;
-const unsigned long FAIL_COOLDOWN_MS = 8000;
+const unsigned long FAIL_COOLDOWN_MS = 10000;
+const unsigned long OCR_RESPONSE_TIMEOUT_MS = 25000;
 
 void setup() {
   Serial.begin(115200);
 
-  pinMode(irPin, INPUT_PULLUP);
+  pinMode(irInPin, INPUT_PULLUP);
+  pinMode(irOutPin, INPUT_PULLUP);
   pinMode(buzzerPin, OUTPUT);
   pinMode(ledRedPin, OUTPUT);
   pinMode(ledGreenPin, OUTPUT);
@@ -91,11 +94,13 @@ void loop() {
   }
 
   // 2. CẢM BIẾN IR: Khi phát hiện xe (LOW) & Cổng chưa mở & Không đang chờ OCR & Hết cooldown
-  bool irTriggered = (digitalRead(irPin) == LOW);
+  bool irInTriggered = (digitalRead(irInPin) == LOW);
+  bool irOutTriggered = (digitalRead(irOutPin) == LOW);
   bool cooldownOk  = (millis() - lastFailTime > FAIL_COOLDOWN_MS);
 
-  if (irTriggered && !isGateOpen && !isWaitingForOCR && cooldownOk) {
-    Serial.println("CAPTURE");
+  if ((irInTriggered || irOutTriggered) && !isGateOpen && !isWaitingForOCR && cooldownOk) {
+    // Giữ CAPTURE cũ cho làn vào để tương thích với phiên bản Python cũ.
+    Serial.println(irOutTriggered ? "CAPTURE:OUT" : "CAPTURE");
     isWaitingForOCR = true;
     requestTime = millis();
     delay(500); // Chống dội tín hiệu
@@ -128,7 +133,7 @@ void loop() {
   }
 
   // 4. Timeout chờ phản hồi OCR (10s)
-  if (isWaitingForOCR && (millis() - requestTime > 10000)) {
+  if (isWaitingForOCR && (millis() - requestTime > OCR_RESPONSE_TIMEOUT_MS)) {
     isWaitingForOCR = false;
     lastFailTime = millis();
   }
