@@ -86,20 +86,23 @@ async function getLayoutSnapshot() {
   // One statement gives consistent occupancy and physical container positions.
   const [rows] = await sequelize.query(`
     SELECT yb.id AS "blockId", yb.code AS block, yb.name AS "blockName",
-      ys.id, ys.bay, ys.row_no AS row, ys.tier, ys.status::text AS status,
+      ys.id, ys.bay, ys.row_no AS row, ys.tier,
+      COALESCE(CASE WHEN pyr.status IS NOT NULL THEN pyr.status END, ys.status::text) AS status,
       ys.module_start AS "moduleStart",ys.module_span AS "moduleSpan",ys.container_length_ft AS "containerLengthFt",
       ys.has_reefer_plug AS "hasReeferPlug",
       cp.container_id AS "containerId",
       COALESCE(
         c.container_no,
         yt."ContainerNo",
+        pyr.container_no,
         (SELECT rc.container_no FROM yard_slot_reservations r JOIN containers rc ON rc.id=r.container_id WHERE r.slot_id=ys.id AND r.reserved_to IS NULL ORDER BY r.reserved_from DESC LIMIT 1)
       ) AS "containerNumber",
       COALESCE(
+        pyr.container_no,
         (SELECT rc.container_no FROM yard_slot_reservations r JOIN containers rc ON rc.id=r.container_id WHERE r.slot_id=ys.id AND r.reserved_to IS NULL ORDER BY r.reserved_from DESC LIMIT 1),
         yt."ContainerNo"
       ) AS "reservedContainerNumber",
-      COALESCE(bk.booking_code, yt."TaskCode") AS "bookingCode",
+      COALESCE(pyr.booking_code, bk.booking_code, yt."TaskCode") AS "bookingCode",
       COALESCE(bk.vehicle_plate, yt."VehiclePlate") AS "vehiclePlate",
       COALESCE(bk.driver_name, yt."DriverName") AS "driverName",
       COALESCE(carr.company_name, yt."OperationType") AS "company",
@@ -111,6 +114,13 @@ async function getLayoutSnapshot() {
       (SELECT map_data->'layout'->>'drawingVersion' FROM smart_yard_maps WHERE is_active=true ORDER BY updated_at DESC LIMIT 1) AS "drawingVersion"
     FROM yard_blocks yb
     LEFT JOIN yard_slots ys ON ys.block_id=yb.id
+    LEFT JOIN LATERAL (
+      SELECT container_no, booking_code, status
+      FROM persistent_yard_reservations
+      WHERE (block_code=yb.code OR block_code=REPLACE(yb.code, 'Block ', ''))
+        AND bay=ys.bay AND row_no=ys.row_no AND tier=ys.tier
+      ORDER BY updated_at DESC LIMIT 1
+    ) pyr ON true
     LEFT JOIN LATERAL (
       SELECT container_id FROM container_positions
       WHERE slot_id=ys.id AND is_current=true ORDER BY placed_at DESC LIMIT 1
