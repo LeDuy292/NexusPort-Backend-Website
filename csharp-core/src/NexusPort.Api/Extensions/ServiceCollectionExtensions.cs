@@ -206,6 +206,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IYardReceivingService, YardReceivingService>();
         services.AddScoped<IYardTaskService, YardTaskService>();
         services.AddScoped<IYardRestackService, YardRestackService>();
+        services.AddScoped<IYardDischargeService, YardDischargeService>();
         services.AddScoped<NexusPort.Modules.Yard.Application.Interfaces.IReeferMonitoringService, NexusPort.Modules.Yard.Application.Services.ReeferMonitoringService>();
         services.AddHostedService<NexusPort.Modules.Yard.Infrastructure.BackgroundServices.ReeferMonitoringSimulatorWorker>();
 

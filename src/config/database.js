@@ -30,12 +30,20 @@ const sequelize = new Sequelize(db.name, db.user, db.password, {
  * Kiểm tra kết nối tới PostgreSQL.
  */
 async function connectDB() {
-  try {
-    await sequelize.authenticate();
-    console.log('[DB] Kết nối PostgreSQL thành công.');
-  } catch (error) {
-    console.error('[DB] Không thể kết nối PostgreSQL:', error.message);
-    throw error;
+  const maxRetries = 10;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await sequelize.authenticate();
+      console.log('[DB] Kết nối PostgreSQL thành công.');
+      return;
+    } catch (error) {
+      console.warn(`[DB] Kết nối lần ${attempt} chưa thành công: ${error.message}`);
+      if (attempt === maxRetries) {
+        console.error('[DB] Không thể kết nối PostgreSQL:', error.message);
+        throw error;
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
   }
 }
 

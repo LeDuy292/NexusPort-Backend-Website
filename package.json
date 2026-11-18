@@ -10,6 +10,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
+    "dev:all": "node scripts/dev-all.js",
+    "dev:aiservice": "cd ai-service && .venv\\Scripts\\python.exe -m uvicorn main:app --reload --host 0.0.0.0 --port 8000",
     "dev:csharp": "powershell -NoProfile -ExecutionPolicy Bypass -File csharp-core/run.ps1",
     "test": "jest --runInBand --forceExit --detectOpenHandles",
     "openapi:check": "jest tests/openapi.contract.test.js --runInBand --forceExit",

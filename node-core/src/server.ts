@@ -82,5 +82,12 @@ const shutdown = async () => {
   await Promise.allSettled([broker.close(), pool.end()]);
   process.exit(0);
 };
+process.on('uncaughtException', (err) => {
+  logger.error('[node-core] Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  logger.error('[node-core] Unhandled rejection:', reason);
+});
+
 process.once('SIGTERM', () => void shutdown());
 process.once('SIGINT', () => void shutdown());

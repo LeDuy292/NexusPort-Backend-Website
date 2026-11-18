@@ -8,3 +8,5 @@ python-multipart>=0.0.9
 pydantic>=2.6.0
 requests>=2.31.0
 python-dotenv>=1.0.0
+# ── ESP32 Hardware Integration ──
+pyserial>=3.5          # Serial communication với ESP32 qua COM7

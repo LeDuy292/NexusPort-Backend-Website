@@ -161,6 +161,12 @@ public static class ServiceReceiptPdfGenerator
         if (string.IsNullOrEmpty(refCode)) refCode = "VIETQR-" + DateTime.Now.ToString("yyyyMMddHHmmss");
         gfx.DrawString("Mã giao dịch:", fSmallBold, new XSolidBrush(cGray), col1, iy);
         gfx.DrawString(refCode + " (Ngân hàng Quân Đội - MB)", fBodyBold, new XSolidBrush(cGreen), col1 + 80, iy);
+        if (proof?["amount"]?.GetValue<decimal>() is decimal receivedAmount)
+        {
+            iy += 16;
+            gfx.DrawString("Số tiền giao dịch:", fSmallBold, new XSolidBrush(cGray), col1, iy);
+            gfx.DrawString(receivedAmount.ToString("N0", CultureInfo.GetCultureInfo("vi-VN")) + " VND", fBodyBold, new XSolidBrush(cGreen), col1 + 80, iy);
+        }
 
         y += 105;
 
@@ -252,7 +258,7 @@ public static class ServiceReceiptPdfGenerator
         gfx.DrawLine(new XPen(cBlue, 1.5), left, y, right, y);
         gfx.DrawLine(new XPen(cBorder, 1), left, y + totH, right, y + totH);
 
-        gfx.DrawString("TỔNG TIỀN ĐÃ THANH TOÁN (ĐÃ BAO GỒM VAT 8%):", fBodyBold, new XSolidBrush(cNavy), colSvc, y + 7);
+        gfx.DrawString("TỔNG PHÍ DỊCH VỤ THEO ĐƠN:", fBodyBold, new XSolidBrush(cNavy), colSvc, y + 7);
         gfx.DrawString(totalAmount + " VND", new XFont("Arial", 12, XFontStyle.Bold, fontOptions), new XSolidBrush(cBlue), colTotal, y + 5, XStringFormats.TopRight);
         y += totH + 18;
 
@@ -262,7 +268,7 @@ public static class ServiceReceiptPdfGenerator
         gfx.DrawString("HƯỚNG DẪN LÀM HÀNG TẠI CỔNG CẢNG (SMART GATE) & CHỨNG TỪ THUẾ", fSmallBold, new XSolidBrush(XColor.FromArgb(29, 78, 216)), left + 10, y + 8);
         gfx.DrawString("• Phiếu thu & biên lai điện tử này được hệ thống NexusPort phát hành tự động sau khi giao dịch ngân hàng thành công.", fSmall, new XSolidBrush(cDark), left + 10, y + 22);
         gfx.DrawString("• Lái xe / Doanh nghiệp chỉ cần xuất trình mã đơn hoặc tệp PDF này tại cổng Smart Gate để được phân làn và cấp vị trí bãi tự động.", fSmall, new XSolidBrush(cDark), left + 10, y + 34);
-        gfx.DrawString("• Hóa đơn điện tử GTGT chính thức đã được xuất và đồng bộ theo thông tin mã số thuế của quý doanh nghiệp.", fSmall, new XSolidBrush(cDark), left + 10, y + 46);
+        gfx.DrawString("• Chứng từ này thể hiện tổng phí theo đơn và số tiền giao dịch đã được PayOS xác nhận.", fSmall, new XSolidBrush(cDark), left + 10, y + 46);
         y += 75;
 
         // Signatures Block

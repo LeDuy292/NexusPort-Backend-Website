@@ -37,10 +37,16 @@ const pool = new Pool({
   connectionString,
   application_name: 'nexusport-node-core',
   max: Number(process.env.DB_POOL_MAX || 2),
-  min: 1,
-  idleTimeoutMillis: 3000,
+  min: 0,
+  idleTimeoutMillis: 10000,
   connectionTimeoutMillis: 10000,
   ...(isSslRequired ? { ssl: { rejectUnauthorized: false } } : {}),
+});
+
+pool.on('connect', (client) => {
+  client.on('error', (err) => {
+    logger.warn('[DB] Handled PostgreSQL client error:', (err as Error)?.message || err);
+  });
 });
 
 pool.on('error', (err) => {

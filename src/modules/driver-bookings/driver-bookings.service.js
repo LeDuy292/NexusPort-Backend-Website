@@ -49,6 +49,12 @@ const BOOKING_FIELDS = `SELECT b.id, b.booking_code AS "bookingCode", b.booking_
 const BOOKING_SELECT = BOOKING_FIELDS + ' WHERE d.user_id=:userId';
 
 async function getFeed(userId) {
+  if (process.env.NODE_ENV !== 'test') {
+    try {
+      const { syncManifestGateBookings } = require('../booking-dispatch/dispatch.service');
+      await syncManifestGateBookings();
+    } catch {}
+  }
   const [profile, bookings, notifications, counts] = await Promise.all([
     getProfile(userId),
     read(`${BOOKING_SELECT} ORDER BY b.created_at DESC LIMIT 100`, { userId }),
