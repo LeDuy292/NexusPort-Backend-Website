@@ -46,12 +46,14 @@ export function createManifestRouter(repository = new ManifestRepository()): Rou
   });
   router.post('/port/approve/:id', async (req: ManifestRequest, res, next) => {
     try {
-      sendSuccess(res, await repository.approvePort(parseId(req.params.id)));
+      const id = String(req.params.id || '').trim();
+      sendSuccess(res, await repository.approvePort(id));
     } catch (e) { next(e); }
   });
   router.post('/port/reset-pending/:id', async (req: ManifestRequest, res, next) => {
     try {
-      sendSuccess(res, await repository.resetPortPending(parseId(req.params.id)));
+      const id = String(req.params.id || '').trim();
+      sendSuccess(res, await repository.resetPortPending(id));
     } catch (e) { next(e); }
   });
   router.post('/port/reset-all', async (_req: ManifestRequest, res, next) => {
@@ -61,8 +63,9 @@ export function createManifestRouter(repository = new ManifestRepository()): Rou
   });
   router.post('/port/bookings/:id', async (req: ManifestRequest, res, next) => {
     try {
+      const id = String(req.params.id || '').trim();
       const bookings = Array.isArray(req.body.bookings) ? req.body.bookings : [];
-      sendSuccess(res, await repository.savePortBookings(parseId(req.params.id), bookings));
+      sendSuccess(res, await repository.savePortBookings(id, bookings));
     } catch (e) { next(e); }
   });
 

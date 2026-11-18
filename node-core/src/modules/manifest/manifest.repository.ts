@@ -129,14 +129,23 @@ export class ManifestRepository {
     const result = await query(`UPDATE shipping_manifests SET
       payload = jsonb_set(
         jsonb_set(
-          jsonb_set(payload, '{status}', '"PORT_APPROVED"'),
-          '{portApprovalStatus}', '"PORT_APPROVED"'
+          jsonb_set(
+            jsonb_set(payload, '{status}', '"PORT_APPROVED"'),
+            '{portApprovalStatus}', '"PORT_APPROVED"'
+          ),
+          '{portApprovedAt}', to_jsonb($2::text)
         ),
-        '{portApprovedAt}', to_jsonb($2::text)
+        '{portApprovedBy}', to_jsonb($3::text)
       ),
       revision = revision + 1
-      WHERE id = $1
-      RETURNING payload || jsonb_build_object('id', id, 'createdAt', created_at) AS document`, [id, now]);
+      WHERE id::text = $1 
+         OR payload->>'manifestNumber' = $1 
+         OR payload->>'id' = $1
+         OR payload->>'voyageNumber' = $1 
+         OR payload->'voyageInfo'->>'voyageNumber' = $1 
+         OR payload->>'vesselName' = $1 
+         OR payload->'voyageInfo'->>'vesselName' = $1
+      RETURNING payload || jsonb_build_object('id', id, 'createdAt', created_at) AS document`, [id, now, approvedBy]);
     if (!result.rows[0]) throw new NotFoundError('Bản khai');
     return result.rows[0].document;
   }
@@ -147,7 +156,13 @@ export class ManifestRepository {
         '{portApprovalStatus}', '"PENDING_APPROVAL"'
       ),
       revision = revision + 1
-      WHERE id = $1
+      WHERE id::text = $1 
+         OR payload->>'manifestNumber' = $1 
+         OR payload->>'id' = $1
+         OR payload->>'voyageNumber' = $1 
+         OR payload->'voyageInfo'->>'voyageNumber' = $1 
+         OR payload->>'vesselName' = $1 
+         OR payload->'voyageInfo'->>'vesselName' = $1
       RETURNING payload || jsonb_build_object('id', id, 'createdAt', created_at) AS document`, [id]);
     if (!result.rows[0]) throw new NotFoundError('Bản khai');
     return result.rows[0].document;
@@ -164,15 +179,33 @@ export class ManifestRepository {
       eport_service_registrations,
       eport_service_email_verifications,
       eport_service_drafts;`);
-    return { success: true, message: 'Đã xóa toàn bộ bản khai và đơn ePort để test lại từ đầu.' };
+
+    // Đồng thời giải phóng toàn bộ ô bãi đã đặt trước (reserved / occupied) về lại 'empty' và xóa nhiệm vụ dỡ tàu
+    try {
+      await query(`UPDATE yard_slots SET status = 'empty'::yard_slot_status WHERE status::text IN ('occupied', 'reserved')`);
+    } catch (e) {
+      console.warn('Lỗi reset yard_slots:', e);
+    }
+    try {
+      await query(`DELETE FROM container_positions`);
+    } catch (e) {
+      console.warn('Lỗi reset container_positions:', e);
+    }
+    try {
+      await query(`DELETE FROM yard_tasks`);
+    } catch (e) {
+      console.warn('Lỗi reset yard_tasks:', e);
+    }
+
+    return { success: true, message: 'Đã xóa toàn bộ bản khai, đơn ePort và giải phóng toàn bộ vị trí đặt chỗ bãi để test lại từ đầu.' };
   }
   async savePortBookings(id: string, bookings: any[]): Promise<any> {
     const result = await query(`UPDATE shipping_manifests SET
       payload = jsonb_set(payload, '{generatedBookings}', $2::jsonb),
       revision = revision + 1
-      WHERE id = $1
+      WHERE id::text = $1 OR payload->>'manifestNumber' = $1
       RETURNING id`, [id, JSON.stringify(bookings)]);
     if (!result.rows[0]) throw new NotFoundError('Bản khai');
-    return { success: true };
+    return { id: result.rows[0].id, count: bookings.length };
   }
 }
