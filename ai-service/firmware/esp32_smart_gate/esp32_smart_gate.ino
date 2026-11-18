@@ -79,7 +79,6 @@ void beep(int times, int durationMs, int pauseMs) {
 void openGateIN() {
   if (gateOpenIN) {
     // Đã mở rồi → gia hạn thêm 30s, không xoay thêm
-    gateOpenedAt = millis();  // alias không dùng, dùng openedAtIN
     openedAtIN = millis();
     return;
   }
@@ -209,8 +208,6 @@ void setup() {
 //  LOOP
 // ══════════════════════════════════════════════════════════
 
-// Biến alias cho openGateIN (để tránh lỗi khai báo bên trên)
-unsigned long gateOpenedAt = 0; // unused — xem openedAtIN/OUT
 
 void loop() {
   unsigned long now = millis();
