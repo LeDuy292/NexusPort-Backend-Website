@@ -4,6 +4,7 @@
     "src"
   ],
   "ext": "js,json",
+  "delay": 1500,
   "ignore": [
     "node-core/**",
     "csharp-core/**",
