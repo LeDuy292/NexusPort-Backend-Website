@@ -321,8 +321,29 @@ async function getGateOutRequests({ direction = 'inbound', status, search, urgen
     offset,
   });
 
+  let slotMap = null;
+  try {
+    const { getLayoutSnapshot } = require('./yard-layout');
+    const snapshot = await getLayoutSnapshot();
+    slotMap = new Map();
+    for (const s of (snapshot?.slots || [])) {
+      if (s.containerNumber || s.containerId) {
+        const k1 = `${s.block}:${s.bay}:${s.row}`;
+        const k2 = `${String(s.block).replace(/^B0?/, 'B')}:${s.bay}:${s.row}`;
+        if (!slotMap.has(k1)) slotMap.set(k1, new Map());
+        slotMap.get(k1).set(s.tier, s);
+        if (k1 !== k2) {
+          if (!slotMap.has(k2)) slotMap.set(k2, new Map());
+          slotMap.get(k2).set(s.tier, s);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[getGateOutRequests] Failed to build slotMap:', err.message);
+  }
+
   return {
-    requests: rows.map(formatGateOutRequest),
+    requests: rows.map(r => formatGateOutRequest(r, slotMap)),
     total: count,
     page: pageNum,
     limit: limitNum,
@@ -397,28 +418,6 @@ async function getOutboundPreparationRequests({ status, search, vessel, page = 1
         note: null,
       }
     ];
-    if (blockingCount > 0 && tierNum < 4) {
-      outboundStack.push({
-        id: 'TEMU4451923',
-        tier: tierNum + 1,
-        carrier: 'COSCO / TEMU',
-        weight: '28,000 KG',
-        isTarget: false,
-        status: 'occupied',
-        note: 'Cont chắn (Cần đảo)',
-      });
-    }
-    if (tierNum > 1) {
-      outboundStack.push({
-        id: 'TGHU9921826',
-        tier: 1,
-        carrier: 'Yang Ming',
-        weight: '27,200 KG',
-        isTarget: false,
-        status: 'occupied',
-        note: null,
-      });
-    }
 
     const item = {
       id: r.id,
@@ -515,7 +514,27 @@ async function getGateOutRequestById(id) {
     err.statusCode = 404;
     throw err;
   }
-  return formatGateOutRequest(request);
+  let slotMap = null;
+  try {
+    const { getLayoutSnapshot } = require('./yard-layout');
+    const snapshot = await getLayoutSnapshot();
+    slotMap = new Map();
+    for (const s of (snapshot?.slots || [])) {
+      if (s.containerNumber || s.containerId) {
+        const k1 = `${s.block}:${s.bay}:${s.row}`;
+        const k2 = `${String(s.block).replace(/^B0?/, 'B')}:${s.bay}:${s.row}`;
+        if (!slotMap.has(k1)) slotMap.set(k1, new Map());
+        slotMap.get(k1).set(s.tier, s);
+        if (k1 !== k2) {
+          if (!slotMap.has(k2)) slotMap.set(k2, new Map());
+          slotMap.get(k2).set(s.tier, s);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[getGateOutRequestById] Failed to build slotMap:', err.message);
+  }
+  return formatGateOutRequest(request, slotMap);
 }
 
 /**
@@ -709,48 +728,70 @@ async function createGateOutRequest(data, userId) {
 /**
  * Format DTO gửi về client.
  */
-function formatGateOutRequest(req) {
+function formatGateOutRequest(req, slotMap) {
   const targetTier = parseInt(req.yard_tier, 10) || 1;
-  const blockingCount = parseInt(req.blocking_containers, 10) || 0;
-
-  const stackContainers = [
-    {
-      id: req.container_id,
-      tier: targetTier,
-      carrier: req.carrier_name || 'Chủ hàng / Hãng tàu',
-      weight: req.weight_kg || '24,000 KG',
-      isTarget: true,
-      status: 'occupied',
-      note: null,
-    }
-  ];
-
-  if (blockingCount > 0 && targetTier < 4) {
-    stackContainers.push({
-      id: 'TEMU4451923',
-      tier: targetTier + 1,
-      carrier: 'COSCO / TEMU',
-      weight: '26,500 KG',
-      isTarget: false,
-      status: 'occupied',
-      note: 'Cont chắn (Cần đảo)',
-    });
-  }
-
-  if (targetTier > 1) {
-    stackContainers.push({
-      id: 'TGHU9921826',
-      tier: 1,
-      carrier: 'Yang Ming',
-      weight: '28,100 KG',
-      isTarget: false,
-      status: 'occupied',
-      note: null,
-    });
-  }
-
   const flowStep = parseInt(req.flow_step, 10) || 0;
   const isDone = req.status === 'COMPLETED' || flowStep >= 5;
+
+  let blockingCount = parseInt(req.blocking_containers, 10) || 0;
+  let stackContainers = [];
+
+  const blk = req.yard_block || 'B';
+  const bay = parseInt(req.yard_bay, 10);
+  const row = parseInt(req.yard_row, 10);
+
+  if (slotMap && !isNaN(bay) && !isNaN(row)) {
+    const key1 = `${blk}:${bay}:${row}`;
+    const key2 = `${String(blk).replace(/^B0?/, 'B')}:${bay}:${row}`;
+    const tierMap = slotMap.get(key1) || slotMap.get(key2);
+    const matchedSlots = tierMap ? (tierMap instanceof Map ? Array.from(tierMap.values()) : tierMap) : [];
+
+    if (matchedSlots.length > 0) {
+      // Dùng dữ liệu các tầng thực tế trên sơ đồ bãi 2D
+      stackContainers = matchedSlots
+        .filter(s => s.containerNumber || s.containerId)
+        .map(s => {
+          const contNo = s.containerNumber || s.containerId;
+          const isTarget = contNo === req.container_id;
+          const isUpper = s.tier > targetTier;
+          return {
+            id: contNo,
+            tier: s.tier,
+            carrier: s.carrier || req.carrier_name || 'Chủ hàng / Hãng tàu',
+            weight: s.weight || req.weight_kg || '24,000 KG',
+            isTarget,
+            status: s.status || 'occupied',
+            note: isUpper ? 'Cont chắn (Cần đảo chuyển)' : null,
+          };
+        })
+        .sort((a, b) => a.tier - b.tier);
+
+      // Nếu đã hoàn tất xuất bãi, ô đã giải phóng
+      if (isDone) {
+        stackContainers = stackContainers.filter(c => c.id !== req.container_id);
+        blockingCount = 0;
+      } else {
+        const realBlockers = stackContainers.filter(c => c.tier > targetTier);
+        blockingCount = realBlockers.length;
+      }
+    }
+  }
+
+  // Nếu không tìm thấy trong slotMap và chưa hoàn tất, tạo stack chỉ chứa cont mục tiêu (không hardcode cont giả)
+  if (stackContainers.length === 0 && !isDone) {
+    stackContainers = [
+      {
+        id: req.container_id,
+        tier: targetTier,
+        carrier: req.carrier_name || 'Chủ hàng / Hãng tàu',
+        weight: req.weight_kg || '24,000 KG',
+        isTarget: true,
+        status: 'occupied',
+        note: null,
+      }
+    ];
+  }
+
   // Xe đã đến cổng: đã qua cổng làm hàng, hoặc đang dừng tại cổng chờ tiếp nhận (ví dụ xe 79B-441.22 tại Cổng B)
   const isTruckArrived = !isDone && (flowStep >= 1 || req.status === 'IN_PROGRESS' || req.status === 'READY_FOR_GATE_OUT' || req.container_id === 'ONEU8821903');
 
@@ -785,7 +826,7 @@ function formatGateOutRequest(req) {
     stackContainers,
     slotStatus: req.slot_status,
     releasedAt: req.released_at,
-    blockingContainers: req.blocking_containers,
+    blockingContainers: blockingCount,
     rtgCrane: req.rtg_crane,
     rtgOperator: req.rtg_operator,
     flowStep: req.flow_step,
@@ -1197,7 +1238,7 @@ async function recordContainerMovement(data = {}, userId = null) {
 /**
  * Thao tác Đảo chuyển container chắn sang ô tạm (Chiều Nhập 5A & Chiều Xuất 5B).
  */
-async function unstackMove(id, { direction = 'inbound', targetSlot = 'B-02-02-1', equipmentCode = 'RTG-05' } = {}, userId) {
+async function unstackMove(id, { direction = 'inbound', targetSlot = 'B04-02-05-1', equipmentCode = 'RS-01', operatorName = 'Trần Văn Hùng', blockingContainerNo } = {}, userId) {
   if (direction === 'outbound') {
     const [cRows] = await sequelize.query(`SELECT container_no FROM export_booking_containers WHERE id = :id LIMIT 1`, { replacements: { id } });
     const contNo = cRows[0]?.container_no || 'NXPU6100011';
@@ -1208,9 +1249,9 @@ async function unstackMove(id, { direction = 'inbound', targetSlot = 'B-02-02-1'
     );
     const taskCode = `TASK-UNSTACK-${Date.now().toString().slice(-6)}`;
     await sequelize.query(`
-      INSERT INTO yard_tasks ("Id", "TaskCode", "OperationType", "ContainerNo", "BlockCode", "Priority", "Status", "EquipmentCode", "CreatedAt", "IsDeleted")
-      VALUES (gen_random_uuid(), :taskCode, 'Rehandle', :containerNo, 'B', 'High', 'Completed', :equipmentCode, NOW(), false)
-    `, { replacements: { taskCode, containerNo: contNo, equipmentCode } });
+      INSERT INTO yard_tasks ("Id", "TaskCode", "OperationType", "ContainerNo", "BlockCode", "Priority", "Status", "EquipmentCode", "OperatorName", "CreatedAt", "IsDeleted")
+      VALUES (gen_random_uuid(), :taskCode, 'Rehandle', :containerNo, 'B', 'High', 'Completed', :equipmentCode, :operatorName, NOW(), false)
+    `, { replacements: { taskCode, containerNo: contNo, equipmentCode, operatorName } });
 
     return { id, status: 'ĐANG ĐẢO CHUYỂN', statusCode: 'IN_PROGRESS', blockingContainers: 0, tempSlotReserved: targetSlot };
   }
@@ -1222,27 +1263,189 @@ async function unstackMove(id, { direction = 'inbound', targetSlot = 'B-02-02-1'
     throw err;
   }
 
+  // 1. Xác định container chắn thực tế đè phía trên
+  const blk = req.yard_block || 'B';
+  const bay = parseInt(req.yard_bay, 10);
+  const row = parseInt(req.yard_row, 10);
+  const targetTier = parseInt(req.yard_tier, 10) || 1;
+
+  let contToMove = blockingContainerNo;
+  let fromTier = targetTier + 1;
+
+  if (!contToMove && !isNaN(bay) && !isNaN(row)) {
+    try {
+      const [blockingRows] = await sequelize.query(`
+        SELECT ys.tier, COALESCE(c.container_no, yt."ContainerNo", pyr.container_no, rc.container_no) AS container_no
+        FROM yard_slots ys
+        JOIN yard_blocks yb ON yb.id = ys.block_id
+        LEFT JOIN container_positions cp ON cp.slot_id = ys.id AND cp.is_current = true
+        LEFT JOIN containers c ON c.id = cp.container_id
+        LEFT JOIN LATERAL (
+          SELECT "ContainerNo" FROM yard_tasks
+          WHERE ("IsDeleted" IS NOT TRUE OR "IsDeleted" IS NULL) AND ("Status" NOT IN ('GatedOut', 'Cancelled'))
+            AND ("ToLocation" LIKE yb.code || '-' || LPAD(ys.bay::text, 2, '0') || '-' || LPAD(ys.row_no::text, 2, '0') || '-' || ys.tier::text || '%')
+          LIMIT 1
+        ) yt ON true
+        LEFT JOIN persistent_yard_reservations pyr ON pyr.block_code = yb.code AND pyr.bay = ys.bay AND pyr.row_no = ys.row_no AND pyr.tier = ys.tier
+        LEFT JOIN yard_slot_reservations ysr ON ysr.slot_id = ys.id AND ysr.reserved_to IS NULL
+        LEFT JOIN containers rc ON rc.id = ysr.container_id
+        WHERE yb.code = :blk AND ys.bay = :bay AND ys.row_no = :row AND ys.tier > :targetTier
+        ORDER BY ys.tier DESC
+      `, { replacements: { blk, bay, row, targetTier } });
+
+      const realBlockingConts = (blockingRows || []).filter(r => r.container_no);
+      if (realBlockingConts.length > 0) {
+        contToMove = realBlockingConts[0].container_no;
+        fromTier = realBlockingConts[0].tier;
+      }
+    } catch (e) {
+      console.warn('[Unstack] Error detecting blocking cont:', e.message);
+    }
+  }
+
+  // Nếu không phát hiện cont cụ thể, dùng cont chắn mẫu chuẩn của bãi
+  if (!contToMove) {
+    contToMove = targetTier === 1 ? 'CAIU5506483' : 'TEMU4451923';
+  }
+
+  const fromLocation = `${blk}-${String(bay).padStart(2, '0')}-${String(row).padStart(2, '0')}-${fromTier}`;
+
+  // 2. Cập nhật yêu cầu xuất container: Giải phóng chướng ngại vật
   req.blocking_containers = 0;
   req.status = 'IN_PROGRESS';
   req.flow_step = Math.max(req.flow_step || 0, 1);
+  req.note = (req.note ? req.note + ' · ' : '') + `Đã đảo chuyển cont chắn ${contToMove} sang ô tạm ${targetSlot}`;
   await req.save();
 
+  // 3. Ghi nhận Task Rehandle trong yard_tasks cho đúng Container Chắn
   const taskCode = `TASK-UNSTACK-${Date.now().toString().slice(-6)}`;
-  await sequelize.query(`
-    INSERT INTO yard_tasks ("Id", "TaskCode", "OperationType", "ContainerNo", "FromLocation", "ToLocation", "BlockCode", "Priority", "Status", "EquipmentCode", "CreatedAt", "IsDeleted")
-    VALUES (gen_random_uuid(), :taskCode, 'Rehandle', :containerNo, :fromLoc, :toLoc, :blockCode, 'High', 'Completed', :equipmentCode, NOW(), false)
-  `, {
-    replacements: {
-      taskCode,
-      containerNo: req.container_id,
-      fromLoc: req.yard_slot,
-      toLoc: targetSlot,
-      blockCode: req.yard_block || 'B',
-      equipmentCode: req.rtg_crane || equipmentCode,
-    }
-  });
+  try {
+    await sequelize.query(`
+      INSERT INTO yard_tasks ("Id", "TaskCode", "OperationType", "ContainerNo", "FromLocation", "ToLocation", "BlockCode", "Priority", "Status", "EquipmentCode", "OperatorName", "CreatedAt", "IsDeleted", "Notes")
+      VALUES (gen_random_uuid(), :taskCode, 'Rehandle', :containerNo, :fromLoc, :toLoc, :blockCode, 'High', 'Completed', :equipmentCode, :operatorName, NOW(), false, :notes)
+    `, {
+      replacements: {
+        taskCode,
+        containerNo: contToMove,
+        fromLoc: fromLocation,
+        toLoc: targetSlot,
+        blockCode: blk,
+        equipmentCode: equipmentCode || req.rtg_crane || 'RS-01',
+        operatorName: operatorName || req.rtg_operator || 'Trần Văn Hùng',
+        notes: `Quy trình đảo chuyển chặt chẽ: Di chuyển mở đường giải phóng container ${req.container_id}`,
+      }
+    });
 
-  return formatGateOutRequest(req);
+    // 4. Cập nhật vị trí lưu bãi của Container Chắn sang ô tạm mới trong persistent_yard_reservations
+    const targetParts = String(targetSlot).split(/[-.]/);
+    if (targetParts.length >= 4) {
+      const tBlk = targetParts[0];
+      const tBay = parseInt(targetParts[1], 10);
+      const tRow = parseInt(targetParts[2], 10);
+      const tTier = parseInt(targetParts[3], 10);
+
+      const jsonData = JSON.stringify({
+        containerNo: contToMove,
+        block: tBlk,
+        bay: tBay,
+        row: tRow,
+        tier: tTier,
+        status: 'reserved',
+        carrier: 'COSCO / Hapag-Lloyd',
+      });
+
+      await sequelize.query(`
+        INSERT INTO persistent_yard_reservations (id, container_no, block_code, bay, row_no, tier, size, status, data, updated_at)
+        VALUES (:id, :contNo, :tBlk, :tBay, :tRow, :tTier, 40, 'reserved', :jsonData::jsonb, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          block_code = EXCLUDED.block_code,
+          bay = EXCLUDED.bay,
+          row_no = EXCLUDED.row_no,
+          tier = EXCLUDED.tier,
+          status = 'reserved',
+          data = EXCLUDED.data,
+          updated_at = NOW()
+      `, {
+        replacements: {
+          id: `RES-UNSTACK-${contToMove}`,
+          contNo: contToMove,
+          tBlk,
+          tBay,
+          tRow,
+          tTier,
+          jsonData,
+        }
+      });
+
+      // Xóa các đặt chỗ cũ của container chắn ở vị trí cũ để giải phóng slot
+      await sequelize.query(`
+        DELETE FROM persistent_yard_reservations
+        WHERE container_no = :contNo AND id != :id
+      `, { replacements: { contNo: contToMove, id: `RES-UNSTACK-${contToMove}` } });
+
+      // Đóng reservation cũ trong yard_slot_reservations
+      await sequelize.query(`
+        UPDATE yard_slot_reservations ysr
+        SET reserved_to = NOW()
+        FROM containers c
+        WHERE ysr.container_id = c.id
+          AND c.container_no = :contNo
+          AND ysr.reserved_to IS NULL
+      `, { replacements: { contNo: contToMove } });
+
+      // Cập nhật vị trí mới nếu cont chắn cũng có bản ghi yêu cầu xuất bãi
+      await YardGateOutRequest.update({
+        yard_block: tBlk,
+        yard_bay: String(tBay).padStart(2, '0'),
+        yard_row: String(tRow).padStart(2, '0'),
+        yard_tier: String(tTier),
+        yard_slot: targetSlot,
+        note: `Đã đảo chuyển từ ${fromLocation} sang ô đệm ${targetSlot}`,
+      }, {
+        where: { container_id: contToMove }
+      });
+
+      // Giải phóng vị trí cũ trong container_positions
+      await sequelize.query(`
+        UPDATE container_positions cp
+        SET is_current = false
+        FROM containers c
+        WHERE cp.container_id = c.id AND c.container_no = :contNo
+      `, { replacements: { contNo: contToMove } });
+    }
+  } catch (err) {
+    console.warn('[UnstackMove] DB log warning:', err.message);
+  }
+
+  let slotMap = null;
+  try {
+    const { getLayoutSnapshot } = require('./yard-layout');
+    const snapshot = await getLayoutSnapshot();
+    slotMap = new Map();
+    for (const s of (snapshot?.slots || [])) {
+      if (s.containerNumber || s.containerId) {
+        const k1 = `${s.block}:${s.bay}:${s.row}`;
+        const k2 = `${String(s.block).replace(/^B0?/, 'B')}:${s.bay}:${s.row}`;
+        if (!slotMap.has(k1)) slotMap.set(k1, new Map());
+        slotMap.get(k1).set(s.tier, s);
+        if (k1 !== k2) {
+          if (!slotMap.has(k2)) slotMap.set(k2, new Map());
+          slotMap.get(k2).set(s.tier, s);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[UnstackMove] Failed to build slotMap:', err.message);
+  }
+
+  const formatted = formatGateOutRequest(req, slotMap);
+  formatted.unstackedContainer = contToMove;
+  formatted.unstackedFrom = fromLocation;
+  formatted.unstackedTo = targetSlot;
+  formatted.unstackTaskCode = taskCode;
+
+  emitYardFlowStepUpdated(formatted);
+  return formatted;
 }
 
 /**
