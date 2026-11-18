@@ -24,6 +24,85 @@ function formatDate(date) {
   return `${yyyy}${mm}${dd}`;
 }
 
+/**
+ * Giải phóng triệt để toạ độ và ô bãi trên Sơ đồ Bãi 2D khi container đã xuất cổng (COMPLETED).
+ */
+async function releaseYardSlotForGatedOutContainer(containerId, slotCode = null) {
+  if (!containerId) return;
+  const contNo = String(containerId).trim().toUpperCase();
+  try {
+    // 1. Giải phóng đặt chỗ trong yard_slot_reservations
+    await sequelize.query(`
+      UPDATE yard_slot_reservations
+      SET reserved_to = NOW()
+      WHERE container_id IN (
+        SELECT id FROM containers WHERE UPPER(TRIM(container_no)) = :contNo
+      ) AND reserved_to IS NULL
+    `, { replacements: { contNo } });
+
+    // 2. Thu hồi toạ độ container_positions
+    await sequelize.query(`
+      UPDATE container_positions
+      SET is_current = false, removed_at = NOW()
+      WHERE container_id IN (
+        SELECT id FROM containers WHERE UPPER(TRIM(container_no)) = :contNo
+      ) AND is_current = true
+    `, { replacements: { contNo } });
+
+    // 3. Xoá vị trí giữ bãi persistent_yard_reservations
+    await sequelize.query(`
+      DELETE FROM persistent_yard_reservations
+      WHERE UPPER(TRIM(container_no)) = :contNo OR UPPER(TRIM(id)) = :contNo
+    `, { replacements: { contNo } });
+
+    // 4. Đánh dấu GatedOut trong yard_tasks
+    await sequelize.query(`
+      UPDATE yard_tasks
+      SET "Status" = 'GatedOut', "IsDeleted" = true
+      WHERE UPPER(TRIM("ContainerNo")) = :contNo
+    `, { replacements: { contNo } });
+
+    // 5. Cập nhật ô bãi yard_slots -> empty
+    if (slotCode) {
+      const parts = String(slotCode).split(/[-.]/);
+      if (parts.length >= 4) {
+        const blk = parts[0];
+        const bay = parseInt(parts[1], 10);
+        const row = parseInt(parts[2], 10);
+        const tier = parseInt(parts[3], 10);
+        await sequelize.query(`
+          UPDATE yard_slots
+          SET status = 'empty'
+          WHERE block_id IN (SELECT id FROM yard_blocks WHERE code = :blk)
+            AND bay = :bay AND row_no = :row AND tier = :tier
+        `, { replacements: { blk, bay, row, tier } });
+      }
+    }
+
+    // Đồng thời giải phóng bất kỳ slot nào từng gán cho container này nếu không còn ai giữ
+    await sequelize.query(`
+      UPDATE yard_slots
+      SET status = 'empty'
+      WHERE id IN (
+        SELECT slot_id FROM yard_slot_reservations
+        WHERE container_id IN (
+          SELECT id FROM containers WHERE UPPER(TRIM(container_no)) = :contNo
+        )
+      ) AND NOT EXISTS (
+        SELECT 1 FROM yard_slot_reservations r2
+        WHERE r2.slot_id = yard_slots.id AND r2.reserved_to IS NULL
+      ) AND NOT EXISTS (
+        SELECT 1 FROM container_positions cp2
+        WHERE cp2.slot_id = yard_slots.id AND cp2.is_current = true
+      )
+    `, { replacements: { contNo } });
+
+    console.log(`[GateOutDelivery] Đã giải phóng hoàn toàn vị trí ô bãi cho container ${contNo}`);
+  } catch (err) {
+    console.error(`[GateOutDelivery] Lỗi giải phóng ô bãi cho ${contNo}:`, err.message);
+  }
+}
+
 class GateOutDeliveryService {
   /**
    * 1. Kiểm tra 5 điều kiện tại cổng vào theo thời gian thực (kiểm tra lại, không dùng kết quả cũ).
@@ -581,8 +660,13 @@ class GateOutDeliveryService {
     // 4. CHUYỂN TRẠNG THÁI: CONTAINER -> ĐÃ RA CỔNG, LỆNH -> HOÀN THÀNH
     yardReq.status = 'COMPLETED';
     yardReq.flow_step = 5;
+    yardReq.slot_status = 'Available';
+    yardReq.released_at = now;
     yardReq.note = `Xuất cổng thành công qua ${gateName} lúc ${now.toLocaleTimeString('vi-VN')}. Hoàn thành tính lưu bãi (${storageDays} ngày).`;
     await yardReq.save();
+
+    // 4.1. GIẢI PHÓNG TOÀN DIỆN VỊ TRÍ KHỎI SƠ ĐỒ BÃI 2D
+    await releaseYardSlotForGatedOutContainer(yardReq.container_id, yardReq.yard_slot);
 
     // 5. PHÁT SỰ KIỆN REALTIME: ContainerGatedOut
     const gatedOutPayload = {

@@ -26,6 +26,14 @@ function buildLayoutSnapshot(rows, generatedAt = new Date().toISOString()) {
         name: row.blockName,
       });
     if (!row.id) continue;
+    const isGatedOut = row.isGatedOut === 1 || row.isGatedOut === true;
+    const isOccupiedOrReserved = !isGatedOut && (row.status === 'occupied' || row.status === 'reserved' || row.status === 'in_yard');
+    const containerNumber = isOccupiedOrReserved ? (row.containerNumber || row.reservedContainerNumber || null) : null;
+    const containerId = (isOccupiedOrReserved && containerNumber)
+      ? (row.containerId || `res-${row.id}`)
+      : null;
+    const finalStatus = isGatedOut ? 'empty' : (isOccupiedOrReserved ? row.status : 'empty');
+
     slots.push({
       id: row.id,
       blockId: row.blockId,
@@ -33,24 +41,24 @@ function buildLayoutSnapshot(rows, generatedAt = new Date().toISOString()) {
       bay: Number(row.bay),
       row: Number(row.row),
       tier: Number(row.tier),
-      status: row.status,
-      containerId: row.containerId || (row.reservedContainerNumber ? `res-${row.id}` : null),
-      containerNumber: row.containerNumber || row.reservedContainerNumber || null,
+      status: finalStatus,
+      containerId: containerId,
+      containerNumber: containerNumber,
       moduleStart: row.moduleStart == null ? null : Number(row.moduleStart),
       moduleSpan: row.moduleSpan == null ? null : Number(row.moduleSpan),
       containerLengthFt:
         row.containerLengthFt == null ? null : Number(row.containerLengthFt),
       hasReeferPlug: row.hasReeferPlug === true,
-      reservedContainerNumber: row.reservedContainerNumber || null,
-      bookingCode: row.bookingCode || null,
-      vehiclePlate: row.vehiclePlate || null,
-      driverName: row.driverName || null,
-      company: row.company || null,
-      sealNumber: row.sealNumber || null,
-      operationType: row.operationType || null,
-      equipmentCode: row.equipmentCode || null,
-      operatorName: row.operatorName || null,
-      notes: row.notes || null,
+      reservedContainerNumber: isOccupiedOrReserved ? (row.reservedContainerNumber || null) : null,
+      bookingCode: isOccupiedOrReserved ? (row.bookingCode || null) : null,
+      vehiclePlate: isOccupiedOrReserved ? (row.vehiclePlate || null) : null,
+      driverName: isOccupiedOrReserved ? (row.driverName || null) : null,
+      company: isOccupiedOrReserved ? (row.company || null) : null,
+      sealNumber: isOccupiedOrReserved ? (row.sealNumber || null) : null,
+      operationType: isOccupiedOrReserved ? (row.operationType || null) : null,
+      equipmentCode: isOccupiedOrReserved ? (row.equipmentCode || null) : null,
+      operatorName: isOccupiedOrReserved ? (row.operatorName || null) : null,
+      notes: isOccupiedOrReserved ? (row.notes || null) : null,
       mapped: currentDesign
         ? terminalPlan.areas.some(
             (a) =>
@@ -87,7 +95,13 @@ async function getLayoutSnapshot() {
   const [rows] = await sequelize.query(`
     SELECT yb.id AS "blockId", yb.code AS block, yb.name AS "blockName",
       ys.id, ys.bay, ys.row_no AS row, ys.tier,
-      COALESCE(CASE WHEN pyr.status IS NOT NULL THEN pyr.status END, ys.status::text) AS status,
+      COALESCE(
+        CASE WHEN gor.is_gated_out IS NOT NULL THEN 'empty' END,
+        CASE WHEN pyr.status IS NOT NULL THEN pyr.status END,
+        CASE WHEN cp.container_id IS NOT NULL THEN 'occupied' END,
+        CASE WHEN ysr.reservation_id IS NOT NULL THEN (CASE WHEN ys.status::text = 'occupied' THEN 'occupied' ELSE 'reserved' END) END,
+        ys.status::text
+      ) AS status,
       ys.module_start AS "moduleStart",ys.module_span AS "moduleSpan",ys.container_length_ft AS "containerLengthFt",
       ys.has_reefer_plug AS "hasReeferPlug",
       cp.container_id AS "containerId",
@@ -95,11 +109,11 @@ async function getLayoutSnapshot() {
         c.container_no,
         yt."ContainerNo",
         pyr.container_no,
-        (SELECT rc.container_no FROM yard_slot_reservations r JOIN containers rc ON rc.id=r.container_id WHERE r.slot_id=ys.id AND r.reserved_to IS NULL ORDER BY r.reserved_from DESC LIMIT 1)
+        ysr.container_no
       ) AS "containerNumber",
       COALESCE(
         pyr.container_no,
-        (SELECT rc.container_no FROM yard_slot_reservations r JOIN containers rc ON rc.id=r.container_id WHERE r.slot_id=ys.id AND r.reserved_to IS NULL ORDER BY r.reserved_from DESC LIMIT 1),
+        ysr.container_no,
         yt."ContainerNo"
       ) AS "reservedContainerNumber",
       COALESCE(pyr.booking_code, bk.booking_code, yt."TaskCode") AS "bookingCode",
@@ -111,6 +125,7 @@ async function getLayoutSnapshot() {
       yt."EquipmentCode" AS "equipmentCode",
       yt."OperatorName" AS "operatorName",
       yt."Notes" AS "notes",
+      gor.is_gated_out AS "isGatedOut",
       (SELECT map_data->'layout'->>'drawingVersion' FROM smart_yard_maps WHERE is_active=true ORDER BY updated_at DESC LIMIT 1) AS "drawingVersion"
     FROM yard_blocks yb
     LEFT JOIN yard_slots ys ON ys.block_id=yb.id
@@ -122,18 +137,34 @@ async function getLayoutSnapshot() {
       ORDER BY updated_at DESC LIMIT 1
     ) pyr ON true
     LEFT JOIN LATERAL (
+      SELECT rc.container_no, r.id AS reservation_id
+      FROM yard_slot_reservations r
+      JOIN containers rc ON rc.id=r.container_id
+      WHERE r.slot_id=ys.id AND r.reserved_to IS NULL
+      ORDER BY r.reserved_from DESC LIMIT 1
+    ) ysr ON true
+    LEFT JOIN LATERAL (
       SELECT container_id FROM container_positions
       WHERE slot_id=ys.id AND is_current=true ORDER BY placed_at DESC LIMIT 1
     ) cp ON true
     LEFT JOIN containers c ON c.id=cp.container_id
     LEFT JOIN LATERAL (
       SELECT * FROM yard_tasks
-      WHERE ("ToLocation" = yb.code || '-' || LPAD(ys.bay::text, 2, '0') || '-' || LPAD(ys.row_no::text, 2, '0') || '-' || ys.tier::text
+      WHERE ("IsDeleted" IS NOT TRUE OR "IsDeleted" IS NULL)
+        AND ("Status" NOT IN ('GatedOut', 'Cancelled'))
+        AND ("ToLocation" = yb.code || '-' || LPAD(ys.bay::text, 2, '0') || '-' || LPAD(ys.row_no::text, 2, '0') || '-' || ys.tier::text
           OR "ToLocation" = yb.code || '-' || ys.bay::text || '-' || ys.row_no::text || '-' || ys.tier::text
           OR "ToLocation" = yb.code || '.' || LPAD(ys.bay::text, 2, '0') || '.' || LPAD(ys.row_no::text, 2, '0') || '.' || ys.tier::text
           OR "ToLocation" = yb.code || '.' || ys.bay::text || '.' || ys.row_no::text || '.' || ys.tier::text)
       ORDER BY "CreatedAt" DESC LIMIT 1
     ) yt ON true
+    LEFT JOIN LATERAL (
+      SELECT 1 AS is_gated_out
+      FROM yard_gate_out_requests ygr
+      WHERE UPPER(TRIM(ygr.container_id)) = UPPER(TRIM(COALESCE(c.container_no, yt."ContainerNo", pyr.container_no, ysr.container_no)))
+        AND (ygr.status = 'COMPLETED' OR ygr.flow_step >= 5)
+      LIMIT 1
+    ) gor ON true
     LEFT JOIN LATERAL (
       SELECT b.booking_code, b.vehicle_plate, b.driver_name, b.carrier_id, b.status AS booking_status
       FROM bookings b
