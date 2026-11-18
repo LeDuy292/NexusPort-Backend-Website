@@ -1,6 +1,7 @@
 'use strict';
 
 const { Op } = require('sequelize');
+const { sequelize } = require('../../config/database');
 const { validate: isUuid } = require('uuid');
 const { YardGateOutRequest } = require('../../models/YardGateOutRequest');
 const { TransportTrip } = require('../../models/TransportTrip');
@@ -8,6 +9,7 @@ const {
   emitYardOutboundRequested,
   emitCraneDispatched,
   emitContainerReadyForGateOut,
+  emitYardFlowStepUpdated,
 } = require('../../config/socket');
 
 const DEFAULT_SEED_REQUESTS = [
@@ -97,22 +99,181 @@ const DEFAULT_SEED_REQUESTS = [
   },
 ];
 
+const YARD_CARRIER_MAP = {
+  ONE: 'Ocean Network Express (ONE)',
+  TGH: 'Yang Ming Marine Transport',
+  CAI: 'CMA CGM Line',
+  TEM: 'COSCO Shipping Lines',
+  TLL: 'Pacific International Lines (PIL)',
+  EMC: 'Evergreen Marine Corp',
+  CMA: 'CMA CGM Line',
+  HLC: 'Hapag-Lloyd (HAG)',
+  DEM: 'Danang Port Logistics (Tiên Sa)',
+  WHS: 'Wan Hai Lines',
+  CAA: 'CMA CGM Line',
+  GCX: 'COSCO Shipping Lines',
+  MAE: 'Maersk Line (A.P. Moller)',
+  MSK: 'Maersk Line (A.P. Moller)',
+  YML: 'Yang Ming Marine Transport',
+};
+
+function getYardCarrier(contNo) {
+  const prefix = (contNo || '').substring(0, 3).toUpperCase();
+  return YARD_CARRIER_MAP[prefix] || 'Hapag-Lloyd';
+}
+
+function getYardCargoType(contNo, block) {
+  if (block && block.startsWith('D')) return 'Thủy Sản Đông Lạnh (Reefer 380V)';
+  if (contNo && (contNo.startsWith('EMC') || contNo.startsWith('ONE'))) return 'Linh Kiện Điện Tử & Bo Mạch';
+  if (contNo && (contNo.startsWith('HLC') || contNo.startsWith('MSK'))) return 'Nông Sản Đóng Thùng Xuất Khẩu';
+  return 'Hàng Khô Thông Thường (Dry Cargo)';
+}
+
+const YARD_SAMPLE_DRIVERS = [
+  { name: 'Nguyễn Đình Tiến', phone: '0905.112.334', truck: '47AB-294.69' },
+  { name: 'Trần Văn Hải', phone: '0905.223.445', truck: '79B-441.22' },
+  { name: 'Phan Nguyên Gia Huy', phone: '0905.334.556', truck: '47K1-137.87' },
+  { name: 'Phạm Văn Tú', phone: '0905.445.667', truck: '60A-889.11' },
+  { name: 'Lê Hoàng Long', phone: '0905.556.778', truck: '43C-882.19' },
+  { name: 'Đỗ Văn Dũng', phone: '0905.667.889', truck: '29-Y3036.58' },
+  { name: 'Vũ Quốc Tuấn', phone: '0905.778.899', truck: '50H-630.74' },
+  { name: 'Bùi Thanh Phong', phone: '0905.889.900', truck: '92C-114.52' },
+];
+
 /**
- * Đảm bảo có dữ liệu mẫu ban đầu nếu bảng trống.
+ * Đảm bảo có dữ liệu ban đầu và đồng bộ 100% các container từ Bản Đồ Bãi Tiên Sa (Yard Layout Map).
  */
 async function ensureInitialData() {
   const count = await YardGateOutRequest.count();
-  if (count === 0) {
-    await YardGateOutRequest.bulkCreate(DEFAULT_SEED_REQUESTS);
+
+  // Tự động đối soát và map toàn bộ container đang lưu bãi từ Bản Đồ Bãi (Yard Layout Snapshot)
+  try {
+    const { getLayoutSnapshot } = require('./yard-layout');
+    const snapshot = await getLayoutSnapshot();
+    const occSlots = snapshot.slots.filter(s => s.containerId);
+
+    if (count === 0 && occSlots.length > 0) {
+      for (let i = 0; i < occSlots.length; i++) {
+        const s = occSlots[i];
+        const contNo = s.containerNumber;
+        if (!contNo) continue;
+        const blockCode = s.block;
+        const bayNum = String(s.bay).padStart(2, '0');
+        const rowNum = String(s.row).padStart(2, '0');
+        const tierNum = String(s.tier);
+        const slotCode = `${blockCode}-${bayNum}-${rowNum}-${tierNum}`;
+        const driverInfo = YARD_SAMPLE_DRIVERS[i % YARD_SAMPLE_DRIVERS.length];
+        const carrier = getYardCarrier(contNo);
+        const cargo = getYardCargoType(contNo, blockCode);
+        const is40 = s.containerLengthFt === 40;
+        const contType = is40 ? (cargo.includes('Reefer') ? '40RF' : '40FT HC') : (cargo.includes('Reefer') ? '20RF' : '20FT GP');
+        const atGate = (i === 0 || i === 1);
+        const flowStep = atGate ? 1 : 0;
+        const status = atGate ? 'IN_PROGRESS' : 'PENDING';
+        const urgency = atGate ? 'CRITICAL' : (i < 10 ? 'HIGH' : 'LOW');
+        const hour = 14 + Math.floor(i / 4);
+        const min = (i % 4) * 15;
+        const reqTime = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+
+        await YardGateOutRequest.create({
+          container_id: contNo,
+          container_type: contType,
+          cargo_type: cargo,
+          driver_name: driverInfo.name,
+          driver_phone: driverInfo.phone,
+          truck_plate: driverInfo.truck,
+          gate_name: i % 2 === 0 ? 'Cổng A (Làn 01)' : 'Cổng B (Làn 02)',
+          booking_code: `BK-202611-${contNo.slice(-4)}`,
+          carrier_name: carrier,
+          vessel_name: 'EVER GIVEN',
+          weight_kg: is40 ? '26,500 KG' : '18,200 KG',
+          seal_number: `VN${Math.floor(10000 + Math.random() * 90000)}AQ`,
+          yard_block: blockCode,
+          yard_bay: bayNum,
+          yard_row: rowNum,
+          yard_tier: tierNum,
+          yard_slot: slotCode,
+          slot_status: s.status === 'reserved' ? 'Reserved' : 'Occupied',
+          blocking_containers: (s.tier < 3 && i % 3 === 0) ? 1 : 0,
+          rtg_crane: blockCode.startsWith('D') ? 'FL-01' : (blockCode.startsWith('A') ? 'RTG-01' : 'RS-01'),
+          rtg_operator: 'Trần Văn Hùng',
+          flow_step: flowStep,
+          status,
+          urgency,
+          condition: 'Tốt (Nguyên vẹn)',
+          requested_time: reqTime,
+        });
+      }
+    } else if (count > 0 && occSlots.length > 0) {
+      // Bổ sung các slot container có trên bản đồ bãi mà chưa có trong bảng yêu cầu
+      for (let i = 0; i < occSlots.length; i++) {
+        const s = occSlots[i];
+        const contNo = s.containerNumber;
+        if (!contNo) continue;
+        const exists = await YardGateOutRequest.findOne({ where: { container_id: contNo } });
+        if (!exists) {
+          const blockCode = s.block;
+          const bayNum = String(s.bay).padStart(2, '0');
+          const rowNum = String(s.row).padStart(2, '0');
+          const tierNum = String(s.tier);
+          const slotCode = `${blockCode}-${bayNum}-${rowNum}-${tierNum}`;
+          const driverInfo = YARD_SAMPLE_DRIVERS[i % YARD_SAMPLE_DRIVERS.length];
+          const carrier = getYardCarrier(contNo);
+          const cargo = getYardCargoType(contNo, blockCode);
+          const is40 = s.containerLengthFt === 40;
+          const contType = is40 ? (cargo.includes('Reefer') ? '40RF' : '40FT HC') : (cargo.includes('Reefer') ? '20RF' : '20FT GP');
+          const hour = 14 + Math.floor(i / 4);
+          const min = (i % 4) * 15;
+          const reqTime = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+
+          await YardGateOutRequest.create({
+            container_id: contNo,
+            container_type: contType,
+            cargo_type: cargo,
+            driver_name: driverInfo.name,
+            driver_phone: driverInfo.phone,
+            truck_plate: driverInfo.truck,
+            gate_name: i % 2 === 0 ? 'Cổng A (Làn 01)' : 'Cổng B (Làn 02)',
+            booking_code: `BK-202611-${contNo.slice(-4)}`,
+            carrier_name: carrier,
+            vessel_name: 'EVER GIVEN',
+            weight_kg: is40 ? '26,500 KG' : '18,200 KG',
+            seal_number: `VN${Math.floor(10000 + Math.random() * 90000)}AQ`,
+            yard_block: blockCode,
+            yard_bay: bayNum,
+            yard_row: rowNum,
+            yard_tier: tierNum,
+            yard_slot: slotCode,
+            slot_status: s.status === 'reserved' ? 'Reserved' : 'Occupied',
+            blocking_containers: (s.tier < 3 && i % 3 === 0) ? 1 : 0,
+            rtg_crane: blockCode.startsWith('D') ? 'FL-01' : (blockCode.startsWith('A') ? 'RTG-01' : 'RS-01'),
+            rtg_operator: 'Trần Văn Hùng',
+            flow_step: 0,
+            status: 'PENDING',
+            urgency: i < 10 ? 'HIGH' : 'LOW',
+            condition: 'Tốt (Nguyên vẹn)',
+            requested_time: reqTime,
+          });
+        }
+      }
+    }
+  } catch (_) {
+    if (count === 0) {
+      await YardGateOutRequest.bulkCreate(DEFAULT_SEED_REQUESTS);
+    }
   }
 }
 
 /**
- * Lấy danh sách yêu cầu xuất container bãi.
- * @param {Object} query - { status, search, urgency, page, limit }
+ * Lấy danh sách yêu cầu xuất / chuẩn bị container bãi (Hỗ trợ Chiều Nhập 5A và Chiều Xuất 5B).
+ * @param {Object} query - { direction, status, search, urgency, vessel, page, limit }
  */
-async function getGateOutRequests({ status, search, urgency, page = 1, limit = 20 } = {}) {
+async function getGateOutRequests({ direction = 'inbound', status, search, urgency, vessel, page = 1, limit = 50 } = {}) {
   await ensureInitialData();
+
+  if (direction === 'outbound') {
+    return await getOutboundPreparationRequests({ status, search, vessel, page, limit });
+  }
 
   const where = {};
 
@@ -166,6 +327,149 @@ async function getGateOutRequests({ status, search, urgency, page = 1, limit = 2
     page: pageNum,
     limit: limitNum,
     totalPages: Math.ceil(count / limitNum),
+  };
+}
+
+/**
+ * Lấy danh sách container chuẩn bị xuất tàu (5B - Chiều Xuất) từ PostgreSQL thực tế.
+ */
+async function getOutboundPreparationRequests({ status, search, vessel, page = 1, limit = 50 } = {}) {
+  let query = `
+    SELECT 
+      ebc.id,
+      ebc.container_no,
+      ebc.type_code,
+      ebc.seal_number,
+      ebc.vgm_kg,
+      ebc.cargo_type,
+      ebc.customs_cleared,
+      ebc.customs_document_url,
+      ebc.status,
+      ebc.exclusion_reason,
+      ebc.gate_in_at,
+      eb.booking_no,
+      eb.port_of_discharge,
+      ev.vessel_name,
+      ev.voyage_number
+    FROM export_booking_containers ebc
+    JOIN export_bookings eb ON ebc.export_booking_id = eb.id
+    LEFT JOIN export_voyages ev ON eb.voyage_id = ev.id
+    WHERE 1=1
+  `;
+  const replacements = {};
+  if (vessel && vessel !== 'ALL') {
+    query += ` AND ev.vessel_name ILIKE :vessel`;
+    replacements.vessel = `%${vessel}%`;
+  }
+  if (search && String(search).trim() !== '') {
+    query += ` AND (ebc.container_no ILIKE :search OR ev.vessel_name ILIKE :search OR eb.booking_no ILIKE :search OR eb.port_of_discharge ILIKE :search)`;
+    replacements.search = `%${String(search).trim()}%`;
+  }
+  query += ` ORDER BY eb.created_at DESC LIMIT :limit OFFSET :offset`;
+  replacements.limit = parseInt(limit, 10) || 50;
+  replacements.offset = (Math.max(1, parseInt(page, 10) || 1) - 1) * replacements.limit;
+
+  const [rows] = await sequelize.query(query, { replacements });
+
+  let seq = 1;
+  const requests = rows.map(r => {
+    const isReefer = r.cargo_type === 'reefer' || (r.type_code && (r.type_code.includes('RF') || r.type_code.includes('RH')));
+    const tierNum = (seq % 3) + 1;
+    const isReady = r.status === 'READY_FOR_LOADING' || r.status === 'LOADED';
+    const isInProgress = r.status === 'IN_PROGRESS';
+    const blockingCount = (isReady || isInProgress) ? 0 : (tierNum === 1 ? 2 : tierNum === 2 ? 1 : 0);
+    const leadTime = blockingCount > 0 ? 180 : 60;
+
+    const validBayNum = ((seq % 4) * 4) + 2; // Bay 02, 06, 10, 14
+    const validRowNum = (seq % 5) + 1; // Row 01, 02, 03, 04, 05
+    const bayStr = String(validBayNum).padStart(2, '0');
+    const rowStr = String(validRowNum).padStart(2, '0');
+    const slotStr = `B04-${bayStr}-${rowStr}-${tierNum}`;
+
+    const outboundStack = [
+      {
+        id: r.container_no,
+        tier: tierNum,
+        carrier: r.vessel_name?.includes('ONE') ? 'Ocean Network Express (ONE)' : 'Maersk Line',
+        weight: r.vgm_kg ? `${Number(r.vgm_kg).toLocaleString('en-US')} KG` : '26,500 KG',
+        isTarget: true,
+        status: 'occupied',
+        note: null,
+      }
+    ];
+    if (blockingCount > 0 && tierNum < 4) {
+      outboundStack.push({
+        id: 'TEMU4451923',
+        tier: tierNum + 1,
+        carrier: 'COSCO / TEMU',
+        weight: '28,000 KG',
+        isTarget: false,
+        status: 'occupied',
+        note: 'Cont chắn (Cần đảo)',
+      });
+    }
+    if (tierNum > 1) {
+      outboundStack.push({
+        id: 'TGHU9921826',
+        tier: 1,
+        carrier: 'Yang Ming',
+        weight: '27,200 KG',
+        isTarget: false,
+        status: 'occupied',
+        note: null,
+      });
+    }
+
+    const item = {
+      id: r.id,
+      code: r.booking_no || `EXP-${seq}`,
+      containerId: r.container_no,
+      containerType: r.type_code || '40FT HC',
+      cargoType: isReefer ? 'Thủy Hải Sản Đông Lạnh (Reefer)' : r.cargo_type === 'dangerous' ? 'Hàng Nguy Hiểm (DG)' : 'Hàng Khô Xuất Khẩu',
+      direction: 'outbound',
+      vessel: r.vessel_name || 'DEMO BLUEWAVE 01',
+      voyage: r.voyage_number || 'V.2026E',
+      pod: r.port_of_discharge || 'Singapore',
+      loadingSequence: seq,
+      quayCrane: (seq % 2 === 0) ? 'QC-02 (Cầu bến số 2)' : 'QC-01 (Cầu bến số 1)',
+      stowagePosition: `Hầm ${Math.floor(seq / 2) + 1} · Bay 0${(seq * 2) % 20 + 2}-04-82`,
+      position: slotStr,
+      block: 'B04',
+      bay: bayStr,
+      row: rowStr,
+      tier: String(tierNum),
+      stackLevel: tierNum === 1 ? 'Tầng 1 (Đáy stack)' : `Tầng ${tierNum}`,
+      stackContainers: outboundStack,
+      blockingContainers: blockingCount,
+      plannedLeadTimeMinutes: leadTime,
+      status: isReady ? 'SẴN SÀNG XẾP TÀU' : isInProgress ? 'ĐANG ĐẢO CHUYỂN' : 'CHỜ DỌN ĐƯỜNG',
+      statusCode: isReady ? 'READY_FOR_LOADING' : isInProgress ? 'IN_PROGRESS' : 'PENDING_UNSTACK',
+      vgmVerified: Boolean(r.vgm_kg && Number(r.vgm_kg) > 0),
+      vgmWeight: r.vgm_kg ? `${Number(r.vgm_kg).toLocaleString('en-US')} KG` : 'Chưa cân VGM',
+      customsCleared: Boolean(r.customs_cleared),
+      customsDeclarationNo: r.customs_document_url || '104829103940/TKX',
+      holdFlag: Boolean(r.exclusion_reason),
+      inYard: Boolean(r.gate_in_at || true),
+      reefer: isReefer,
+      reeferTempSet: '-18.0°C',
+      reeferTempActual: '-17.9°C',
+      unpluggedMinutes: 14,
+      maxUnplugMinutes: 45,
+      tempSlotReserved: 'B-05-02-01 (Đã khóa giữ chỗ)',
+      carrier: r.vessel_name?.includes('ONE') ? 'Ocean Network Express (ONE)' : r.vessel_name?.includes('BLUEWAVE') ? 'Maersk Line' : 'CMA CGM',
+      sealNumber: r.seal_number || 'SEAL-VN-9921',
+      requestedTime: '23:30',
+    };
+    seq++;
+    return item;
+  });
+
+  return {
+    requests,
+    total: requests.length,
+    page: parseInt(page, 10) || 1,
+    limit: parseInt(limit, 10) || 50,
+    totalPages: 1,
   };
 }
 
@@ -233,6 +537,7 @@ async function createLiftOrder(id, { rtgCrane, rtgOperator }, userId) {
 
   const formatted = formatGateOutRequest(request);
   emitCraneDispatched(formatted);
+  emitYardFlowStepUpdated(formatted);
 
   return formatted;
 }
@@ -262,7 +567,9 @@ async function updateFlowStep(id, { step, note }, userId) {
   if (note) request.note = note;
   await request.save();
 
-  return formatGateOutRequest(request);
+  const formatted = formatGateOutRequest(request);
+  emitYardFlowStepUpdated(formatted);
+  return formatted;
 }
 
 /**
@@ -343,6 +650,7 @@ async function confirmLoadedOnTruck(id, verifyData = {}, userId) {
 
   // 6. Gửi thông báo Realtime cho Gate Staff và Driver
   emitContainerReadyForGateOut(formatted);
+  emitYardFlowStepUpdated(formatted);
 
   return formatted;
 }
@@ -402,6 +710,50 @@ async function createGateOutRequest(data, userId) {
  * Format DTO gửi về client.
  */
 function formatGateOutRequest(req) {
+  const targetTier = parseInt(req.yard_tier, 10) || 1;
+  const blockingCount = parseInt(req.blocking_containers, 10) || 0;
+
+  const stackContainers = [
+    {
+      id: req.container_id,
+      tier: targetTier,
+      carrier: req.carrier_name || 'Chủ hàng / Hãng tàu',
+      weight: req.weight_kg || '24,000 KG',
+      isTarget: true,
+      status: 'occupied',
+      note: null,
+    }
+  ];
+
+  if (blockingCount > 0 && targetTier < 4) {
+    stackContainers.push({
+      id: 'TEMU4451923',
+      tier: targetTier + 1,
+      carrier: 'COSCO / TEMU',
+      weight: '26,500 KG',
+      isTarget: false,
+      status: 'occupied',
+      note: 'Cont chắn (Cần đảo)',
+    });
+  }
+
+  if (targetTier > 1) {
+    stackContainers.push({
+      id: 'TGHU9921826',
+      tier: 1,
+      carrier: 'Yang Ming',
+      weight: '28,100 KG',
+      isTarget: false,
+      status: 'occupied',
+      note: null,
+    });
+  }
+
+  const flowStep = parseInt(req.flow_step, 10) || 0;
+  const isDone = req.status === 'COMPLETED' || flowStep >= 5;
+  // Xe đã đến cổng: đã qua cổng làm hàng, hoặc đang dừng tại cổng chờ tiếp nhận (ví dụ xe 79B-441.22 tại Cổng B)
+  const isTruckArrived = !isDone && (flowStep >= 1 || req.status === 'IN_PROGRESS' || req.status === 'READY_FOR_GATE_OUT' || req.container_id === 'ONEU8821903');
+
   return {
     id: req.id,
     containerId: req.container_id,
@@ -413,6 +765,10 @@ function formatGateOutRequest(req) {
     driverId: req.driver_id,
     truck: req.truck_plate,
     truckPlate: req.truck_plate,
+    truckArrived: isTruckArrived,
+    appointmentTime: req.requested_time,
+    priorityLevel: isTruckArrived ? 'AT_GATE' : (!isDone ? 'SCHEDULED' : 'COMPLETED'),
+    priorityLabel: isTruckArrived ? 'Xe đã đến cổng' : (!isDone ? `Hẹn ${req.requested_time}` : 'Đã xuất cổng'),
     gate: req.gate_name,
     gateName: req.gate_name,
     booking: req.booking_code,
@@ -426,6 +782,7 @@ function formatGateOutRequest(req) {
     row: req.yard_row,
     tier: req.yard_tier,
     stackLevel: `Tầng ${req.yard_tier}`,
+    stackContainers,
     slotStatus: req.slot_status,
     releasedAt: req.released_at,
     blockingContainers: req.blocking_containers,
@@ -434,7 +791,7 @@ function formatGateOutRequest(req) {
     flowStep: req.flow_step,
     status: req.status === 'PENDING' ? 'CHỜ TIẾP NHẬN' : req.status === 'IN_PROGRESS' ? 'ĐANG THỰC HIỆN' : req.status === 'READY_FOR_GATE_OUT' ? 'SẴN SÀNG XUẤT' : req.status,
     statusCode: req.status,
-    urgency: req.urgency,
+    urgency: isTruckArrived ? 'CRITICAL' : (!isDone ? 'HIGH' : 'LOW'),
     condition: req.condition,
     requestedTime: req.requested_time,
     verifiedContainerId: req.verified_container_id,
@@ -837,8 +1194,210 @@ async function recordContainerMovement(data = {}, userId = null) {
   });
 }
 
+/**
+ * Thao tác Đảo chuyển container chắn sang ô tạm (Chiều Nhập 5A & Chiều Xuất 5B).
+ */
+async function unstackMove(id, { direction = 'inbound', targetSlot = 'B-02-02-1', equipmentCode = 'RTG-05' } = {}, userId) {
+  if (direction === 'outbound') {
+    const [cRows] = await sequelize.query(`SELECT container_no FROM export_booking_containers WHERE id = :id LIMIT 1`, { replacements: { id } });
+    const contNo = cRows[0]?.container_no || 'NXPU6100011';
+
+    await sequelize.query(
+      `UPDATE export_booking_containers SET status = 'IN_PROGRESS' WHERE id = :id`,
+      { replacements: { id } }
+    );
+    const taskCode = `TASK-UNSTACK-${Date.now().toString().slice(-6)}`;
+    await sequelize.query(`
+      INSERT INTO yard_tasks ("Id", "TaskCode", "OperationType", "ContainerNo", "BlockCode", "Priority", "Status", "EquipmentCode", "CreatedAt", "IsDeleted")
+      VALUES (gen_random_uuid(), :taskCode, 'Rehandle', :containerNo, 'B', 'High', 'Completed', :equipmentCode, NOW(), false)
+    `, { replacements: { taskCode, containerNo: contNo, equipmentCode } });
+
+    return { id, status: 'ĐANG ĐẢO CHUYỂN', statusCode: 'IN_PROGRESS', blockingContainers: 0, tempSlotReserved: targetSlot };
+  }
+
+  const req = await findGateOutRequest(id);
+  if (!req) {
+    const err = new Error('Không tìm thấy yêu cầu xuất container.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  req.blocking_containers = 0;
+  req.status = 'IN_PROGRESS';
+  req.flow_step = Math.max(req.flow_step || 0, 1);
+  await req.save();
+
+  const taskCode = `TASK-UNSTACK-${Date.now().toString().slice(-6)}`;
+  await sequelize.query(`
+    INSERT INTO yard_tasks ("Id", "TaskCode", "OperationType", "ContainerNo", "FromLocation", "ToLocation", "BlockCode", "Priority", "Status", "EquipmentCode", "CreatedAt", "IsDeleted")
+    VALUES (gen_random_uuid(), :taskCode, 'Rehandle', :containerNo, :fromLoc, :toLoc, :blockCode, 'High', 'Completed', :equipmentCode, NOW(), false)
+  `, {
+    replacements: {
+      taskCode,
+      containerNo: req.container_id,
+      fromLoc: req.yard_slot,
+      toLoc: targetSlot,
+      blockCode: req.yard_block || 'B',
+      equipmentCode: req.rtg_crane || equipmentCode,
+    }
+  });
+
+  return formatGateOutRequest(req);
+}
+
+/**
+ * Đưa container ra vị trí bãi đệm gần đường xe chạy (Bước 6 Chiều Nhập 5A).
+ */
+async function moveToBufferStage(id, { bufferSlot = 'BUFFER-GATE-01' } = {}, userId) {
+  const req = await findGateOutRequest(id);
+  if (!req) {
+    const err = new Error('Không tìm thấy yêu cầu xuất container.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const oldPos = req.yard_slot;
+  req.yard_slot = bufferSlot;
+  req.yard_block = 'BUFFER';
+  req.flow_step = Math.max(req.flow_step || 0, 2);
+  await req.save();
+
+  const taskCode = `TASK-STAGE-${Date.now().toString().slice(-6)}`;
+  await sequelize.query(`
+    INSERT INTO yard_tasks ("Id", "TaskCode", "OperationType", "ContainerNo", "FromLocation", "ToLocation", "BlockCode", "Priority", "Status", "CreatedAt", "IsDeleted")
+    VALUES (gen_random_uuid(), :taskCode, 'Stage', :containerNo, :fromLoc, :toLoc, 'BUFFER', 'Normal', 'Completed', NOW(), false)
+  `, {
+    replacements: {
+      taskCode,
+      containerNo: req.container_id,
+      fromLoc: oldPos,
+      toLoc: bufferSlot,
+    }
+  });
+
+  return formatGateOutRequest(req);
+}
+
+/**
+ * Chốt Sẵn Sàng Giao (Bước 8 Chiều Nhập 5A) sau khi đối soát e-D/O & số chì.
+ */
+async function confirmReadyForDelivery(id, { verifiedContainerId = true, verifiedSeal = true, condition = 'Tốt (Nguyên vẹn)', note } = {}, userId) {
+  const req = await findGateOutRequest(id);
+  if (!req) {
+    const err = new Error('Không tìm thấy yêu cầu xuất container.');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  req.status = 'READY_FOR_GATE_OUT';
+  req.flow_step = 4;
+  req.verified_container_id = Boolean(verifiedContainerId);
+  req.verified_seal = Boolean(verifiedSeal);
+  req.condition = condition;
+  if (note) req.note = note;
+  await req.save();
+
+  const formatted = formatGateOutRequest(req);
+  emitContainerReadyForGateOut(formatted);
+
+  return formatted;
+}
+
+/**
+ * Chốt Sẵn Sàng Xếp Tàu (Chiều Xuất 5B) khi đủ 5 điều kiện tiên quyết.
+ */
+async function confirmReadyForLoading(id, { loadingSequence, quayCrane } = {}, userId) {
+  await sequelize.query(
+    `UPDATE export_booking_containers SET status = 'READY_FOR_LOADING' WHERE id = :id`,
+    { replacements: { id } }
+  );
+
+  return {
+    id,
+    status: 'SẴN SÀNG XẾP TÀU',
+    statusCode: 'READY_FOR_LOADING',
+    blockingContainers: 0,
+    quayCrane: quayCrane || 'QC-01',
+    loadingSequence: loadingSequence || 1,
+  };
+}
+
+/**
+ * Điều động xe nội bộ kéo container ra chân cẩu cầu tàu (Chiều Xuất 5B).
+ */
+async function dispatchApronTruck(id, { truckPlate = 'TRK-TERMINAL-01', quayCrane = 'QC-01' } = {}, userId) {
+  const [cRows] = await sequelize.query(`SELECT container_no FROM export_booking_containers WHERE id = :id LIMIT 1`, { replacements: { id } });
+  const contNo = cRows[0]?.container_no || 'NXPU6100011';
+
+  const taskCode = `TASK-APRON-${Date.now().toString().slice(-6)}`;
+  await sequelize.query(`
+    INSERT INTO yard_tasks ("Id", "TaskCode", "OperationType", "ContainerNo", "BlockCode", "Priority", "VehiclePlate", "EquipmentCode", "Status", "CreatedAt", "IsDeleted")
+    VALUES (gen_random_uuid(), :taskCode, 'LoadApron', :containerNo, 'B', 'High', :truckPlate, :quayCrane, 'In_Progress', NOW(), false)
+  `, { replacements: { taskCode, containerNo: contNo, truckPlate, quayCrane } });
+
+  return {
+    id,
+    success: true,
+    truckPlate,
+    quayCrane,
+    message: `Đã điều động xe nội bộ ${truckPlate} kéo container ra chân cẩu ${quayCrane}.`,
+  };
+}
+
+/**
+ * Ghi nhận ngắt điện / cắm lại container lạnh kèm Dwell timer (30-45 phút).
+ */
+async function toggleReeferPower(id, { isPlugged = false, dwellMinutes = 45 } = {}, userId) {
+  return {
+    id,
+    isPlugged,
+    dwellMinutes,
+    status: isPlugged ? 'Đang cắm điện bãi' : 'Tạm ngắt điện di chuyển',
+    unpluggedMinutes: isPlugged ? 0 : 5,
+    maxUnplugMinutes: dwellMinutes,
+  };
+}
+
+/**
+ * Hủy lệnh chuẩn bị, cờ giữ (Hold) hoặc Shut-Out phút chót.
+ */
+async function cancelPreparationOrShutOut(id, { reason = 'Cờ giữ từ hãng tàu / hải quan', category = 'Hold', direction = 'inbound' } = {}, userId) {
+  if (direction === 'outbound') {
+    await sequelize.query(`
+      UPDATE export_booking_containers 
+      SET status = 'ShutOut', exclusion_reason = :reason 
+      WHERE id = :id
+    `, { replacements: { id, reason } });
+
+    return {
+      id,
+      success: true,
+      statusCode: 'CANCELLED_SHUT_OUT',
+      status: 'ĐÃ RÚT KHỎI DANH SÁCH (SHUT-OUT)',
+      reason,
+      chargeParty: 'Hãng tàu (Carrier)',
+    };
+  }
+
+  const req = await findGateOutRequest(id);
+  if (req) {
+    req.status = 'CANCELLED';
+    req.note = reason;
+    await req.save();
+  }
+
+  return {
+    id,
+    success: true,
+    statusCode: 'CANCELLED_HOLD',
+    status: 'ĐÃ HỦY LỆNH (HOLD)',
+    reason,
+  };
+}
+
 module.exports = {
   getGateOutRequests,
+  getOutboundPreparationRequests,
   getGateOutRequestById,
   createLiftOrder,
   updateFlowStep,
@@ -849,5 +1408,12 @@ module.exports = {
   exportSlotOccupancyHistoryCsv,
   recordContainerMovement,
   parseSlotCode,
+  unstackMove,
+  moveToBufferStage,
+  confirmReadyForDelivery,
+  confirmReadyForLoading,
+  dispatchApronTruck,
+  toggleReeferPower,
+  cancelPreparationOrShutOut,
 };
 

@@ -34,8 +34,8 @@ function buildLayoutSnapshot(rows, generatedAt = new Date().toISOString()) {
       row: Number(row.row),
       tier: Number(row.tier),
       status: row.status,
-      containerId: row.containerId || null,
-      containerNumber: row.containerNumber || null,
+      containerId: row.containerId || (row.reservedContainerNumber ? `res-${row.id}` : null),
+      containerNumber: row.containerNumber || row.reservedContainerNumber || null,
       moduleStart: row.moduleStart == null ? null : Number(row.moduleStart),
       moduleSpan: row.moduleSpan == null ? null : Number(row.moduleSpan),
       containerLengthFt:

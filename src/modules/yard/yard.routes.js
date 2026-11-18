@@ -268,4 +268,98 @@ router.post(
   ctrl.confirmLoadedOnTruck
 );
 
+// ─── THAO TÁC NGHIỆP VỤ CHUẨN BỊ BÃI (5A INBOUND & 5B OUTBOUND) ─────────────
+router.post(
+  '/gate-out-requests/:id/unstack',
+  authenticate,
+  authorize('Yard Operator', 'Administrator', 'Dispatcher'),
+  ctrl.unstackMove
+);
+
+router.post(
+  '/gate-out-requests/:id/buffer-stage',
+  authenticate,
+  authorize('Yard Operator', 'Administrator', 'Dispatcher'),
+  ctrl.moveToBufferStage
+);
+
+router.post(
+  '/gate-out-requests/:id/confirm-ready-delivery',
+  authenticate,
+  authorize('Yard Operator', 'Administrator', 'Dispatcher'),
+  ctrl.confirmReadyDelivery
+);
+
+router.post(
+  '/gate-out-requests/:id/confirm-ready-loading',
+  authenticate,
+  authorize('Yard Operator', 'Administrator', 'Dispatcher'),
+  ctrl.confirmReadyLoading
+);
+
+router.post(
+  '/gate-out-requests/:id/dispatch-apron',
+  authenticate,
+  authorize('Yard Operator', 'Administrator', 'Dispatcher'),
+  ctrl.dispatchApronTruck
+);
+
+router.post(
+  '/gate-out-requests/:id/reefer-power',
+  authenticate,
+  authorize('Yard Operator', 'Administrator', 'Dispatcher'),
+  ctrl.toggleReeferPower
+);
+
+router.post(
+  '/gate-out-requests/:id/shut-out',
+  authenticate,
+  authorize('Yard Operator', 'Administrator', 'Dispatcher'),
+  ctrl.cancelPreparationOrShutOut
+);
+
+// ─── GATE-OUT DELIVERY & e-EIR WORKFLOW ENDPOINTS ────────────────────────────
+const gateOutCtrl = require('./gate-out-delivery.controller');
+
+/**
+ * 1. Kiểm tra 5 điều kiện xuất container tại cổng vào theo thời gian thực
+ * (e-D/O, thanh toán, khung giờ, xe/tài xế, container sẵn sàng bãi)
+ */
+router.post(
+  '/gate-out/check-eligibility',
+  authenticate,
+  authorize('Gate Officer', 'Yard Operator', 'Dispatcher', 'Administrator', 'Driver', 'Carrier Staff', 'Transport Company'),
+  gateOutCtrl.checkEligibility
+);
+
+/**
+ * 2. Lập phiếu EIR điện tử (hướng ra) & xác nhận hoàn tất đối soát hiện trường
+ */
+router.post(
+  '/gate-out/issue-eir',
+  authenticate,
+  authorize('Yard Operator', 'Gate Officer', 'Dispatcher', 'Administrator'),
+  gateOutCtrl.issueGateOutEir
+);
+
+/**
+ * 3. Ghi nhận xe ra cổng ra, kết thúc tính lưu bãi, phát ContainerGatedOut
+ */
+router.post(
+  '/gate-out/confirm-exit',
+  authenticate,
+  authorize('Gate Officer', 'Administrator', 'Yard Operator', 'Dispatcher'),
+  gateOutCtrl.confirmGateOutExit
+);
+
+/**
+ * 4. Xử lý ngoại lệ trong quá trình xuất bãi (Sai cont, sai chì, EDoHeld, hư hỏng)
+ */
+router.post(
+  '/gate-out/exception',
+  authenticate,
+  authorize('Yard Operator', 'Gate Officer', 'Dispatcher', 'Administrator'),
+  gateOutCtrl.handleException
+);
+
 module.exports = router;
