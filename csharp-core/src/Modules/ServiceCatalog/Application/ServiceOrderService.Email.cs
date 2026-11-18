@@ -14,12 +14,13 @@ public sealed partial class ServiceOrderService
         var recipient = (await Rows("SELECT COALESCE((SELECT recipient FROM eport_service_mail_queue WHERE draft_id=r.draft_id AND kind='PAYMENT_NOTICE'),u.email) AS email FROM eport_service_registrations r JOIN users u ON u.id=r.confirmed_by WHERE r.draft_id=@p0", ct, id)).Single();
         Require(kind == "PAYMENT_RECEIPT" || MailAddress.TryCreate(S(recipient, "email"), out _), "Tài khoản đăng ký chưa có email hợp lệ để nhận thông báo.", 422, "SERVICE_ACCOUNT_EMAIL_REQUIRED");
         var paid = kind == "PAYMENT_RECEIPT";
-        var proof = paid ? (await Rows("SELECT number,bank_reference AS reference,updated_at AS \"paidAt\" FROM eport_service_payments WHERE draft_id=@p0 AND status='SUCCEEDED'", ct, id)).SingleOrDefault() : null;
+        var proof = paid ? (await Rows("SELECT number,amount,bank_reference AS reference,updated_at AS \"paidAt\" FROM eport_service_payments WHERE draft_id=@p0 AND status='SUCCEEDED'", ct, id)).SingleOrDefault() : null;
         var title = paid ? "Biên lai thu phí & Xác nhận hoàn tất dịch vụ" : "Thông báo phê duyệt phí dịch vụ cảng";
 
         string E(string? text) => WebUtility.HtmlEncode(text ?? "");
 
         var amount = (order["total"]?.GetValue<decimal>() ?? 583200m).ToString("N0", CultureInfo.GetCultureInfo("vi-VN"));
+        var receivedAmount = (proof?["amount"]?.GetValue<decimal>() ?? order["total"]?.GetValue<decimal>() ?? 0).ToString("N0", CultureInfo.GetCultureInfo("vi-VN"));
         var fees = order["fees"] as JsonArray;
         var containersArr = order["containers"] as JsonArray;
 
@@ -117,10 +118,14 @@ public sealed partial class ServiceOrderService
                         <td style='padding: 6px 0; font-weight: 600; color: #0f172a;'>{sourceLabel}</td>
                       </tr>
                       <tr>
-                        <td style='padding: 6px 0; color: #64748b;'>Tổng số tiền:</td>
-                        <td style='padding: 6px 0; font-size: 16px; font-weight: 800; color: #0369a1;'>{amount} VND <span style='font-size: 11px; font-weight: normal; color: #64748b;'>(đã bao gồm VAT 8%)</span></td>
+                        <td style='padding: 6px 0; color: #64748b;'>Tổng phí dịch vụ theo đơn:</td>
+                        <td style='padding: 6px 0; font-size: 16px; font-weight: 800; color: #0369a1;'>{amount} VND</td>
                       </tr>
                       {(paid ? $@"<tr>
+                        <td style='padding: 6px 0; color: #64748b;'>Số tiền giao dịch PayOS đã nhận:</td>
+                        <td style='padding: 6px 0; font-weight: 700; color: #166534;'>{receivedAmount} VND</td>
+                      </tr>
+                      <tr>
                         <td style='padding: 6px 0; color: #64748b;'>Phương thức:</td>
                         <td style='padding: 6px 0; font-weight: 600; color: #166534;'>Chuyển khoản VietQR 24/7 (Ngân hàng Quân Đội - MB)</td>
                       </tr>

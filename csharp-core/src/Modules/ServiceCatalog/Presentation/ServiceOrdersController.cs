@@ -51,9 +51,6 @@ public sealed class ServiceOrdersController(ServiceOrderService service) : Contr
     [HttpPost("{id:guid}/payments")]
     public Task<IActionResult> CreatePayment(Guid id, ServicePaymentCreateInput input, CancellationToken ct)
         => Run(() => service.CreateServicePayment(id, input, ct));
-    [HttpPost("{id:guid}/payments/simulate-success")]
-    public Task<IActionResult> SimulateSuccess(Guid id, CancellationToken ct)
-        => Run(async () => await service.SimulatePaymentSuccess(id, ct));
     [HttpPost("{id:guid}/payments/{paymentId:guid}/sync")]
     public Task<IActionResult> SyncPayment(Guid id, Guid paymentId, ServicePaymentSyncInput input, CancellationToken ct)
         => Run(() => service.SyncServicePayment(id, paymentId, input, ct));
