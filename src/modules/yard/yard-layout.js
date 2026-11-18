@@ -42,6 +42,15 @@ function buildLayoutSnapshot(rows, generatedAt = new Date().toISOString()) {
         row.containerLengthFt == null ? null : Number(row.containerLengthFt),
       hasReeferPlug: row.hasReeferPlug === true,
       reservedContainerNumber: row.reservedContainerNumber || null,
+      bookingCode: row.bookingCode || null,
+      vehiclePlate: row.vehiclePlate || null,
+      driverName: row.driverName || null,
+      company: row.company || null,
+      sealNumber: row.sealNumber || null,
+      operationType: row.operationType || null,
+      equipmentCode: row.equipmentCode || null,
+      operatorName: row.operatorName || null,
+      notes: row.notes || null,
       mapped: currentDesign
         ? terminalPlan.areas.some(
             (a) =>
@@ -80,8 +89,25 @@ async function getLayoutSnapshot() {
       ys.id, ys.bay, ys.row_no AS row, ys.tier, ys.status::text AS status,
       ys.module_start AS "moduleStart",ys.module_span AS "moduleSpan",ys.container_length_ft AS "containerLengthFt",
       ys.has_reefer_plug AS "hasReeferPlug",
-      cp.container_id AS "containerId", c.container_no AS "containerNumber",
-      (SELECT rc.container_no FROM yard_slot_reservations r JOIN containers rc ON rc.id=r.container_id WHERE r.slot_id=ys.id AND r.reserved_to IS NULL ORDER BY r.reserved_from DESC LIMIT 1) AS "reservedContainerNumber",
+      cp.container_id AS "containerId",
+      COALESCE(
+        c.container_no,
+        yt."ContainerNo",
+        (SELECT rc.container_no FROM yard_slot_reservations r JOIN containers rc ON rc.id=r.container_id WHERE r.slot_id=ys.id AND r.reserved_to IS NULL ORDER BY r.reserved_from DESC LIMIT 1)
+      ) AS "containerNumber",
+      COALESCE(
+        (SELECT rc.container_no FROM yard_slot_reservations r JOIN containers rc ON rc.id=r.container_id WHERE r.slot_id=ys.id AND r.reserved_to IS NULL ORDER BY r.reserved_from DESC LIMIT 1),
+        yt."ContainerNo"
+      ) AS "reservedContainerNumber",
+      COALESCE(bk.booking_code, yt."TaskCode") AS "bookingCode",
+      COALESCE(bk.vehicle_plate, yt."VehiclePlate") AS "vehiclePlate",
+      COALESCE(bk.driver_name, yt."DriverName") AS "driverName",
+      COALESCE(carr.company_name, yt."OperationType") AS "company",
+      COALESCE(c.seal_no, yt."ExpectedSealNo", yt."ActualSealNo") AS "sealNumber",
+      yt."OperationType" AS "operationType",
+      yt."EquipmentCode" AS "equipmentCode",
+      yt."OperatorName" AS "operatorName",
+      yt."Notes" AS "notes",
       (SELECT map_data->'layout'->>'drawingVersion' FROM smart_yard_maps WHERE is_active=true ORDER BY updated_at DESC LIMIT 1) AS "drawingVersion"
     FROM yard_blocks yb
     LEFT JOIN yard_slots ys ON ys.block_id=yb.id
@@ -90,6 +116,22 @@ async function getLayoutSnapshot() {
       WHERE slot_id=ys.id AND is_current=true ORDER BY placed_at DESC LIMIT 1
     ) cp ON true
     LEFT JOIN containers c ON c.id=cp.container_id
+    LEFT JOIN LATERAL (
+      SELECT * FROM yard_tasks
+      WHERE ("ToLocation" = yb.code || '-' || LPAD(ys.bay::text, 2, '0') || '-' || LPAD(ys.row_no::text, 2, '0') || '-' || ys.tier::text
+          OR "ToLocation" = yb.code || '-' || ys.bay::text || '-' || ys.row_no::text || '-' || ys.tier::text
+          OR "ToLocation" = yb.code || '.' || LPAD(ys.bay::text, 2, '0') || '.' || LPAD(ys.row_no::text, 2, '0') || '.' || ys.tier::text
+          OR "ToLocation" = yb.code || '.' || ys.bay::text || '.' || ys.row_no::text || '.' || ys.tier::text)
+      ORDER BY "CreatedAt" DESC LIMIT 1
+    ) yt ON true
+    LEFT JOIN LATERAL (
+      SELECT b.booking_code, b.vehicle_plate, b.driver_name, b.carrier_id, b.status AS booking_status
+      FROM bookings b
+      WHERE (b.id::text = ys.id::text 
+         OR (c.id IS NOT NULL AND EXISTS(SELECT 1 FROM booking_containers bc WHERE bc.booking_id=b.id AND bc.container_id=c.id)))
+      ORDER BY b.created_at DESC LIMIT 1
+    ) bk ON true
+    LEFT JOIN carriers carr ON carr.id = bk.carrier_id
     WHERE yb.is_active=true
     ORDER BY yb.code,ys.bay,ys.row_no,ys.tier`);
   return buildLayoutSnapshot(rows);
