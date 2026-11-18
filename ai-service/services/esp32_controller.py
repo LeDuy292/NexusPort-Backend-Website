@@ -15,7 +15,11 @@ Thiết kế:
   - Có thể dùng độc lập hoặc import vào main.py FastAPI
 """
 
-import serial
+try:
+    import serial
+    import serial.tools.list_ports
+except ImportError:
+    serial = None
 import threading
 import time
 import logging
@@ -159,6 +163,8 @@ class ESP32Controller:
 
     def _find_esp32_port(self) -> Optional[str]:
         """Tự động dò tìm cổng Serial của ESP32 (chip CH340, CP210x, FTDI)."""
+        if serial is None:
+            return None
         try:
             import serial.tools.list_ports
             ports = list(serial.tools.list_ports.comports())
@@ -178,6 +184,9 @@ class ESP32Controller:
 
     def _open_serial(self) -> bool:
         """Mở cổng Serial, tự dò tìm cổng nếu cổng chỉ định không tồn tại."""
+        if serial is None:
+            logger.warning("[ESP32] Thư viện pyserial chưa được cài đặt. Chạy chế độ mô phỏng / không Serial.")
+            return False
         target_port = self.port
         try:
             with self._serial_lock:
