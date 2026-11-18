@@ -51,8 +51,9 @@ class ESP32Controller:
         self._serial: Optional[serial.Serial] = None
         self._serial_lock = threading.Lock()
 
-        # Event được set() khi nhận "CAPTURE" từ ESP32
+        # Event được set() khi nhận CAPTURE từ ESP32
         self.capture_event = threading.Event()
+        self.capture_lane = "IN"
         # Callback tùy chọn gọi khi có CAPTURE (ngoài Event)
         self._on_capture: Optional[Callable] = None
 
@@ -70,8 +71,8 @@ class ESP32Controller:
         Khởi động kết nối Serial và thread đọc nền.
 
         Args:
-            on_capture: Callback(lane: str) gọi khi nhận CAPTURE từ ESP32.
-                        lane = "IN" (index 0) hoặc "OUT" (index 1) — dùng cho 2-lane.
+            on_capture: Callback(lane) gọi khi nhận CAPTURE_IN/OUT.
+                        CAPTURE cũ được hiểu là làn IN.
         Returns:
             True nếu kết nối thành công ngay, False nếu đang retry.
         """
@@ -260,12 +261,14 @@ class ESP32Controller:
 
                 logger.info("[ESP32] ← Received: %s", line)
 
-                if line == "CAPTURE":
-                    logger.info("[ESP32] CAPTURE signal received — triggering OCR")
+                if line in ("CAPTURE", "CAPTURE:IN", "CAPTURE_IN", "CAPTURE:OUT", "CAPTURE_OUT"):
+                    lane = "OUT" if line in ("CAPTURE:OUT", "CAPTURE_OUT") else "IN"
+                    logger.info("[ESP32] CAPTURE signal received for lane %s — triggering OCR", lane)
+                    self.capture_lane = lane
                     self.capture_event.set()
                     if self._on_capture:
                         try:
-                            self._on_capture()
+                            self._on_capture(lane)
                         except Exception as cb_err:
                             logger.error("[ESP32] on_capture callback error: %s", cb_err)
 
