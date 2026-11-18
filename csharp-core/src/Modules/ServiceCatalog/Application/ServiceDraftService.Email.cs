@@ -46,6 +46,7 @@ public sealed partial class ServiceDraftService
             Require(input.Source.BookingId.HasValue || hasBookingCode, "Nhập mã eBooking xuất khẩu trước khi xác thực.");
         }
         var email = await RegisteredEmail(ct);
+        Require(workflowEmail != null, "Dịch vụ gửi email xác thực chưa sẵn sàng. Vui lòng thử lại sau.", 503, "SERVICE_EMAIL_UNAVAILABLE");
         await using var tx = await db.Database.BeginTransactionAsync(ct);
         await Exec("SELECT pg_advisory_xact_lock(hashtext(@p0))", ct, "eport-email:" + Actor.ToString("N"));
         var challenge = Guid.NewGuid(); var salt = RandomNumberGenerator.GetBytes(32);
@@ -57,16 +58,14 @@ public sealed partial class ServiceDraftService
             """, ct, challenge, id, Actor, company, email, SourceHash(input), HashCode(code, salt), Convert.ToHexString(salt),
             JsonSerializer.Serialize(new { input.Flow, input.MainServiceId, input.Source }, Json));
         await tx.CommitAsync(ct);
-        try
+        try { await workflowEmail!.SendCode(email, code, ct); }
+        catch
         {
-            if (workflowEmail != null) await workflowEmail.SendCode(email, code, ct);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"[EMAIL_OTP] Đã tạo mã xác thực email cho {email}: {code} ({ex.Message})");
+            await Exec("UPDATE eport_service_email_verifications SET invalidated_at=now() WHERE id=@p0", CancellationToken.None, challenge);
+            throw new CatalogException("Không gửi được mã xác thực đến email. Vui lòng kiểm tra cấu hình email và thử lại.", 503, "SERVICE_EMAIL_DELIVERY_FAILED");
         }
         var at = email.IndexOf('@');
-        return new { challengeId = challenge, maskedEmail = email[..1] + "***" + email[at..], expiresInSeconds = 300, retryAfterSeconds = 60, otpHint = code };
+        return new { challengeId = challenge, maskedEmail = email[..1] + "***" + email[at..], expiresInSeconds = 300, retryAfterSeconds = 60 };
     }
     public async Task<object> VerifyRegistrationEmail(Guid id, ServiceEmailCodeInput request, CancellationToken ct)
     {
