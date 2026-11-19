@@ -54,6 +54,18 @@ public static class ServiceCollectionExtensions
         var connectionString = configuration.GetConnectionString("DefaultConnection") 
             ?? "Host=localhost;Port=5432;Database=NexusPort;Username=postgres;Password=pgadmin4";
 
+        // The hosted database is shared by several apps and frequently exhausts
+        // its connection slots. Reuse one reserved connection and queue requests.
+        var connectionOptions = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+        if (!string.Equals(connectionOptions.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(connectionOptions.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            connectionOptions.MaxPoolSize = 1;
+            connectionOptions.MinPoolSize = 1;
+            connectionOptions.Timeout = Math.Max(connectionOptions.Timeout, 30);
+            connectionString = connectionOptions.ConnectionString;
+        }
+
         var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
         dataSourceBuilder.MapEnum<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>("driver_status");
         dataSourceBuilder.MapEnum<NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus>("truck_status");

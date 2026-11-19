@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 using NexusPort.Modules.ServiceCatalog.Application;
@@ -13,15 +14,27 @@ namespace NexusPort.Modules.ServiceCatalog.Presentation;
 [Authorize(Roles = "Transport Company,Carrier,Carrier Staff,Administrator,Admin,Dispatcher")]
 public sealed class ServiceOrdersController(ServiceOrderService service) : ControllerBase
 {
+    private static bool IsTransientDatabaseError(Exception error)
+        => error is NpgsqlException pg && pg.IsTransient
+            || error is InvalidOperationException { InnerException: NpgsqlException inner } && inner.IsTransient;
+
     private async Task<IActionResult> Run(Func<Task<object>> action)
     {
-        try { return Ok(await action()); }
+        try
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                try { return Ok(await action()); }
+                catch (Exception error) when (HttpMethods.IsGet(Request.Method) && attempt < 2 && IsTransientDatabaseError(error))
+                { await Task.Delay(400 * (attempt + 1), HttpContext.RequestAborted); }
+            }
+        }
         catch (AppException error) { return StatusCode(error.StatusCode, new { message = error.Message, errorCode = error.ErrorCode }); }
         catch (PostgresException error) when (error.SqlState is "42P01" or "42703")
         { return StatusCode(503, new { message = "Chức năng quản lý đơn dịch vụ chưa sẵn sàng. Vui lòng liên hệ quản trị viên.", errorCode = "SERVICE_ORDER_SCHEMA_REQUIRED" }); }
         catch (PostgresException error) when (error.SqlState is "23505" or "23503" or "23514" or "40001" or "40P01")
         { return Conflict(new { message = "Dữ liệu vừa thay đổi hoặc yêu cầu đã được xử lý. Tải lại đơn và kiểm tra trạng thái trước khi thao tác.", errorCode = "SERVICE_ORDER_CONFLICT" }); }
-        catch (Exception error) when (error.Message.Contains("transient failure", StringComparison.OrdinalIgnoreCase) || error is NpgsqlException)
+        catch (Exception error) when (IsTransientDatabaseError(error))
         { return StatusCode(503, new { message = "Hệ thống đang kết nối lại cơ sở dữ liệu. Vui lòng tải lại hồ sơ sau vài giây.", errorCode = "DATABASE_TRANSIENT_RETRY" }); }
     }
 
