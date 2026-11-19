@@ -11,7 +11,7 @@ require('dotenv').config();
 require('../config/env');
 
 const bcrypt = require('bcryptjs');
-const { connectDB, syncDB } = require('../config/database');
+const { connectDB } = require('../config/database');
 const { User } = require('../models/User');
 require('../models/TransportTrip');
 const { bcrypt: bcryptConfig } = require('../config/env');
@@ -87,7 +87,6 @@ async function seed() {
 
   try {
     await connectDB();
-    await syncDB({ alter: true });
 
     // Hash password một lần để dùng cho tất cả seed users
     console.log('🔐 Hashing password...');

@@ -24,7 +24,6 @@
     <ProjectReference Include="..\Modules\Identity\NexusPort.Modules.Identity.csproj" />
     <ProjectReference Include="..\Modules\Booking\NexusPort.Modules.Booking.csproj" />
     <ProjectReference Include="..\Modules\Vessel\NexusPort.Modules.Vessel.csproj" />
-    <ProjectReference Include="..\Modules\Berth\NexusPort.Modules.Berth.csproj" />
     <ProjectReference Include="..\Modules\Container\NexusPort.Modules.Container.csproj" />
     <ProjectReference Include="..\Modules\Yard\NexusPort.Modules.Yard.csproj" />
     <ProjectReference Include="..\Modules\Gate\NexusPort.Modules.Gate.csproj" />
