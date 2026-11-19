@@ -6,6 +6,13 @@ using NexusPort.Modules.Carrier;
 
 var builder = WebApplication.CreateBuilder(args);
 if (builder.Environment.IsDevelopment())
+{
+    // Local development does not require permission to write Windows Event Log.
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Logging.AddDebug();
+}
+if (builder.Environment.IsDevelopment())
     builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true).AddEnvironmentVariables();
 ApplyDeploymentConfigFallbacks(builder.Configuration);
 

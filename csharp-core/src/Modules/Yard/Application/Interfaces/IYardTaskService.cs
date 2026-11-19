@@ -16,5 +16,6 @@ public interface IYardTaskService
     Task<ValidateSlotResponseDto> ValidateTargetSlotAsync(ValidateSlotRequestDto dto, CancellationToken cancellationToken = default);
     Task<CalculateShiftingFeeResponseDto> CalculateShiftingFeeAsync(CalculateShiftingFeeRequestDto dto, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<YardTaskDto>> GetRelocationTasksAsync(string? status, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ActiveYardContainerDto>> GetActiveYardContainersAsync(CancellationToken cancellationToken = default);
     Task EnsureSeedTasksAsync(CancellationToken cancellationToken = default);
 }

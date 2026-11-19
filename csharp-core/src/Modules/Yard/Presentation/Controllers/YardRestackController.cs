@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using NexusPort.Modules.Yard.Application.DTOs;
 using NexusPort.Modules.Yard.Application.Interfaces;
 using System.Security.Claims;
@@ -7,6 +8,7 @@ namespace NexusPort.Modules.Yard.Presentation.Controllers;
 
 [ApiController]
 [Route("api/v1/[controller]")]
+[Authorize(Roles = "Dispatcher,YardStaff,Yard Staff,Yard Operator,Administrator,Admin")]
 public class YardRestackController : ControllerBase
 {
     private readonly IYardRestackService _restackService;
@@ -15,6 +17,10 @@ public class YardRestackController : ControllerBase
     {
         _restackService = restackService;
     }
+
+    [HttpGet("risks")]
+    public async Task<ActionResult<IReadOnlyList<RestackRiskDto>>> GetRisks(CancellationToken cancellationToken)
+        => Ok(await _restackService.GetUpcomingRisksAsync(cancellationToken));
 
     /// <summary>
     /// NXP-126: Phân tích Stack, phát hiện container bị chặn và tìm slot đệm
@@ -87,7 +93,7 @@ public class YardRestackController : ControllerBase
         [FromBody] AdvanceRestackStepDto? dto,
         CancellationToken cancellationToken)
     {
-        var operatorName = User.FindFirstValue(ClaimTypes.Name) ?? User.FindFirstValue("username") ?? "Trần Văn Hùng (RTG-01)";
+        var operatorName = User.FindFirstValue(ClaimTypes.Name) ?? User.FindFirstValue("username") ?? "YardStaff";
         var updatedPlan = await _restackService.CompleteStepAsync(id, stepNumber, dto ?? new AdvanceRestackStepDto(), operatorName, cancellationToken);
         return Ok(updatedPlan);
     }
@@ -106,10 +112,4 @@ public class YardRestackController : ControllerBase
         return Ok(plan);
     }
 
-    [HttpPost("seed")]
-    public async Task<ActionResult> Seed(CancellationToken cancellationToken)
-    {
-        await _restackService.EnsureSeedPlansAsync(cancellationToken);
-        return Ok(new { message = "Khởi tạo dữ liệu mẫu Kế hoạch đảo bãi thành công!" });
-    }
 }
