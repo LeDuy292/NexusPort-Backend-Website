@@ -26,15 +26,6 @@ public class YardDbContext : DbContext
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(YardDbContext).Assembly);
 
         // Ánh xạ tường minh các Entity liên module để EF Core trỏ đúng bảng PostgreSQL
-        modelBuilder.Entity<NexusPort.Modules.Container.Domain.Entities.Container>(b =>
-        {
-            b.ToTable("Containers");
-            b.HasKey(x => x.Id);
-            b.Property(x => x.ContainerNumber).IsRequired().HasMaxLength(100);
-            b.Property(x => x.Status).IsRequired().HasMaxLength(50);
-            b.Property(x => x.Description).HasMaxLength(500);
-        });
-
         modelBuilder.Entity<NexusPort.Modules.Equipment.Domain.Entities.Equipment>(b =>
         {
             b.ToTable("Equipments");

@@ -69,7 +69,6 @@ async function main() {
   if (!connectionString) throw Error("DATABASE_URL is required");
   const ssl =
     process.env.DB_SSL === "true" ||
-    process.env.DB_TARGET === "aiven" ||
     connectionString.includes("sslmode=require");
   const db = new Client({
     connectionString,

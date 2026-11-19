@@ -186,6 +186,7 @@ public sealed partial class ExportBookingService
         await StorePreparedReservations(id, content, ct);
         if (draft != null) await Exec("UPDATE export_booking_drafts SET submitted_booking_id=@p0,updated_at=now() WHERE id=@p1", ct, id, request.DraftId);
         await History(id, content.VoyageId.Value, "BookingRequested", "Khách hàng gửi nhu cầu đặt chỗ; VGM và lịch xe được hoàn thiện theo từng mốc, chưa tạo lịch cảng.", ct);
+        await AutoApprove(id, ct);
         await tx.CommitAsync(ct); return await Detail(id, ct);
     }
     private async Task<List<string>> PreparedCargoErrors(ExportPreparationContent content, CancellationToken ct)
@@ -260,7 +261,7 @@ public sealed partial class ExportBookingService
     public async Task<JsonObject> ReviewPreparedContainers(Guid id, ExportContainerReviewRequest request, CancellationToken ct)
     {
         await using var tx=await _db.Database.BeginTransactionAsync(ct);
-        var booking=await Booking(id,true,ct); OwnLine(booking); Version(booking,request.ExpectedVersion);
+        var booking=await Booking(id,true,ct); await OwnLine(booking,ct); Version(booking,request.ExpectedVersion);
         Require(booking["preparation"] != null && S(booking,"portStatus")=="WaitingContainerReview","Status","Chưa có phiên bản container đang chờ hãng tàu kiểm tra.");
         var content=booking["preparation"]!.Deserialize<ExportPreparationContent>(Json)!;
         if(request.Approve)

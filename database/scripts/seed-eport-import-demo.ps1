@@ -7,13 +7,19 @@ $demoVars=@{}
 foreach($demoLine in Get-Content -LiteralPath (Join-Path $demoRepo '.env')) {
  if($demoLine -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$'){$demoVars[$matches[1]]=$matches[2].Trim().Trim('"').Trim("'")}
 }
-if($demoVars['NODE_ENV'] -ne 'development' -or $demoVars['DB_TARGET'] -ne 'aiven'){throw 'Refusing non-Development database. This uses the same .env target as csharp-core/run.ps1.'}
+if($demoVars['NODE_ENV'] -ne 'development'){throw 'Refusing non-Development database. This uses the same .env target as csharp-core/run.ps1.'}
 $demoPrevious=@{}
 foreach($demoName in @('PGPASSWORD','PGSSLMODE','PGCONNECT_TIMEOUT','PGCLIENTENCODING')){$demoPrevious[$demoName]=[Environment]::GetEnvironmentVariable($demoName,'Process')}
 try {
- $env:PGPASSWORD=$demoVars['AIVEN_DB_PASSWORD'];$env:PGSSLMODE='require';$env:PGCONNECT_TIMEOUT='15';$env:PGCLIENTENCODING='UTF8'
+ $dbHost = if($demoVars['DB_HOST']){$demoVars['DB_HOST']}else{'localhost'}
+ $dbPort = if($demoVars['DB_PORT']){$demoVars['DB_PORT']}else{'5432'}
+ $dbName = if($demoVars['DB_NAME']){$demoVars['DB_NAME']}else{'railway'}
+ $dbUser = if($demoVars['DB_USER']){$demoVars['DB_USER']}else{'postgres'}
+ $env:PGPASSWORD = if($demoVars['DB_PASSWORD']){$demoVars['DB_PASSWORD']}else{''}
+ $env:PGSSLMODE = if($demoVars['DB_SSL_MODE']){$demoVars['DB_SSL_MODE']}else{'prefer'}
+ $env:PGCONNECT_TIMEOUT='15';$env:PGCLIENTENCODING='UTF8'
  $demoPsql='C:\Program Files\PostgreSQL\17\bin\psql.exe'
- $demoArgs=@('-h',$demoVars['AIVEN_DB_HOST'],'-p',$demoVars['AIVEN_DB_PORT'],'-U',$demoVars['AIVEN_DB_USER'],'-d',$demoVars['AIVEN_DB_NAME'],'-X','-A','-t','-q','-v','ON_ERROR_STOP=1')
+ $demoArgs=@('-h',$dbHost,'-p',$dbPort,'-U',$dbUser,'-d',$dbName,'-X','-A','-t','-q','-v','ON_ERROR_STOP=1')
  function Read-DemoJson([string]$Sql){
   $demoOutput=& $demoPsql @demoArgs -c "BEGIN READ ONLY; $Sql ROLLBACK;" 2>&1
   if($LASTEXITCODE -ne 0){throw 'Read-only Development inspection failed; connection details withheld.'}

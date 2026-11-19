@@ -6,7 +6,7 @@ const { addDiscoveredRoutes } = require('./route-openapi');
 const shippingLineReference = require('../../node-core/src/modules/container/domain/shipping-line-reference.json');
 
 const shippingLineAccounts = [
-  '**Tài khoản Hãng tàu đã nhập trên Aiven**',
+  '**Tài khoản Hãng tàu trên hệ thống**',
   '',
   '| Username | Role | Hãng tàu | Tiền tố BIC |',
   '|---|---|---|---|',

@@ -30,34 +30,37 @@ Get-Content -LiteralPath $envPath | ForEach-Object {
     [Environment]::SetEnvironmentVariable($name, $value, 'Process')
 }
 
-$requiredVariables = @(
-    'AIVEN_DB_HOST',
-    'AIVEN_DB_PORT',
-    'AIVEN_DB_NAME',
-    'AIVEN_DB_USER',
-    'AIVEN_DB_PASSWORD'
-)
-
-$missingVariables = $requiredVariables | Where-Object {
-    [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_, 'Process'))
-}
-
-if ($missingVariables.Count -gt 0) {
-    throw "Missing Aiven settings in .env: $($missingVariables -join ', ')"
-}
-
-$hostName = [Environment]::GetEnvironmentVariable('AIVEN_DB_HOST', 'Process')
-$port = [Environment]::GetEnvironmentVariable('AIVEN_DB_PORT', 'Process')
-$database = [Environment]::GetEnvironmentVariable('AIVEN_DB_NAME', 'Process')
-$username = [Environment]::GetEnvironmentVariable('AIVEN_DB_USER', 'Process')
-$password = [Environment]::GetEnvironmentVariable('AIVEN_DB_PASSWORD', 'Process')
+$databaseUrl = [Environment]::GetEnvironmentVariable('DATABASE_URL', 'Process')
 $poolSize = [Environment]::GetEnvironmentVariable('DB_POOL_MAX', 'Process')
-
 if ([string]::IsNullOrWhiteSpace($poolSize)) {
-    $poolSize = '3'
+    $poolSize = '5'
 }
 
-$connectionString = "Host=$hostName;Port=$port;Database=$database;Username=$username;Password=$password;SSL Mode=Require;Trust Server Certificate=true;Maximum Pool Size=$poolSize"
+if (-not [string]::IsNullOrWhiteSpace($databaseUrl) -and [uri]::TryCreate($databaseUrl.Trim(), [UriKind]::Absolute, [ref]$null)) {
+    $uri = [uri]$databaseUrl.Trim()
+    $userInfo = $uri.UserInfo.Split(':', 2)
+    $username = if ($userInfo.Length -gt 0) { [uri]::UnescapeDataString($userInfo[0]) } else { '' }
+    $password = if ($userInfo.Length -gt 1) { [uri]::UnescapeDataString($userInfo[1]) } else { '' }
+    $port = if ($uri.Port -gt 0) { $uri.Port } else { 5432 }
+    $database = $uri.AbsolutePath.TrimStart('/')
+    $disableSsl = $uri.Query -like '*sslmode=disable*'
+    $sslPart = if ($disableSsl) { 'SSL Mode=Disable' } else { 'SSL Mode=Require;Trust Server Certificate=true' }
+    $connectionString = "Host=$($uri.Host);Port=$port;Database=$database;Username=$username;Password=$password;$sslPart;Maximum Pool Size=$poolSize;Connection Idle Lifetime=15;Connection Pruning Interval=5"
+} else {
+    $hostName = [Environment]::GetEnvironmentVariable('DB_HOST', 'Process')
+    if ([string]::IsNullOrWhiteSpace($hostName)) { $hostName = 'localhost' }
+    $port = [Environment]::GetEnvironmentVariable('DB_PORT', 'Process')
+    if ([string]::IsNullOrWhiteSpace($port)) { $port = '5432' }
+    $database = [Environment]::GetEnvironmentVariable('DB_NAME', 'Process')
+    if ([string]::IsNullOrWhiteSpace($database)) { $database = 'nexusport' }
+    $username = [Environment]::GetEnvironmentVariable('DB_USER', 'Process')
+    if ([string]::IsNullOrWhiteSpace($username)) { $username = 'postgres' }
+    $password = [Environment]::GetEnvironmentVariable('DB_PASSWORD', 'Process')
+    $sslMode = [Environment]::GetEnvironmentVariable('DB_SSL_MODE', 'Process')
+    if ([string]::IsNullOrWhiteSpace($sslMode)) { $sslMode = 'Disable' }
+    $connectionString = "Host=$hostName;Port=$port;Database=$database;Username=$username;Password=$password;SSL Mode=$sslMode;Maximum Pool Size=$poolSize;Connection Idle Lifetime=15;Connection Pruning Interval=5"
+}
+
 [Environment]::SetEnvironmentVariable('ConnectionStrings__DefaultConnection', $connectionString, 'Process')
 
 # Hand a previous run of this checkout over to this terminal. Never stop a
@@ -85,7 +88,7 @@ foreach ($listenPort in $listenPorts) {
     }
 }
 
-Write-Host "Starting NexusPort.Api with Aiven PostgreSQL ($database)..."
+Write-Host "Starting NexusPort.Api with PostgreSQL ($database)..."
 # This script loads the checkout's local settings. A deployed API can explicitly
 # choose Production and --no-launch-profile instead.
 if ([string]::IsNullOrWhiteSpace($env:ASPNETCORE_ENVIRONMENT)) {

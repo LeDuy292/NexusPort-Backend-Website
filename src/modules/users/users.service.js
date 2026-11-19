@@ -387,7 +387,7 @@ async function createCarrierAccount({ email, username, password, fullName, compa
   const effectivePassword = password || DEFAULT_SYSTEM_PASS;
 
   if (existingUser) {
-    if (['Transport Company', 'Carrier', 'Carrier Staff'].includes(existingUser.role)) {
+    if (['Transport Company', 'Carrier Staff'].includes(existingUser.role)) {
       if (password) {
         const hashedPassword = await bcrypt.hash(password, bcryptConfig.saltRounds);
         existingUser.password = hashedPassword;

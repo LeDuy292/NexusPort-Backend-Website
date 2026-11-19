@@ -299,6 +299,7 @@ public sealed partial class ExportBookingService
         }
         await History(bookingId, request.VoyageId, previous == null ? "BookingSubmitted" : "BookingResubmitted",
             "Khách hàng gửi hồ sơ container, chứng từ và lịch xe đề xuất cho hãng tàu; chưa tạo lịch cảng hoặc lượt bãi.", ct);
+        await AutoApprove(bookingId, ct);
         await tx.CommitAsync(ct); return await Detail(bookingId, ct);
     }
 
