@@ -21,6 +21,8 @@ public sealed class ServiceOrdersController(ServiceOrderService service) : Contr
         { return StatusCode(503, new { message = "Chức năng quản lý đơn dịch vụ chưa sẵn sàng. Vui lòng liên hệ quản trị viên.", errorCode = "SERVICE_ORDER_SCHEMA_REQUIRED" }); }
         catch (PostgresException error) when (error.SqlState is "23505" or "23503" or "23514" or "40001" or "40P01")
         { return Conflict(new { message = "Dữ liệu vừa thay đổi hoặc yêu cầu đã được xử lý. Tải lại đơn và kiểm tra trạng thái trước khi thao tác.", errorCode = "SERVICE_ORDER_CONFLICT" }); }
+        catch (Exception error) when (error.Message.Contains("transient failure", StringComparison.OrdinalIgnoreCase) || error is NpgsqlException)
+        { return StatusCode(503, new { message = "Hệ thống đang kết nối lại cơ sở dữ liệu. Vui lòng tải lại hồ sơ sau vài giây.", errorCode = "DATABASE_TRANSIENT_RETRY" }); }
     }
 
     [HttpGet]
@@ -48,6 +50,8 @@ public sealed class ServiceOrdersController(ServiceOrderService service) : Contr
         => Run(async () => await service.OrderAction(id, input, ct));
     [HttpGet("{id:guid}/payments")]
     public Task<IActionResult> Payments(Guid id, CancellationToken ct) => Run(() => service.ListServicePayments(id, ct));
+    [HttpGet("payments/return/{orderCode:long}")]
+    public Task<IActionResult> PaymentReturn(long orderCode, CancellationToken ct) => Run(() => service.ResolvePaymentReturn(orderCode, ct));
     [HttpPost("{id:guid}/payments")]
     public Task<IActionResult> CreatePayment(Guid id, ServicePaymentCreateInput input, CancellationToken ct)
         => Run(() => service.CreateServicePayment(id, input, ct));
