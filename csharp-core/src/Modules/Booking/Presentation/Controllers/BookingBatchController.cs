@@ -19,7 +19,7 @@ public sealed class BookingBatchController:ControllerBase
     private readonly AppDbContext _context;
     private readonly ICurrentUser _user;
     public BookingBatchController(IBookingService service,AppDbContext context,ICurrentUser user){_service=service;_context=context;_user=user;}
-    private bool IsCarrier=>new[]{"Carrier","Transport Company","Carrier Staff"}.Contains(_user.Role,StringComparer.OrdinalIgnoreCase);
+    private bool IsCarrier=>new[]{"Transport Company","Carrier Staff"}.Contains(_user.Role,StringComparer.OrdinalIgnoreCase);
     private async Task<Guid?> Scope(CancellationToken token)
     {
         if(!_user.UserId.HasValue)throw new UnauthorizedException("Vui lòng đăng nhập.");
