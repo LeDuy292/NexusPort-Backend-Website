@@ -651,6 +651,39 @@ async function confirmLoadedOnTruck(id, verifyData = {}, userId) {
 
   await request.save();
 
+  // 4.1. Giải phóng toàn diện vị trí khỏi Sơ đồ bãi 2D
+  try {
+    const contNo = String(request.container_id).trim().toUpperCase();
+    await sequelize.query(`
+      UPDATE yard_slot_reservations
+      SET reserved_to = NOW()
+      WHERE container_id IN (
+        SELECT id FROM containers WHERE UPPER(TRIM(container_no)) = :contNo
+      ) AND reserved_to IS NULL
+    `, { replacements: { contNo } });
+
+    await sequelize.query(`
+      UPDATE container_positions
+      SET is_current = false, removed_at = NOW()
+      WHERE container_id IN (
+        SELECT id FROM containers WHERE UPPER(TRIM(container_no)) = :contNo
+      ) AND is_current = true
+    `, { replacements: { contNo } });
+
+    await sequelize.query(`
+      DELETE FROM persistent_yard_reservations
+      WHERE UPPER(TRIM(container_no)) = :contNo OR UPPER(TRIM(id)) = :contNo
+    `, { replacements: { contNo } });
+
+    await sequelize.query(`
+      UPDATE yard_tasks
+      SET "Status" = 'GatedOut', "IsDeleted" = true
+      WHERE UPPER(TRIM("ContainerNo")) = :contNo
+    `, { replacements: { contNo } });
+  } catch (err) {
+    console.warn('[confirmLoadedOnTruck] Slot cleanup error:', err.message);
+  }
+
   // 5. Cập nhật chuyến TransportTrip liên kết (nếu có)
   if (request.trip_id) {
     try {
