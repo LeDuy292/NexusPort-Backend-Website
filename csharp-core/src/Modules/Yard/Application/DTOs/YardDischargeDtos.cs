@@ -15,7 +15,12 @@ public class DischargeContainerItemDto
     public string? IsoType { get; set; }
     public bool IsReefer { get; set; }
     public decimal GrossWeightKg { get; set; }
-    public string? BlNumber { get; set; }
+    public string WeightCategory { get; set; } = "MEDIUM"; // LIGHT (<12T), MEDIUM (12-20T), HEAVY (>20T)
+    public string CargoType { get; set; } = "FCL"; // FCL, LCL
+    public string? ShippingLine { get; set; } // Hãng tàu / Tuyến đường
+    public string? Pod { get; set; } // Port of Discharge (Cảng dỡ hàng - cho hàng xuất)
+    public string? Consolidator { get; set; } // Chủ khai thác hàng lẻ LCL
+    public string? BlNumber { get; set; } // Số vận đơn B/L (Hàng nhập FCL)
     public string? Consignee { get; set; }
     public string? Commodity { get; set; }
     public string? SealNumber { get; set; }
@@ -81,6 +86,11 @@ public class TallyScanResultDto
     public DateTime? DischargedAt { get; set; }
     public string? Condition { get; set; }
     public bool IsReefer { get; set; }
+    public string WeightCategory { get; set; } = "MEDIUM";
+    public string CargoType { get; set; } = "FCL";
+    public string? ShippingLine { get; set; }
+    public string? Pod { get; set; }
+    public string? Consolidator { get; set; }
     public List<string> DamagePhotos { get; set; } = new();
     public string? AssignedBufferSlot { get; set; }
     public string Message { get; set; } = string.Empty;
