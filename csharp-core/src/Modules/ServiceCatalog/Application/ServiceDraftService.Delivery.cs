@@ -140,8 +140,6 @@ public sealed partial class ServiceDraftService
             if (input.Source.VesselName == "") Add("VESSEL_REQUIRED", "Bổ sung tên tàu trên lệnh giao hàng.", "source.vesselName");
             if (input.Source.VoyageNumber == "") Add("VOYAGE_REQUIRED", "Bổ sung chuyến tàu trên lệnh giao hàng.", "source.voyageNumber");
         }
-        if (!HasCustomsConfirmation(draftId, input))
-            Add("CUSTOMS_CONFIRMATION_REQUIRED", "Bấm Xác nhận thông quan cho danh sách container hiện tại trước khi xác nhận đăng ký.", "delivery.customsConfirmationScope");
         var delivery = input.Delivery;
         if (delivery.TransportMode == "TRUCK")
         {

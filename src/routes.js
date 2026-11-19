@@ -25,14 +25,29 @@ const healthHandler = (_req, res) => {
 systemRoutes.get('/health', healthHandler);
 systemRoutes.get('/api/health', healthHandler);
 
-// In-memory persistent storage for yard reservations
+const { sequelize } = require('./config/database');
+
+// Persistent storage for yard reservations across all machines via PostgreSQL
 const yardReservationsRoutes = Router();
 let reservationsStore = [];
 
-yardReservationsRoutes.get('/', (_req, res) => {
+yardReservationsRoutes.get('/', async (_req, res) => {
+  try {
+    const [rows] = await sequelize.query(`
+      SELECT data FROM persistent_yard_reservations ORDER BY updated_at DESC;
+    `);
+    if (rows && rows.length > 0) {
+      const list = rows.map(r => r.data);
+      reservationsStore = list;
+      return res.json(list);
+    }
+  } catch (err) {
+    console.warn('[YardReservations] DB read warning:', err.message);
+  }
   res.json(reservationsStore);
 });
-yardReservationsRoutes.post('/', (req, res) => {
+
+yardReservationsRoutes.post('/', async (req, res) => {
   const item = req.body;
   if (item) {
     const contId = (item.containerId || item.containerNo || item.booking?.containerId || '').trim().toUpperCase();
@@ -45,23 +60,85 @@ yardReservationsRoutes.post('/', (req, res) => {
     } else {
       reservationsStore.push({ ...item, createdAt: new Date().toISOString() });
     }
+
+    try {
+      const id = contId || item.posId || `RES-${Date.now()}`;
+      const blockCode = item.blockCode || item.block || 'A01';
+      const bay = parseInt(item.bay, 10) || 2;
+      const rowNo = parseInt(item.row, 10) || 1;
+      const tier = parseInt(item.tier, 10) || 1;
+      const size = parseInt(item.size, 10) || 40;
+      const bookingCode = item.bookingCode || item.booking?.id || '';
+
+      await sequelize.query(`
+        INSERT INTO persistent_yard_reservations (id, container_no, booking_code, block_code, bay, row_no, tier, size, status, data, updated_at)
+        VALUES (:id, :contId, :bookingCode, :blockCode, :bay, :rowNo, :tier, :size, 'reserved', :data, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          container_no = EXCLUDED.container_no,
+          booking_code = EXCLUDED.booking_code,
+          block_code = EXCLUDED.block_code,
+          bay = EXCLUDED.bay,
+          row_no = EXCLUDED.row_no,
+          tier = EXCLUDED.tier,
+          size = EXCLUDED.size,
+          status = EXCLUDED.status,
+          data = EXCLUDED.data,
+          updated_at = NOW();
+      `, {
+        replacements: {
+          id,
+          contId,
+          bookingCode,
+          blockCode,
+          bay,
+          rowNo,
+          tier,
+          size,
+          data: JSON.stringify(item),
+        }
+      });
+    } catch (err) {
+      console.warn('[YardReservations] DB write warning:', err.message);
+    }
   }
   res.status(201).json(item);
 });
-yardReservationsRoutes.delete('/:posId', (req, res) => {
+
+yardReservationsRoutes.delete('/:posId', async (req, res) => {
   reservationsStore = reservationsStore.filter(r => r.posId !== req.params.posId);
+  try {
+    await sequelize.query(`DELETE FROM persistent_yard_reservations WHERE id = :id OR data->>'posId' = :id`, {
+      replacements: { id: req.params.posId }
+    });
+  } catch (err) {
+    console.warn('[YardReservations] DB delete warning:', err.message);
+  }
   res.json({ success: true });
 });
-yardReservationsRoutes.delete('/container/:containerId', (req, res) => {
+
+yardReservationsRoutes.delete('/container/:containerId', async (req, res) => {
   const key = (req.params.containerId || '').trim().toUpperCase();
   reservationsStore = reservationsStore.filter(r => {
     const rCont = (r.containerId || r.containerNo || r.booking?.containerId || '').trim().toUpperCase();
     return rCont !== key;
   });
+  try {
+    await sequelize.query(`DELETE FROM persistent_yard_reservations WHERE container_no = :key OR id = :key`, {
+      replacements: { key }
+    });
+  } catch (err) {
+    console.warn('[YardReservations] DB delete warning:', err.message);
+  }
   res.json({ success: true });
 });
-yardReservationsRoutes.delete('/', (_req, res) => {
+
+yardReservationsRoutes.delete('/', async (_req, res) => {
   reservationsStore = [];
+  try {
+    await sequelize.query(`DELETE FROM persistent_yard_reservations`);
+  } catch (err) {
+    console.warn('[YardReservations] DB delete warning:', err.message);
+  }
   res.json({ success: true });
 });
 

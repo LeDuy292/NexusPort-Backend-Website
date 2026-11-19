@@ -5,6 +5,16 @@ namespace NexusPort.Modules.Yard.Infrastructure.Persistence;
 public class YardDbContext : DbContext
 {
     public DbSet<NexusPort.Modules.Yard.Domain.Entities.YardBlock> YardBlocks => Set<NexusPort.Modules.Yard.Domain.Entities.YardBlock>();
+    public DbSet<NexusPort.Modules.Yard.Domain.Entities.YardSlot> YardSlots => Set<NexusPort.Modules.Yard.Domain.Entities.YardSlot>();
+    public DbSet<NexusPort.Modules.Yard.Domain.Entities.ContainerPosition> ContainerPositions => Set<NexusPort.Modules.Yard.Domain.Entities.ContainerPosition>();
+    public DbSet<NexusPort.Modules.Yard.Preparation.Domain.PreparationTask> PreparationTasks => Set<NexusPort.Modules.Yard.Preparation.Domain.PreparationTask>();
+    public DbSet<NexusPort.Modules.Yard.Preparation.Domain.PreparationWorkOrder> PreparationWorkOrders => Set<NexusPort.Modules.Yard.Preparation.Domain.PreparationWorkOrder>();
+    public DbSet<NexusPort.Modules.Yard.Preparation.Domain.SlotReservation> SlotReservations => Set<NexusPort.Modules.Yard.Preparation.Domain.SlotReservation>();
+    public DbSet<NexusPort.Modules.Yard.Preparation.Domain.PreparationConfig> PreparationConfigs => Set<NexusPort.Modules.Yard.Preparation.Domain.PreparationConfig>();
+    public DbSet<NexusPort.Modules.Yard.Preparation.Domain.ContainerMovement> ContainerMovements => Set<NexusPort.Modules.Yard.Preparation.Domain.ContainerMovement>();
+    public DbSet<NexusPort.Modules.Yard.Preparation.Domain.EDoRecord> EDoRecords => Set<NexusPort.Modules.Yard.Preparation.Domain.EDoRecord>();
+    public DbSet<NexusPort.Modules.Yard.Preparation.Domain.ExceptionItem> ExceptionItems => Set<NexusPort.Modules.Yard.Preparation.Domain.ExceptionItem>();
+    public DbSet<NexusPort.Modules.Yard.Preparation.Domain.PreparationOutboxMessage> PreparationOutboxMessages => Set<NexusPort.Modules.Yard.Preparation.Domain.PreparationOutboxMessage>();
 
     public YardDbContext(DbContextOptions<YardDbContext> options) : base(options)
     {

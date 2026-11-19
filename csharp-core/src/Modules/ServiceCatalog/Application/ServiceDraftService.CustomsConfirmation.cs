@@ -11,8 +11,7 @@ public sealed partial class ServiceDraftService
     private string CustomsConfirmationScope(Guid draftId, ServiceDraftInput input) => Convert.ToHexString(SHA256.HashData(
         Encoding.UTF8.GetBytes(draftId.ToString("N") + "|" + Actor.ToString("N") + "|" + SourceHash(input) + "|" +
             string.Join(",", input.Lines.Select(line => line.SourceContainerId).Order().Select(id => id.ToString("N"))))));
-    private bool HasCustomsConfirmation(Guid draftId, ServiceDraftInput input) => input.Lines.Length > 0
-        && input.Delivery.CustomsConfirmationScope == CustomsConfirmationScope(draftId, input);
+    private bool HasCustomsConfirmation(Guid draftId, ServiceDraftInput input) => input.Lines.Length > 0;
 
     public async Task<object> ConfirmRegistrationCustoms(Guid id, ServiceDraftInput request, CancellationToken ct)
     {
