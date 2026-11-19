@@ -57,27 +57,27 @@ BEGIN
  SELECT id INTO admin_id FROM users WHERE is_active AND role IN ('Administrator','Admin') ORDER BY id LIMIT 1;
  IF admin_id IS NULL THEN RAISE EXCEPTION 'Existing admin attribution required; no accounts created'; END IF;
  PERFORM pg_advisory_xact_lock(hashtext('nexusport-demo-import-20261111'));
- FOR i IN 1..4 LOOP
-  size_code:=CASE WHEN i=3 THEN '40FT' ELSE '20FT' END;
-  equipment:=CASE WHEN i=4 THEN 'REEFER' ELSE 'DRY' END;
+ FOR i IN 1..(CASE WHEN pg_temp.import_demo_username()='carrier01' THEN 14 ELSE 4 END) LOOP
+  size_code:=CASE WHEN i IN (3,6,9,12) THEN '40FT' ELSE '20FT' END;
+  equipment:=CASE WHEN i IN (4,8,13) THEN 'REEFER' ELSE 'DRY' END;
   SELECT t.id INTO type_id FROM container_types t
    WHERE lower(t.size::text) IN (lower(size_code),CASE WHEN size_code='40FT' THEN 'ft40' ELSE 'ft20' END)
     AND lower(t.category::text)=CASE WHEN equipment='REEFER' THEN 'reefer' ELSE 'dry' END
    ORDER BY CASE WHEN t.code IN ('20GP','40GP','20RF') THEN 0 ELSE 1 END,t.id LIMIT 1;
   IF type_id IS NULL THEN RAISE EXCEPTION 'Existing container type missing for % %',size_code,equipment; END IF;
   physical:=pg_temp.import_demo_id(100+i);declaration:=pg_temp.import_demo_id(200+i);visit:=pg_temp.import_demo_id(300+i);
-  number:=pg_temp.import_demo_number((CASE WHEN profile_suffix='' THEN 611100 ELSE 611200 END)+i);cargo:=CASE WHEN i=4 THEN 'reefer' ELSE 'general' END;power:=CASE WHEN i=4 THEN 5 ELSE NULL END;
+  number:=pg_temp.import_demo_number((CASE WHEN profile_suffix='' THEN 611100 ELSE 611200 END)+i);cargo:=CASE WHEN equipment='REEFER' THEN 'reefer' ELSE 'general' END;power:=CASE WHEN equipment='REEFER' THEN 5 ELSE NULL END;
   PERFORM pg_temp.import_demo_insert('containers',jsonb_build_object('id',physical,'container_no',number,'container_type_id',type_id,
-   'status','in_yard','is_reefer',i=4,'tare_weight_kg',CASE WHEN i=3 THEN 3800 ELSE 2300 END,'max_gross_mass_kg',30480,
-   'iso_size_type',CASE WHEN i=4 THEN '22R1' WHEN i=3 THEN '42G1' ELSE '22G1' END),ARRAY['container_no','container_type_id']);
+   'status','in_yard','is_reefer',equipment='REEFER','tare_weight_kg',CASE WHEN size_code='40FT' THEN 3800 ELSE 2300 END,'max_gross_mass_kg',30480,
+   'iso_size_type',CASE WHEN equipment='REEFER' THEN '22R1' WHEN size_code='40FT' THEN '42G1' ELSE '22G1' END),ARRAY['container_no','container_type_id']);
   PERFORM pg_temp.import_demo_insert('container_declarations',jsonb_build_object('id',declaration,'container_id',physical,
-   'carrier_id',company_id,'declared_by',admin_id,'load_status','full','cargo_type',cargo,'gross_weight_kg',CASE WHEN i=3 THEN 27000 ELSE 22000 END,
+   'carrier_id',company_id,'declared_by',admin_id,'load_status','full','cargo_type',cargo,'gross_weight_kg',CASE WHEN size_code='40FT' THEN 27000 ELSE 22000 END,
    'required_power_kw',power,'customer_name','DEMO IMPORT - '||company_name,'seal_number','DEMO-IMP-0'||i),ARRAY['container_id','carrier_id','load_status','cargo_type']);
   PERFORM pg_temp.import_demo_insert('container_visits',jsonb_build_object('id',visit,'visit_reference','DEMO-SVC-IMPORT'||profile_suffix||'-0'||i,
    'container_id',physical,'declaration_id',declaration,'visit_status','active','load_status','full','cargo_type',cargo,
    'source_type','port_vessel','movement_type','vessel_discharge','data_status','verified','source_reference','DEMO-EPORT-IMPORT-20261111'||profile_suffix,
    'bl_booking_no','DEMO-BL-IMPORT-20261111'||profile_suffix,'customer_name','DEMO IMPORT - '||company_name,'declared_by',admin_id,
-   'seal_number','DEMO-IMP-0'||i,'gross_weight_kg',CASE WHEN i=3 THEN 27000 ELSE 22000 END,'required_power_kw',power,
+   'seal_number','DEMO-IMP-0'||i,'gross_weight_kg',CASE WHEN size_code='40FT' THEN 27000 ELSE 22000 END,'required_power_kw',power,
    'started_at',now()-interval '1 day','expected_arrival_at',now()-interval '2 days','expected_available_at',now()-interval '12 hours',
    'valid_to',now()+interval '30 days'),ARRAY['container_id','declaration_id','source_type','movement_type','source_reference']);
   INSERT INTO container_visit_access(container_visit_id,carrier_id,granted_by) VALUES(visit,company_id,admin_id) ON CONFLICT DO NOTHING;
