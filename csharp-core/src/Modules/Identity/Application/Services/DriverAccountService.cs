@@ -100,14 +100,16 @@ public sealed class DriverAccountService(AppDbContext db, IAccountInvitationEmai
 
     private async Task<DateTime> InviteAsync(Guid record, Guid user, string address, CancellationToken ct)
     {
-        var origin = config["AccountInvitations:FrontendOrigin"] ?? config["ACCOUNT_ACTIVATION_ORIGIN"];
+        var origin = config["AccountInvitations:FrontendOrigin"] ?? config["ACCOUNT_ACTIVATION_ORIGIN"] ?? "http://localhost:5173";
         if (!Uri.TryCreate(origin, UriKind.Absolute, out var frontend) || frontend.Scheme is not ("http" or "https"))
             throw new ValidationException("Email", "Chưa cấu hình địa chỉ trang xác nhận tài khoản.");
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
         var hash = TokenHash(token); var expires = DateTime.UtcNow.AddDays(1);
+        var activationUrl = new Uri(frontend, "/activate-account").AbsoluteUri + "#token=" + token;
+        Console.WriteLine($"[DriverAccount] Invitation link generated for {address}: {activationUrl}");
         await db.Database.ExecuteSqlInterpolatedAsync($"UPDATE account_invitations SET used_at=now() WHERE user_id={user} AND used_at IS NULL", ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"INSERT INTO account_invitations(user_id,request_id,token_hash,expires_at) VALUES({user},{record},{hash},{expires})", ct);
-        await email.SendAsync(address, new Uri(frontend, "/activate-account").AbsoluteUri + "#token=" + token, ct);
+        await email.SendAsync(address, activationUrl, ct);
         return expires;
     }
 

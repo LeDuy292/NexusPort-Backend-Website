@@ -114,6 +114,7 @@ function blToRow(b) {
     status: b.status,
     source_type: b.sourceType,
     source_reference: b.sourceReference,
+    booking_no: b.bookingNo,
     issue_date: toDb(b.issueDate),
     attached_files: JSON.stringify(b.attachedFiles || []),
     containers: JSON.stringify(b.containers || []),

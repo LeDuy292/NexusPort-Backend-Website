@@ -76,9 +76,10 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
             SELECT b.id,b.booking_no AS "bookingNumber",
                 COALESCE(NULLIF(b.bl_number,''), 'BL-' || b.booking_no) AS "blNumber",
                 v.vessel_name AS "vesselName",v.voyage_number AS "voyageNumber",
-                COALESCE(b.port_of_discharge,v.port_of_discharge,'Singapore') AS "portOfDischarge",
+                COALESCE(b.port_of_discharge,v.port_of_discharge) AS "portOfDischarge",
                 COALESCE(v.port_of_loading,'Cảng Tiên Sa') AS "portOfLoading",
-                'Evergreen Line (EMC)'::text AS "operatorName",
+                COALESCE((SELECT l.full_name FROM shipping_lines l WHERE l.id=b.shipping_line_id),
+                         (SELECT u.full_name FROM users u WHERE u.id=b.line_user_id),'—') AS "operatorName",
                 v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",
                 v.etd AS "etd",v.eta AS "eta",count(e.id)::int AS "containerCount"
             """ + ExportJoins + " WHERE b.id=@p0 AND " + ExportEligible + """
@@ -95,41 +96,28 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         {
             var p = manifestRows[0]["payload"]?.AsObject();
             var bNum = p?["bookingNumber"]?.ToString() ?? p?["manifestNumber"]?.ToString() ?? id.ToString();
-            var contCount = p?["containers"]?.AsArray()?.Count ?? p?["records"]?.AsArray()?.Count ?? 3;
+            var contCount = p?["containers"]?.AsArray()?.Count ?? p?["records"]?.AsArray()?.Count ?? 0;
             return new JsonObject
             {
                 ["id"] = id.ToString(),
                 ["bookingNumber"] = bNum,
                 ["blNumber"] = p?["blNumber"]?.ToString() ?? ("BL-" + bNum),
-                ["vesselName"] = p?["vesselName"]?.ToString() ?? "ONE CONTINUITY",
-                ["voyageNumber"] = p?["voyageNumber"]?.ToString() ?? "OC-2612E",
-                ["portOfDischarge"] = p?["pod"]?.ToString() ?? "Singapore",
+                ["vesselName"] = p?["vesselName"]?.ToString(),
+                ["voyageNumber"] = p?["voyageNumber"]?.ToString(),
+                ["portOfDischarge"] = p?["pod"]?.ToString(),
                 ["portOfLoading"] = p?["pol"]?.ToString() ?? "Cảng Tiên Sa",
-                ["operatorName"] = p?["shippingLine"]?.ToString() ?? "Evergreen Line (EMC)",
-                ["eta"] = p?["eta"]?.ToString() ?? "2026-11-25T08:00:00Z",
-                ["cyCutoff"] = p?["cyCutoff"]?.ToString() ?? "2026-11-25T18:00:00Z",
-                ["receiveFrom"] = "2026-11-18T00:00:00Z",
+                ["operatorName"] = p?["shippingLine"]?.ToString(),
+                ["eta"] = p?["eta"]?.ToString(),
+                ["cyCutoff"] = p?["cyCutoff"]?.ToString(),
+                ["receiveFrom"] = p?["receiveFrom"]?.ToString(),
                 ["containerCount"] = contCount,
                 ["verificationStatus"] = "SOURCE_LINKED"
             };
         }
 
-        return new JsonObject
-        {
-            ["id"] = id.ToString(),
-            ["bookingNumber"] = "BK-OC2612E",
-            ["blNumber"] = "BL-OC2612E-1903",
-            ["vesselName"] = "ONE CONTINUITY",
-            ["voyageNumber"] = "OC-2612E",
-            ["portOfDischarge"] = "Tokyo, Japan",
-            ["portOfLoading"] = "Cảng Tiên Sa",
-            ["operatorName"] = "Evergreen Line (EMC)",
-            ["eta"] = "2026-11-25T08:00:00Z",
-            ["cyCutoff"] = "2026-11-25T18:00:00Z",
-            ["receiveFrom"] = "2026-11-18T00:00:00Z",
-            ["containerCount"] = 3,
-            ["verificationStatus"] = "SOURCE_LINKED"
-        };
+        // Không có Booking thật thì không cho đăng ký dịch vụ (không trả về Booking mẫu).
+        Require(false, "Không tìm thấy Booking hợp lệ của công ty để đăng ký dịch vụ.", 404, "SERVICE_SOURCE_NOT_FOUND");
+        return null!;
     }
 
     public async Task<object> Sources(string flow, string? search, CancellationToken ct)
@@ -178,9 +166,10 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
             SELECT b.id,b.booking_no AS "bookingNumber",
                 COALESCE(NULLIF(b.bl_number,''), 'BL-' || b.booking_no) AS "blNumber",
                 v.vessel_name AS "vesselName",v.voyage_number AS "voyageNumber",
-                COALESCE(b.port_of_discharge,v.port_of_discharge,'Singapore') AS "portOfDischarge",
+                COALESCE(b.port_of_discharge,v.port_of_discharge) AS "portOfDischarge",
                 COALESCE(v.port_of_loading,'Cảng Tiên Sa') AS "portOfLoading",
-                'Evergreen Line (EMC)'::text AS "operatorName",
+                COALESCE((SELECT l.full_name FROM shipping_lines l WHERE l.id=b.shipping_line_id),
+                         (SELECT u.full_name FROM users u WHERE u.id=b.line_user_id),'—') AS "operatorName",
                 v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",
                 v.etd AS "etd",v.eta AS "eta",count(e.id)::int AS "containerCount"
             """ + ExportJoins + " WHERE " + ExportEligible + """
@@ -237,7 +226,7 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                             ["hasValidVgm"] = true,
                             ["isHeld"] = false,
                             ["hasActiveOrder"] = false,
-                            ["destinationPort"] = p?["pod"]?.ToString() ?? "Singapore"
+                            ["destinationPort"] = p?["pod"]?.ToString()
                         });
                     }
                     return results;
@@ -250,9 +239,10 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                     'EXPORT'::text AS flow,b.id AS "bookingId",
                     e.type_code AS "typeCode",'full'::text AS "loadStatus",e.cargo_type::text AS "cargoType",
                     e.seal_number AS "sealNumber",e.vgm_kg AS "vgmKg",e.target_temperature AS "targetTemperature",e.un_number AS "unNumber",e.dg_class AS "dgClass",
-                    'Evergreen Line (EMC)'::text AS "operatorName",
+                    COALESCE((SELECT l.full_name FROM shipping_lines l WHERE l.id=b.shipping_line_id),
+                         (SELECT u.full_name FROM users u WHERE u.id=b.line_user_id),'—') AS "operatorName",
                     COALESCE(v.port_of_discharge,b.port_of_discharge,'Tokyo, Japan') AS "dischargePort",
-                    COALESCE(b.port_of_discharge,v.port_of_discharge,'Tokyo, Japan') AS "destinationPort",
+                    COALESCE(b.port_of_discharge,v.port_of_discharge) AS "destinationPort",
                     (e.vgm_kg IS NOT NULL AND e.vgm_kg > 0) AS "hasValidVgm",
                     (regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe')) AS "isHeld",
                     false AS "hasActiveOrder"

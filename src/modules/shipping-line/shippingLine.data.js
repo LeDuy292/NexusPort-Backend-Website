@@ -118,25 +118,6 @@ let voyages = [
     manifestCount: 1,
     containerCount: 250,
   },
-  {
-    id: 'voy-04',
-    voyageNumber: 'MM-2601S',
-    vesselId: 'ves-04',
-    vesselName: 'MAERSK MC-KINNEY MOLLER',
-    pol: 'Hải Phòng (VNHPH)',
-    pod: 'Tanjung Pelepas, Malaysia (MYTPP)',
-    eta: '2026-11-06 10:00',
-    etd: '2026-11-07 15:00',
-    ata: '2026-11-06 09:30',
-    atd: null,
-    cyCutOff: '2026-11-06 04:00',
-    vgmCutOff: '2026-11-05 22:00',
-    status: 'OPERATING',
-    terminal: 'Cảng Quốc tế Lạch Huyện (HICT)',
-    remarks: 'Đang dỡ hàng nhập khẩu, tiến độ 65%',
-    manifestCount: 1,
-    containerCount: 580,
-  },
 ];
 
 // Lịch sử điều chỉnh Cut-off của chuyến tàu

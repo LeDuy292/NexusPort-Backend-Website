@@ -41,12 +41,16 @@ const normalizeTargetUrl = (url, fallback) => {
 
 const csharpTarget = normalizeTargetUrl(
   process.env.CSHARP_CORE_URL || process.env.RAILWAY_SERVICE_CSHARP_CORE_URL,
-  'https://csharp-core-production.up.railway.app'
+  process.env.NODE_ENV === 'production'
+    ? 'https://csharp-core-production.up.railway.app'
+    : 'http://localhost:5000'
 );
 
 const nodeCoreTarget = normalizeTargetUrl(
   process.env.NODE_CORE_URL || process.env.RAILWAY_SERVICE_NODE_CORE_URL,
-  'https://node-core-production.up.railway.app'
+  process.env.NODE_ENV === 'production'
+    ? 'https://node-core-production.up.railway.app'
+    : 'http://localhost:4000'
 );
 
 const csharpProxy = createProxyMiddleware({
