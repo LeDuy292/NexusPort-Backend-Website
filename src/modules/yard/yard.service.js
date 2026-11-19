@@ -265,6 +265,53 @@ async function ensureInitialData() {
 }
 
 /**
+ * Tạo danh sách key chuẩn hóa cho cột stack ô bãi để đối soát chính xác 100% giữa
+ * Sơ đồ Bản đồ Bãi 2D (A, B, C, D) và Lệnh xuất bãi (A01, B02, B04).
+ */
+function getNormalizedSlotKeys(block, bay, row) {
+  const b = String(block || 'B').trim().toUpperCase();
+  const bayNum = parseInt(bay, 10);
+  const rowNum = parseInt(row, 10);
+  const keys = new Set();
+  keys.add(`${b}:${bayNum}:${rowNum}`);
+  const letter = b.replace(/[^A-Z]/g, '');
+  if (letter) {
+    keys.add(`${letter}:${bayNum}:${rowNum}`);
+    const numPart = b.replace(/^[A-Z]+/, '');
+    if (numPart) {
+      keys.add(`${letter}${numPart.padStart(2, '0')}:${bayNum}:${rowNum}`);
+    }
+  }
+  return Array.from(keys);
+}
+
+function buildSlotMap(snapshot) {
+  const slotMap = new Map();
+  for (const s of (snapshot?.slots || [])) {
+    if (s.containerNumber || s.containerId) {
+      const keys = getNormalizedSlotKeys(s.block, s.bay, s.row);
+      for (const k of keys) {
+        if (!slotMap.has(k)) slotMap.set(k, new Map());
+        slotMap.get(k).set(Number(s.tier), s);
+      }
+    }
+  }
+  return slotMap;
+}
+
+function lookupSlotMap(slotMap, block, bay, row) {
+  if (!slotMap) return [];
+  const keys = getNormalizedSlotKeys(block, bay, row);
+  for (const k of keys) {
+    if (slotMap.has(k)) {
+      const tierMap = slotMap.get(k);
+      return tierMap instanceof Map ? Array.from(tierMap.values()) : tierMap;
+    }
+  }
+  return [];
+}
+
+/**
  * Lấy danh sách yêu cầu xuất / chuẩn bị container bãi (Hỗ trợ Chiều Nhập 5A và Chiều Xuất 5B).
  * @param {Object} query - { direction, status, search, urgency, vessel, page, limit }
  */
@@ -325,19 +372,7 @@ async function getGateOutRequests({ direction = 'inbound', status, search, urgen
   try {
     const { getLayoutSnapshot } = require('./yard-layout');
     const snapshot = await getLayoutSnapshot();
-    slotMap = new Map();
-    for (const s of (snapshot?.slots || [])) {
-      if (s.containerNumber || s.containerId) {
-        const k1 = `${s.block}:${s.bay}:${s.row}`;
-        const k2 = `${String(s.block).replace(/^B0?/, 'B')}:${s.bay}:${s.row}`;
-        if (!slotMap.has(k1)) slotMap.set(k1, new Map());
-        slotMap.get(k1).set(s.tier, s);
-        if (k1 !== k2) {
-          if (!slotMap.has(k2)) slotMap.set(k2, new Map());
-          slotMap.get(k2).set(s.tier, s);
-        }
-      }
-    }
+    slotMap = buildSlotMap(snapshot);
   } catch (err) {
     console.warn('[getGateOutRequests] Failed to build slotMap:', err.message);
   }
@@ -518,19 +553,7 @@ async function getGateOutRequestById(id) {
   try {
     const { getLayoutSnapshot } = require('./yard-layout');
     const snapshot = await getLayoutSnapshot();
-    slotMap = new Map();
-    for (const s of (snapshot?.slots || [])) {
-      if (s.containerNumber || s.containerId) {
-        const k1 = `${s.block}:${s.bay}:${s.row}`;
-        const k2 = `${String(s.block).replace(/^B0?/, 'B')}:${s.bay}:${s.row}`;
-        if (!slotMap.has(k1)) slotMap.set(k1, new Map());
-        slotMap.get(k1).set(s.tier, s);
-        if (k1 !== k2) {
-          if (!slotMap.has(k2)) slotMap.set(k2, new Map());
-          slotMap.get(k2).set(s.tier, s);
-        }
-      }
-    }
+    slotMap = buildSlotMap(snapshot);
   } catch (err) {
     console.warn('[getGateOutRequestById] Failed to build slotMap:', err.message);
   }
@@ -774,10 +797,7 @@ function formatGateOutRequest(req, slotMap) {
   const row = parseInt(req.yard_row, 10);
 
   if (slotMap && !isNaN(bay) && !isNaN(row)) {
-    const key1 = `${blk}:${bay}:${row}`;
-    const key2 = `${String(blk).replace(/^B0?/, 'B')}:${bay}:${row}`;
-    const tierMap = slotMap.get(key1) || slotMap.get(key2);
-    const matchedSlots = tierMap ? (tierMap instanceof Map ? Array.from(tierMap.values()) : tierMap) : [];
+    const matchedSlots = lookupSlotMap(slotMap, blk, bay, row);
 
     if (matchedSlots.length > 0) {
       // Dùng dữ liệu các tầng thực tế trên sơ đồ bãi 2D
