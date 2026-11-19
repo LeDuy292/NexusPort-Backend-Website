@@ -47,4 +47,14 @@ describe('Driver route after Gate-In PASS', () => {
     await expect(new DriverRouteService(repository).get(driverId, row.containerId))
       .rejects.toMatchObject({ statusCode: 404, errorCode: 'DRIVER_ROUTE_NOT_FOUND' });
   });
+
+  it('loads the dispatcher map for the selected booking and keeps all its containers', async () => {
+    const secondContainer = { ...row, containerId: '66666666-6666-4666-8666-666666666666' };
+    const repository = { findForDispatcher: jest.fn().mockResolvedValue([row, secondContainer]) } as unknown as DriverRouteRepository;
+    const result = await new DriverRouteService(repository, navigation).monitor(row.bookingId);
+
+    expect(repository.findForDispatcher).toHaveBeenCalledWith(row.bookingId);
+    expect(result.routes.map(route => [route.bookingId, route.containerId]))
+      .toEqual([[row.bookingId, row.containerId], [row.bookingId, secondContainer.containerId]]);
+  });
 });

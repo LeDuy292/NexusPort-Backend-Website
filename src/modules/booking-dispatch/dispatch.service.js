@@ -3,41 +3,17 @@ const { QueryTypes } = require('sequelize');
 const { sequelize } = require('../../config/database');
 const { BOOKING_FIELDS } = require('../driver-bookings/driver-bookings.service');
 const { POLICY, fail, activeBooking, decorate, checkArrival, checkCall, expectedVersion } = require('./dispatch.policy');
+const { getNewManifestAppointment } = require('./manifest-appointment');
 const admission = require('./yard-admission');
 const query = (sql, replacements = {}, transaction) => sequelize.query(sql, { replacements, transaction, type: QueryTypes.SELECT });
 
 const DEFAULT_CARRIER_ID = 'c1010101-0000-0000-0000-000000000001';
-const vnDateString = (value = new Date()) => new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(value));
 const normalizePlate = s => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
-async function ensureHandoverMapNodes() {
-  const maps = await query('SELECT id, map_data FROM smart_yard_maps WHERE is_active = true LIMIT 1');
-  if (!maps.length || !maps[0].map_data) return;
-  const mapData = maps[0].map_data;
-  const nodes = Array.isArray(mapData.nodes) ? [...mapData.nodes] : [];
-  const existingLocs = new Set(nodes.map(n => n && n.location).filter(Boolean));
-  let changed = false;
-  if (!existingLocs.has('A-S1')) {
-    nodes.push({ id: 'tsa:handover:A-S1', x: 835, y: 1210, label: 'Điểm giao nhận A-S1', location: 'A-S1', restricted: false });
-    changed = true;
-  }
-  if (!existingLocs.has('A-S2')) {
-    nodes.push({ id: 'tsa:handover:A-S2', x: 772, y: 1210, label: 'Điểm giao nhận A-S2', location: 'A-S2', restricted: false });
-    changed = true;
-  }
-  if (changed) {
-    await sequelize.query('UPDATE smart_yard_maps SET map_data = :mapData::jsonb WHERE id = :id', {
-      replacements: { id: maps[0].id, mapData: JSON.stringify({ ...mapData, nodes }) },
-      type: QueryTypes.UPDATE,
-      logging: false,
-    });
-  }
-}
-
-async function syncSingleManifestBooking(gb, targetDate, context) {
+async function syncSingleManifestBooking(gb, context) {
   const { carriers, drivers, trucks, containerTypes, containerTypeIds } = context;
   const bookingCode = String(gb.id || gb.bookingCode || '').trim();
-  if (!bookingCode) return false;
+  if (!bookingCode) return;
 
   const gbStatus = String(gb.status || '').toLowerCase();
   const plateRaw = String(gb.licensePlate || gb.vehiclePlate || gb.suggestedPlate || gb.vehicleSnapshot?.plateNumber || '').trim();
@@ -49,34 +25,28 @@ async function syncSingleManifestBooking(gb, targetDate, context) {
        WHERE booking_code = :bookingCode AND status::text IN ('pending','approved','ready')`,
       { replacements: { bookingCode }, type: QueryTypes.UPDATE, logging: false }
     );
-    return false;
+    return;
   }
 
   const isEligible = ['ready', 'approved'].includes(gbStatus) ||
     gb.portBillPaid === true ||
     String(gb.paymentStatus || '').toLowerCase() === 'paid';
-  if (!isEligible || !driverRaw || !plateRaw) return false;
-
-  let payloadDirty = false;
-  const refDateSource = gb.paidAt || gb.approvedAt || targetDate || vnDateString();
-  const effectiveDateStr = /^\d{4}-\d{2}-\d{2}$/.test(String(refDateSource))
-    ? String(refDateSource)
-    : vnDateString(refDateSource);
-  if (typeof gb.eta === 'string' && gb.eta.startsWith('2026-11-10')) {
-    const timePart = (gb.eta.split('T')[1] || '08:30:00').replace(/[Zz]|([+-]\d{2}:\d{2})$/, '');
-    gb.eta = `${effectiveDateStr}T${timePart}+07:00`;
-    payloadDirty = true;
-  }
-
-  let rawStart = gb.appointmentStart || gb.eta;
-  if (typeof rawStart === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(rawStart)) {
-    rawStart = `${rawStart}+07:00`;
-  }
-  let startMs = rawStart ? Date.parse(rawStart) : Date.now();
-  if (!Number.isFinite(startMs)) startMs = Date.now();
+  if (!isEligible || !driverRaw) return;
 
   await sequelize.transaction({ logging: false }, async transaction => {
     const tQuery = (sql, replacements = {}) => query(sql, replacements, transaction);
+
+    const [existing] = await tQuery(
+      `SELECT id, carrier_id, driver_id, truck_id, vehicle_plate, driver_name, booking_type::text AS booking_type,
+              status::text AS status, appointment_start, description, gate_type
+       FROM bookings WHERE booking_code = :bookingCode LIMIT 1 FOR UPDATE`,
+      { bookingCode }
+    );
+    if (existing && ['checked_in', 'completed'].includes(existing.status)) return;
+    // A registered appointment belongs to Booking. Only the explicit rescheduling flow can edit it.
+    const newAppointment = existing ? null : await getNewManifestAppointment(gb, tQuery);
+    if (!existing && !newAppointment) return;
+    const startMs = existing ? new Date(existing.appointment_start).getTime() : newAppointment.start.getTime();
 
     const matchedCarrier = carriers.find(c =>
       c.id === gb.companyId ||
@@ -115,8 +85,8 @@ async function syncSingleManifestBooking(gb, targetDate, context) {
     );
     if (!truck) {
       const [insertedTruck] = await tQuery(
-        `INSERT INTO trucks (carrier_id, plate_number, status)
-         VALUES (:carrierId, :plateNumber, 'active')
+        `INSERT INTO trucks (carrier_id, plate_number, vehicle_type, status)
+         VALUES (:carrierId, :plateNumber, 'ROAD_TRUCK', 'active')
          RETURNING id, carrier_id, plate_number`,
         {
           carrierId: driver.carrier_id || fallbackCarrierId,
@@ -128,17 +98,7 @@ async function syncSingleManifestBooking(gb, targetDate, context) {
     }
 
     const carrierId = driver.carrier_id || truck.carrier_id || fallbackCarrierId;
-    const existingRows = await tQuery(
-      `SELECT id, carrier_id, driver_id, truck_id, vehicle_plate, driver_name, booking_type::text AS booking_type,
-              status::text AS status, appointment_start, appointment_end, description
-       FROM bookings WHERE booking_code = :bookingCode LIMIT 1 FOR UPDATE`,
-      { bookingCode }
-    );
-    const existing = existingRows[0] || null;
-    if (existing && ['checked_in', 'completed'].includes(existing.status)) return;
-
     const containerNo = String(gb.containerId || gb.containerNumber || '').trim().toUpperCase();
-    let minAllowedStartMs = startMs;
     const bookingType = (gb.direction === 'IMPORT' || gb.operation === 'Pickup') ? 'pickup' : 'dropoff';
 
     let cont = null;
@@ -167,32 +127,6 @@ async function syncSingleManifestBooking(gb, targetDate, context) {
           { containerId: cont.id, existingId: existing?.id || null }
         );
         reusableVisit = visits[0] || null;
-        if (reusableVisit?.inbound_end) {
-          const inbMs = Date.parse(reusableVisit.inbound_end);
-          if (Number.isFinite(inbMs) && minAllowedStartMs < inbMs) minAllowedStartMs = inbMs + 5 * 60000;
-        }
-      }
-    }
-
-    startMs = minAllowedStartMs;
-    let startDateObj = new Date(startMs);
-    let endDateObj = new Date(startMs + 90 * 60000);
-
-    const busyRows = await tQuery(
-      `SELECT appointment_start, appointment_end FROM bookings
-       WHERE (:existingId::uuid IS NULL OR id <> :existingId::uuid)
-         AND status::text NOT IN ('canceled','rejected','expired','completed')
-         AND (driver_id = :driverId OR truck_id = :truckId)
-       ORDER BY appointment_start`,
-      { existingId: existing?.id || null, driverId: driver.id, truckId: truck.id }
-    );
-    for (const br of busyRows) {
-      const bStart = Date.parse(br.appointment_start);
-      const bEnd = Date.parse(br.appointment_end);
-      if (startMs < bEnd && endDateObj.getTime() > bStart) {
-        startMs = bEnd + 5 * 60000;
-        startDateObj = new Date(startMs);
-        endDateObj = new Date(startMs + 90 * 60000);
       }
     }
 
@@ -223,8 +157,8 @@ async function syncSingleManifestBooking(gb, targetDate, context) {
           bookingCode,
           bookingType,
           status: bookingStatus,
-          appointmentStart: startDateObj,
-          appointmentEnd: endDateObj,
+          appointmentStart: newAppointment.start,
+          appointmentEnd: newAppointment.end,
           gateType,
           description,
         }
@@ -236,17 +170,15 @@ async function syncSingleManifestBooking(gb, targetDate, context) {
         existing.truck_id !== truck.id ||
         existing.status !== bookingStatus ||
         existing.booking_type !== bookingType ||
-        existing.description !== description ||
-        Math.abs(Date.parse(existing.appointment_start) - startDateObj.getTime()) > 60000;
+        existing.description !== description;
       if (needsUpdate) {
         await tQuery(
           `UPDATE bookings
            SET carrier_id = :carrierId, driver_id = :driverId, truck_id = :truckId, vehicle_id = :truckId,
                vehicle_plate = :vehiclePlate, driver_name = :driverName,
                booking_type = :bookingType::booking_type, status = :status::booking_status,
-               appointment_start = :appointmentStart, appointment_end = :appointmentEnd,
                gate_type = :gateType, description = :description,
-               approved_at = COALESCE(approved_at, now()), valid_from = :appointmentStart, valid_to = :appointmentEnd, updated_at = now()
+               approved_at = COALESCE(approved_at, now()), updated_at = now()
            WHERE id = :bookingId`,
           {
             bookingId,
@@ -257,8 +189,6 @@ async function syncSingleManifestBooking(gb, targetDate, context) {
             driverName: driver.full_name || driverRaw,
             bookingType,
             status: bookingStatus,
-            appointmentStart: startDateObj,
-            appointmentEnd: endDateObj,
             gateType,
             description,
           }
@@ -362,44 +292,16 @@ async function syncSingleManifestBooking(gb, targetDate, context) {
       }
     }
 
-    const dsRows = await tQuery('SELECT status, action, version FROM booking_dispatch_state WHERE booking_id = :bookingId', { bookingId });
-    if (!dsRows.length || dsRows[0].status === 'withdrawn') {
-      const nextVer = dsRows.length ? Number(dsRows[0].version || 0) + 1 : 1;
-      await tQuery(
-        `INSERT INTO booking_dispatch_state
-          (booking_id, driver_id, status, action, arrived_at, ready_at, called_at, call_expires_at,
-           acknowledged_at, hold_until, message, version, updated_at)
-         VALUES (:bookingId, :driverId, 'ready', 'released', :arrivedAt, now(), NULL, NULL, NULL, NULL,
-           'Sẵn sàng vào cảng · chờ điều độ gọi xe.', :version, now())
-         ON CONFLICT (booking_id) DO UPDATE SET
-           driver_id = EXCLUDED.driver_id,
-           status = 'ready',
-           action = 'released',
-           arrived_at = EXCLUDED.arrived_at,
-           ready_at = now(),
-           called_at = NULL,
-           call_expires_at = NULL,
-           acknowledged_at = NULL,
-           hold_until = NULL,
-           message = EXCLUDED.message,
-           version = booking_dispatch_state.version + 1,
-           updated_at = now()
-         RETURNING booking_id`,
-        { bookingId, driverId: driver.id, arrivedAt: startDateObj, version: nextVer }
-      );
-    }
   });
-
-  return payloadDirty;
 }
 
-async function syncManifestGateBookings(targetDate) {
+async function syncManifestGateBookings() {
   if (process.env.NODE_ENV === 'test') return;
   try {
-    await ensureHandoverMapNodes();
     const [manifests, carriers, drivers, trucks, containerTypeRows] = await Promise.all([
-      query(`SELECT id, payload FROM shipping_manifests
-             WHERE payload->>'portApprovalStatus' = 'PORT_APPROVED' OR payload->>'status' = 'PORT_APPROVED'`),
+      query(`SELECT payload->'generatedBookings' AS bookings FROM shipping_manifests
+             WHERE (payload->>'portApprovalStatus' = 'PORT_APPROVED' OR payload->>'status' = 'PORT_APPROVED')
+               AND jsonb_typeof(payload->'generatedBookings')='array' AND payload->'generatedBookings'<>'[]'::jsonb`),
       query('SELECT id, company_name FROM carriers'),
       query('SELECT id, carrier_id, full_name, license_number, phone FROM drivers'),
       query('SELECT id, carrier_id, plate_number FROM trucks'),
@@ -415,49 +317,17 @@ async function syncManifestGateBookings(targetDate) {
 
     const context = { carriers, drivers, trucks, containerTypes, containerTypeIds };
     for (const manifest of manifests) {
-      const payload = manifest.payload || {};
-      const gbs = Array.isArray(payload.generatedBookings) ? payload.generatedBookings : [];
-      let manifestDirty = false;
-      for (const gb of gbs) {
+      for (const gb of manifest.bookings) {
         try {
-          const dirty = await syncSingleManifestBooking(gb, targetDate, context);
-          if (dirty) manifestDirty = true;
+          await syncSingleManifestBooking(gb, context);
         } catch (err) {
           console.warn('[syncManifestGateBookings] Booking sync skipped:', gb?.id, err.message);
         }
-      }
-      if (manifestDirty) {
-        await sequelize.query('UPDATE shipping_manifests SET payload = :payload::jsonb WHERE id = :id', {
-          replacements: { id: manifest.id, payload: JSON.stringify(payload) },
-          type: QueryTypes.UPDATE,
-          logging: false,
-        });
       }
     }
   } catch (err) {
     console.warn('[syncManifestGateBookings] Error:', err.message);
   }
-}
-
-async function getBoard(date) {
-  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(Date.parse(date))
-    || new Date(date).toISOString().slice(0,10) !== date) {
-    throw fail('Ngày điều phối không hợp lệ (YYYY-MM-DD).', 422);
-  }
-  await syncManifestGateBookings(date);
-  const bookings = await query(BOOKING_FIELDS + `
-    WHERE b.status::text IN ('approved','ready') AND
-      ((b.appointment_start < ((CAST(:date AS date)+1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh')
-        AND b.appointment_end > (CAST(:date AS date)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'))
-       OR (ds.status IN ('arrived','ready','called','acknowledged') AND ds.updated_at>now()-interval '24 hours'))
-    ORDER BY b.appointment_start,b.created_at LIMIT 300`, { date });
-  const now = new Date();
-  const items = bookings.map(b => decorate(b, now));
-  items.sort((a, b) => Number(b.coordination.canCall) - Number(a.coordination.canCall)
-    || Number(a.coordination.isLate || a.dispatch?.action==='call_expired') - Number(b.coordination.isLate || b.dispatch?.action==='call_expired')
-    || Date.parse(a.appointmentStart) - Date.parse(b.appointmentStart)
-    || Date.parse(a.createdAt) - Date.parse(b.createdAt));
-  return { bookings: items, serverTime: now.toISOString(), policy: POLICY, yard: await admission.snapshot() };
 }
 
 async function act(userId, role, bookingId, action, input = {}) {
@@ -491,7 +361,7 @@ async function act(userId, role, bookingId, action, input = {}) {
         status = 'ready'; readyAt = now;
       } else if (action === 'acknowledge' && decorate(raw, now).coordination.canAcknowledge) {
         status = 'acknowledged'; acknowledgedAt = now;
-        message = 'Tài xế đã nhận lệnh gọi. Chờ hướng dẫn và kiểm tra tại cổng.';
+        message = 'Lệnh vào cổng đã có hiệu lực tại GATE-01. Làm theo hướng dẫn và kiểm tra tại cổng.';
       } else throw fail('Không thể thực hiện thao tác ở trạng thái hiện tại.');
     } else {
       if (!['Dispatcher','Administrator'].includes(role)) throw fail('Không có quyền điều phối.', 403);
@@ -543,7 +413,13 @@ async function act(userId, role, bookingId, action, input = {}) {
       acknowledgedAt, holdUntil, message, nextVersion: version + 1, userId, now,
     }, transaction);
     const [updated] = await query(BOOKING_FIELDS + ' WHERE b.id=:bookingId', { bookingId }, transaction);
+    if (action === 'call' && updated.gateEntryOrder?.status !== 'pending_ack') {
+      throw fail('Chưa tạo được lệnh vào cổng. Vui lòng tải lại và gọi xe lại.');
+    }
+    if (action === 'acknowledge' && updated.gateEntryOrder?.status !== 'active') {
+      throw fail('Lệnh vào cổng không còn hiệu lực. Vui lòng yêu cầu điều độ gọi lại.');
+    }
     return decorate(updated);
   });
 }
-module.exports = { getBoard, act, syncManifestGateBookings };
+module.exports = { act, syncManifestGateBookings };

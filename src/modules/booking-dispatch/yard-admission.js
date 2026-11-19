@@ -5,9 +5,10 @@ const { fail } = require('./dispatch.policy');
 const read = (sql, replacements = {}, transaction) => sequelize.query(sql, {
   replacements, transaction, type: QueryTypes.SELECT, logging: false,
 });
+const DEFAULT_CAPACITY = 30;
 const capacity = () => {
-  const value = Number(process.env.YARD_VEHICLE_CAPACITY || 6);
-  return Number.isInteger(value) && value > 0 && value <= 1000 ? value : 6;
+  const value = Number(process.env.YARD_VEHICLE_CAPACITY || DEFAULT_CAPACITY);
+  return Number.isInteger(value) && value > 0 && value <= 1000 ? value : DEFAULT_CAPACITY;
 };
 const automatic = () => process.env.YARD_AUTO_ADMISSION !== 'false';
 // A booking occupies one place throughout invitation -> passage -> Gate Out.
@@ -22,10 +23,13 @@ const occupancySql = `WITH inside AS (
 ), occupied AS (SELECT booking_id FROM inside UNION SELECT booking_id FROM reserved)
 SELECT (SELECT count(*)::int FROM inside) AS inside,
   (SELECT count(*)::int FROM occupied) AS occupied`;
-async function snapshot(transaction) {
-  const [counts] = await read(occupancySql, {}, transaction);
+function yardSnapshot(counts) {
   const limit = capacity(), inside = Number(counts.inside), occupied = Number(counts.occupied);
   return { capacity: limit, inside, reserved: occupied - inside, available: Math.max(0, limit - occupied), automatic: automatic() };
+}
+async function snapshot(transaction) {
+  const [counts] = await read(occupancySql, {}, transaction);
+  return yardSnapshot(counts);
 }
 async function lock(transaction) {
   // Every manual/automatic call takes this lock before the booking/fleet locks.
@@ -39,18 +43,40 @@ async function assignDestination(bookingId, transaction) {
   // never moves a container, reserves a storage slot or completes a Yard task.
   const locations = (process.env.YARD_DEMO_HANDOVER_LOCATIONS || 'A-S1,A-S2').split(',').map(v => v.trim()).filter(Boolean);
   if (!locations.length) return false;
-  const [point] = await read(`SELECT n->>'location' AS location FROM smart_yard_maps m,
-    LATERAL jsonb_array_elements(m.map_data->'nodes') n
-    WHERE m.is_active AND n->>'location' IN (:locations) AND NOT COALESCE((n->>'restricted')::boolean,false)
-    AND (m.map_data->>'validUntil' IS NULL OR (m.map_data->>'validUntil')::timestamptz>now())
-    AND NOT EXISTS(SELECT 1 FROM smart_yard_conditions sc WHERE sc.map_id=m.id AND sc.target_type='node'
-      AND sc.target_id=n->>'id' AND sc.restricted AND (sc.valid_until IS NULL OR sc.valid_until>now()))
-    AND NOT (n ? 'slotId') AND NOT (n ? 'gateCode')
+  const [point] = await read(`WITH RECURSIVE active_map AS (
+    SELECT id,map_data FROM smart_yard_maps WHERE is_active ORDER BY updated_at DESC LIMIT 1
+  ), closed AS (
+    SELECT sc.target_type,sc.target_id FROM smart_yard_conditions sc JOIN active_map m ON m.id=sc.map_id
+    WHERE sc.restricted AND (sc.valid_until IS NULL OR sc.valid_until>now())
+  ), nodes AS MATERIALIZED (
+    SELECT n->>'id' AS id,n FROM active_map m CROSS JOIN LATERAL jsonb_array_elements(m.map_data->'nodes') n
+    WHERE (m.map_data->>'validUntil' IS NULL OR (m.map_data->>'validUntil')::timestamptz>now())
+    AND NOT COALESCE((n->>'restricted')::boolean,false)
+    AND NOT EXISTS(SELECT 1 FROM closed c WHERE c.target_type='node' AND c.target_id=n->>'id')
+  ), open_edges AS MATERIALIZED (
+    SELECT a.id AS src,b.id AS dst,COALESCE((e->>'bidirectional')::boolean,false) AS two_way
+    FROM active_map m CROSS JOIN LATERAL jsonb_array_elements(m.map_data->'edges') e
+    JOIN nodes a ON a.id=e->>'from' JOIN nodes b ON b.id=e->>'to'
+    WHERE NOT COALESCE((e->>'restricted')::boolean,false)
+    AND NOT EXISTS(SELECT 1 FROM closed c WHERE c.target_type='edge' AND c.target_id=e->>'id')
+  ), arcs AS MATERIALIZED (
+    SELECT src,dst FROM open_edges UNION ALL SELECT dst,src FROM open_edges WHERE two_way
+  ), from_gate(id) AS (
+    SELECT id FROM nodes WHERE n->>'gateCode'='GATE-01'
+    UNION SELECT a.dst FROM from_gate r JOIN arcs a ON a.src=r.id
+  ), to_exit(id) AS (
+    SELECT id FROM nodes WHERE n->>'gateCode'=(SELECT code FROM gates
+      WHERE is_active AND code IN ('GATE-02','GATE-03') ORDER BY (code='GATE-02') DESC LIMIT 1)
+    UNION SELECT a.src FROM to_exit r JOIN arcs a ON a.dst=r.id
+  )
+    SELECT n->>'location' AS location FROM nodes JOIN from_gate USING(id) JOIN to_exit USING(id)
+    WHERE n->>'location' IN (:locations) AND NOT (n ? 'slotId') AND NOT (n ? 'gateCode')
+    AND EXISTS(SELECT 1 FROM booking_containers WHERE booking_id=:bookingId)
     ORDER BY (SELECT count(DISTINCT ri.booking_id) FROM driver_route_instructions ri JOIN bookings b ON b.id=ri.booking_id
       WHERE ri.map_data->>'source'='demo_admission' AND ri.map_data->>'handoverLocation'=n->>'location'
       AND b.status::text IN ('approved','ready','checked_in','completed')
       AND NOT EXISTS(SELECT 1 FROM gate_transactions g WHERE g.booking_id=b.id AND g.gate_type='gate_out' AND g.status='completed')),
-      n->>'location' LIMIT 1`, { locations }, transaction);
+      n->>'location' LIMIT 1`, { locations, bookingId }, transaction);
   if (!point) return false;
   await read(`INSERT INTO driver_route_instructions(booking_id,driver_id,route_detail,map_data)
     SELECT b.id,b.driver_id,'Đi tới điểm giao nhận được phân công; xác nhận trên app khi đã đến.',
@@ -89,4 +115,4 @@ async function runAutoAdmission() {
     if (!(await snapshot()).available) break;
   }
 }
-module.exports = { snapshot, lock, requireSpace, assignDestination, runAutoAdmission, occupancySql };
+module.exports = { snapshot, yardSnapshot, lock, requireSpace, assignDestination, runAutoAdmission, occupancySql };

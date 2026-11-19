@@ -176,7 +176,10 @@ async function cleanup(){
   const exit=await api('/gate/complete-out','POST',{bookingId:ids.pickup,gateId:outbound},200,'Gate Officer',ids.staff);
   assert.deepEqual(await api('/gate/complete-out','POST',{bookingId:ids.pickup,gateId:outbound},200,'Gate Officer',ids.staff),exit);
   route=await api(routePath(ids.pickup));assert.equal(route.journey.phase,'exited');
-  const monitor=await api('/dispatchers/smart-routes','GET',null,200,'Dispatcher',ids.staff);assert.equal(monitor.routes.find(item=>item.bookingId===ids.pickup).journey.phase,'exited');
+  await api('/dispatchers/smart-routes','GET',null,422,'Dispatcher',ids.staff);
+  const monitor=await api('/dispatchers/smart-routes?bookingId='+ids.pickup,'GET',null,200,'Dispatcher',ids.staff);
+  assert.ok(monitor.routes.every(item=>item.bookingId===ids.pickup));
+  assert.equal(monitor.routes[0].journey.phase,'exited');
   assert.equal((await db.query('SELECT visit_status FROM container_visits WHERE id=$1',[visit])).rows[0].visit_status,'completed');
   assert.equal((await db.query('SELECT status FROM containers WHERE id=$1',[ids.container])).rows[0].status,'gate_out');
   assert.equal((await db.query('SELECT count(*)::int AS n FROM eir_transactions WHERE container_visit_id=$1',[visit])).rows[0].n,2);

@@ -6,11 +6,27 @@ import {
   yardMapSchema,
 } from "../../modules/driver/domain/smart-route";
 
+const handoverStops = [
+  ["A-S1", "tsa:772,1181.25"],
+  ["A-S2", "tsa:772,1151.25"],
+] as const;
+
 export function buildTienSaMap(): YardMap {
+  const handovers = handoverStops.map(([location, roadId]) => {
+    const road = plan.nodes.find(node => node.id === roadId)!;
+    const id = `tsa:handover:${location}`;
+    return {
+      node: { id, location, label: `Điểm giao nhận ${location}`, x: road.x, y: road.y },
+      edge: {
+        id: `access:${id}`, from: roadId, to: id, bidirectional: true, distanceMeters: 1, travelSeconds: 1,
+        instruction: `Tiếp cận điểm giao nhận ${location} trên làn giao nhận.`,
+      },
+    };
+  });
   const map = yardMapSchema.parse({
     version: plan.version,
-    nodes: plan.nodes,
-    edges: plan.edges,
+    nodes: [...plan.nodes, ...handovers.map(handover => handover.node)],
+    edges: [...plan.edges, ...handovers.map(handover => handover.edge)],
     layout: {
       drawingVersion: plan.version,
       blocks: plan.areas.map((area) => ({

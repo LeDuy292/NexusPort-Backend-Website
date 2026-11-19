@@ -5,6 +5,7 @@ import json
 import logging
 import requests
 from typing import Optional
+from uuid import UUID
 from contextlib import asynccontextmanager
 
 logging.basicConfig(
@@ -316,18 +317,19 @@ def stop_gate_camera(lane: str = "IN"):
 
 @app.post("/api/v1/gate/barrier/open")
 def manual_barrier_open(lane: Optional[str] = Query("IN")):
-    """
-    Cưỡng bức mở Barrier từ Web UI (nút 'Mở Cổng') theo làn chỉ định (IN hoặc OUT).
-    """
+    """Giữ lệnh mở làn ra cho các phiên bản giao diện cũ."""
     if (lane or "").upper() == "OUT":
         return hw_service.manual_open_out()
-    return hw_service.manual_open_in()
+    raise HTTPException(status_code=403, detail="Cổng vào cần lệnh mở barie đã xác minh.")
+
+
+class VerifiedBarrierOpen(BaseModel):
+    commandId: UUID
 
 
 @app.post("/api/v1/gate/barrier/open/in")
-def manual_barrier_open_in():
-    """Cưỡng bức mở Barrier Làn Vào (IN)."""
-    return hw_service.manual_open_in()
+def verified_barrier_open_in(command: VerifiedBarrierOpen):
+    return hw_service.open_authorized_in(str(command.commandId))
 
 
 @app.post("/api/v1/gate/barrier/open/out")

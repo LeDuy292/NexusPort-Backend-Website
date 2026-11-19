@@ -27,7 +27,12 @@ const BOOKING_FIELDS = `SELECT b.id, b.booking_code AS "bookingCode", b.booking_
   b.approved_at AS "approvedAt", b.rejected_reason AS "rejectedReason", b.description,
   b.created_at AS "createdAt", b.gate_type AS "gateType",
   (SELECT jsonb_build_object('id',e.id,'status',CASE WHEN e.status IN ('pending_ack','active') AND e.valid_until<=now() THEN 'expired' ELSE e.status END,
-    'validFrom',e.valid_from,'validUntil',e.valid_until,'vehiclePlate',e.vehicle_plate)
+    'validFrom',e.valid_from,'validUntil',e.valid_until,'vehiclePlate',e.vehicle_plate,
+    'issuedAt',e.issued_at,'revokedAt',CASE WHEN e.status='revoked' THEN (
+      SELECT o.created_at FROM booking_dispatch_outbox o WHERE o.booking_id=b.id
+        AND o.version>e.dispatch_version AND o.kind IN ('released','delayed','withdrawn')
+      ORDER BY o.version LIMIT 1
+    ) END)
     FROM gate_entry_orders e WHERE e.booking_id=b.id ORDER BY e.issued_at DESC,e.dispatch_version DESC LIMIT 1) AS "gateEntryOrder",
   CASE WHEN ds.booking_id IS NULL THEN NULL ELSE jsonb_build_object(
     'status',ds.status,'action',ds.action,'arrivedAt',ds.arrived_at,'readyAt',ds.ready_at,
@@ -49,12 +54,6 @@ const BOOKING_FIELDS = `SELECT b.id, b.booking_code AS "bookingCode", b.booking_
 const BOOKING_SELECT = BOOKING_FIELDS + ' WHERE d.user_id=:userId';
 
 async function getFeed(userId) {
-  if (process.env.NODE_ENV !== 'test') {
-    try {
-      const { syncManifestGateBookings } = require('../booking-dispatch/dispatch.service');
-      await syncManifestGateBookings();
-    } catch {}
-  }
   const [profile, bookings, notifications, counts] = await Promise.all([
     getProfile(userId),
     read(`${BOOKING_SELECT} ORDER BY b.created_at DESC LIMIT 100`, { userId }),

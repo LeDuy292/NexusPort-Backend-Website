@@ -123,7 +123,7 @@ class ESP32Controller:
 
     def send_open(self):
         """Gửi lệnh OPEN xuống ESP32 → mở barrier làn Vào (backward compat)."""
-        self._send("OPEN_IN")
+        return self._send("OPEN_IN")
 
     def send_close(self):
         """Gửi lệnh CLOSE xuống ESP32 → đóng barrier làn Vào (backward compat)."""
@@ -136,7 +136,7 @@ class ESP32Controller:
     # ── Làn Vào (IN) ──
     def send_open_in(self):
         """Gửi lệnh OPEN_IN → mở barrier làn Vào, bật LED xanh, kêu buzzer."""
-        self._send("OPEN_IN")
+        return self._send("OPEN_IN")
 
     def send_close_in(self):
         """Gửi lệnh CLOSE_IN → đóng barrier làn Vào, bật LED đỏ."""
@@ -195,6 +195,7 @@ class ESP32Controller:
                     self._serial.write(payload)
                     self._serial.flush()
                     logger.info("[ESP32] → Sent: %s", command)
+                    return True
                 except Exception as e:
                     logger.error("[ESP32] Send error: %s", e)
                     # Không đóng serial ngay khi chỉ bị timeout nhẹ
@@ -203,6 +204,7 @@ class ESP32Controller:
                         self.connected = False
             else:
                 logger.warning("[ESP32] Cannot send '%s': port not open.", command)
+        return False
 
     def _find_esp32_port(self) -> Optional[str]:
         """Tự động dò tìm cổng Serial của ESP32 (chip CH340, CP210x, FTDI)."""

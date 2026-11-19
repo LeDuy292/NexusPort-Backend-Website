@@ -100,7 +100,7 @@ export class DriverRouteService {
       ...slot, source: row.destinationSource ?? 'reservation',
     } : row.targetLocation?.trim() && (row.operationId || row.destinationSource === 'demo_admission') ? {
       type: 'area', location: row.targetLocation.trim(), slotId: null,
-      block: null, zone: null, bay: null, row: null, tier: null, source: row.operationId ? 'operation' : 'demo_admission',
+      block: null, zone: null, bay: null, row: null, tier: null, source: row.destinationSource === 'demo_admission' ? 'demo_admission' : 'operation',
     } : null;
     const arrived = row.destinationKey === routeDestinationKey(row) ? row.arrivedAt ?? null : null;
     const readyForExit = !!row.containerConfirmedAt && row.bookingStatus === 'completed';
@@ -142,8 +142,8 @@ export class DriverRouteService {
     return result;
   }
 
-  async monitor(): Promise<{ routes: DriverRoute[]; generatedAt: string }> {
-    return { routes: await Promise.all((await this.repository.findForDispatcher()).map(row => this.enrich(row))), generatedAt: new Date().toISOString() };
+  async monitor(bookingId: string): Promise<{ routes: DriverRoute[]; generatedAt: string }> {
+    return { routes: await Promise.all((await this.repository.findForDispatcher(bookingId)).map(row => this.enrich(row))), generatedAt: new Date().toISOString() };
   }
 
   async arrive(driverId: string, containerId: string, input: unknown): Promise<DriverRoute> {

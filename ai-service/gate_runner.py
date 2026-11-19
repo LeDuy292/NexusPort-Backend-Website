@@ -5,8 +5,8 @@ Script chạy độc lập (ngoài FastAPI) trên Laptop để:
   1. Lắng nghe tín hiệu "CAPTURE" từ ESP32 qua Serial (COM7 / 115200 baud)
   2. Chụp khung hình từ Webcam USB (index 0 = Cổng Vào, index 1 = Cổng Ra)
   3. Gọi SmartPortGatePipeline để OCR biển số (Azure AI Vision)
-  4. Đối chiếu với NexusPort Backend (Node.js Express) để kiểm tra biển số hợp lệ
-  5. Gửi "OPEN\\n" hoặc "FAIL\\n" xuống ESP32
+  4. Gửi kết quả quét làn vào tới màn hình Cổng. Dùng AI Service FastAPI để mở barie làn vào sau xác minh.
+  5. Đối chiếu biển số và điều khiển barie làn ra.
 
 Cách chạy:
   Đảm bảo đã đóng Serial Monitor trên Arduino IDE trước khi chạy.
@@ -297,7 +297,11 @@ class GateRunner:
                 self._esp32.send_fail()
                 return
 
-            # 4. Đối chiếu với Backend (tùy chọn)
+            if lane == "IN":
+                self._broadcast(result, image_bytes)
+                return
+
+            # The standalone runner only opens the outbound lane.
             if self.no_verify:
                 is_valid = True
                 logger.info("[process] --no-verify mode: bỏ qua kiểm tra backend.")
@@ -310,13 +314,13 @@ class GateRunner:
                     "[process] ✅ Biển số %s HỢP LỆ → OPEN (gate=%s, lane=%s)",
                     plate_number, gate_code, lane_code,
                 )
-                self._esp32.send_open()
+                self._esp32.send_open_out()
             else:
                 logger.info(
                     "[process] ❌ Biển số %s KHÔNG hợp lệ → FAIL",
                     plate_number,
                 )
-                self._esp32.send_fail()
+                self._esp32.send_fail_out()
 
             # 6. Broadcast lên Node.js (nếu có) để realtime UI
             self._broadcast(result, image_bytes)

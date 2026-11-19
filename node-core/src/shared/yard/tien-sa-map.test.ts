@@ -40,6 +40,14 @@ test("all sectors have inbound and gate-out paths", () => {
   expect(tienSaDestination({ ...target, row: 1.5 }, map)).toBeNull();
   expect(tienSaDestination({ ...target, tier: NaN }, map)).toBeNull();
 });
+test("both handover points have paths from the entrance and back to the exit", () => {
+  const map = buildTienSaMap();
+  for (const location of ["A-S1", "A-S2"]) {
+    const stop = map.nodes.find(node => node.location === location)!;
+    expect(shortestRoute(map, "gate:GATE-01", stop.id)).not.toBeNull();
+    expect(shortestRoute(map, stop.id, "gate:GATE-02")).not.toBeNull();
+  }
+});
 test("simple route preserves assignment, follows C to rear and never invents metres or ETA", async () => {
   const service = new SmartRouteService({
     load: async () => ({ map: null, errorCode: "YARD_MAP_NOT_CONFIGURED" }),
