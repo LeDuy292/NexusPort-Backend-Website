@@ -31,3 +31,5 @@ Thao tác gửi UUID `requestId`, `expectedVersion` của workflow và lý do kh
 - Production bỏ qua biến ghi đè và luôn dùng toàn bộ số tiền đơn. Webhook có chữ ký hợp lệ chỉ được chấp nhận khi mã đơn, link và số tiền khớp chính xác lần thanh toán đã lưu.
 - Biên lai ghi riêng tổng phí đơn và số tiền giao dịch PayOS đã nhận. Nội dung chuyển khoản là `DV` cùng 7 chữ số mã giao dịch (9 ký tự ASCII).
 - QR đã tạo trước khi bật cấu hình 2.000 VND giữ nguyên số tiền cũ; hãy hủy yêu cầu đang chờ rồi tạo yêu cầu mới.
+
+Xem tài liệu kiến trúc toàn diện tại [Tài liệu Kiến trúc Đơn Dịch Vụ & Thanh Toán ePort](eport-service-orders-architecture.md).
