@@ -1,140 +1,253 @@
+/*
+ * NexusPort Smart Gate — Firmware ESP32 (Dual Lane: IN + OUT)
+ * ============================================================
+ * Làn Vào (IN)  : IR=D19, Servo=D13, LED Đỏ=D25, LED Xanh=D26
+ * Làn Ra  (OUT) : IR=D4,  Servo=D14, LED Đỏ=D32, LED Xanh=D33
+ * Dùng chung    : Buzzer=D12
+ *
+ * Giao thức Serial 115200 baud:
+ *   ESP32 → PC : CAPTURE_IN, CAPTURE_OUT
+ *   PC → ESP32 : OPEN_IN, CLOSE_IN, FAIL_IN, OPEN_OUT, CLOSE_OUT, FAIL_OUT
+ *   ESP32 → PC : STATUS:OPENED_IN, STATUS:CLOSED_IN, STATUS:OPENED_OUT, STATUS:CLOSED_OUT
+ */
+
 #include <ESP32Servo.h>
 
-const int irInPin = 19;     // Cảm biến làn vào
-const int irOutPin = 18;    // Cảm biến làn ra (để INPUT_PULLUP nếu chưa đấu nối)
-const int servoPin = 13;    // Động cơ Servo (Barrier)
-const int buzzerPin = 12;   // Còi Buzzer
-const int ledRedPin = 25;   // LED Đỏ
-const int ledGreenPin = 26; // LED Xanh
+// ══════════════════════════════════════════════════════════
+//  Khai báo chân phần cứng (Khớp 100% yêu cầu)
+// ══════════════════════════════════════════════════════════
 
-Servo barrierServo;
+// ── Làn Vào (IN) ──
+const int irPinIN     = 19; // Cảm biến IR cổng Vào: D19
+const int servoPinIN  = 13; // Servo cổng Vào: D13
+const int ledRedIN    = 25; // LED Đỏ cổng Vào: D25
+const int ledGrnIN    = 26; // LED Xanh cổng Vào: D26
 
-// Trạng thái Barie & OCR
-bool isGateOpen = false;
-bool isWaitingForOCR = false;
-unsigned long requestTime = 0;
-unsigned long gateOpenedAt = 0;
+// ── Làn Ra (OUT) ──
+const int irPinOUT    = 4;  // Cảm biến IR cổng Ra: D4
+const int servoPinOUT = 14; // Servo cổng Ra: D14
+const int ledRedOUT   = 32; // LED Đỏ cổng Ra: D32
+const int ledGrnOUT   = 33; // LED Xanh cổng Ra: D33
 
-// Thời gian mở barie trước khi tự đóng: đúng 30 giây
-const unsigned long AUTO_CLOSE_MS = 30000;
+// ── Dùng chung ──
+const int buzzerPin   = 12; // Còi Buzzer: D12
 
-// Cooldown sau FAIL: chống spam còi
-unsigned long lastFailTime = 0;
-const unsigned long FAIL_COOLDOWN_MS = 10000;
-const unsigned long OCR_RESPONSE_TIMEOUT_MS = 25000;
+// ══════════════════════════════════════════════════════════
+//  Servo objects
+// ══════════════════════════════════════════════════════════
+Servo servoIN;
+Servo servoOUT;
 
+// ══════════════════════════════════════════════════════════
+//  Trạng thái & Biến quản lý mỗi làn
+// ══════════════════════════════════════════════════════════
+bool gateOpenIN        = false;
+bool lastIrStateIN     = false; // Dùng phát hiện cạnh sườn (vừa đưa tay vào)
+unsigned long openedAtIN   = 0;
+unsigned long lastTriggerIN = 0;
+
+bool gateOpenOUT       = false;
+bool lastIrStateOUT    = false; // Dùng phát hiện cạnh sườn
+unsigned long openedAtOUT  = 0;
+unsigned long lastTriggerOUT = 0;
+
+// ══════════════════════════════════════════════════════════
+//  Hằng thời gian
+// ══════════════════════════════════════════════════════════
+const unsigned long AUTO_CLOSE_MS  = 30000UL; // 30 giây tự đóng
+const unsigned long COOLDOWN_MS    =  2500UL; // 2.5 giây chống spam giữa 2 lần quét
+
+// ══════════════════════════════════════════════════════════
+//  Hàm tiện ích: Kêu còi
+// ══════════════════════════════════════════════════════════
+void beep(int times, int durationMs, int pauseMs) {
+  for (int i = 0; i < times; i++) {
+    digitalWrite(buzzerPin, HIGH);
+    delay(durationMs);
+    digitalWrite(buzzerPin, LOW);
+    if (i < times - 1) delay(pauseMs);
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  Làn Vào (IN) — Mở & Đóng
+// ══════════════════════════════════════════════════════════
+void openGateIN() {
+  if (gateOpenIN) {
+    openedAtIN = millis(); // Gia hạn thêm 30s
+    return;
+  }
+
+  gateOpenIN = true;
+  openedAtIN = millis();
+
+  // Đèn: Xanh sáng, Đỏ tắt
+  digitalWrite(ledRedIN, LOW);
+  digitalWrite(ledGrnIN, HIGH);
+
+  // Còi 1 bíp ngắn
+  beep(1, 150, 0);
+
+  // Servo quay 90° và giữ nguyên
+  servoIN.write(90);
+
+  Serial.println("STATUS:OPENED_IN");
+}
+
+void closeGateIN() {
+  if (!gateOpenIN) return;
+
+  gateOpenIN = false;
+
+  // Servo về 0°
+  servoIN.write(0);
+
+  // Đèn: Đỏ sáng, Xanh tắt
+  digitalWrite(ledGrnIN, LOW);
+  digitalWrite(ledRedIN, HIGH);
+
+  Serial.println("STATUS:CLOSED_IN");
+}
+
+// ══════════════════════════════════════════════════════════
+//  Làn Ra (OUT) — Mở & Đóng
+// ══════════════════════════════════════════════════════════
+void openGateOUT() {
+  if (gateOpenOUT) {
+    openedAtOUT = millis();
+    return;
+  }
+
+  gateOpenOUT = true;
+  openedAtOUT = millis();
+
+  // Đèn: Xanh sáng, Đỏ tắt
+  digitalWrite(ledRedOUT, LOW);
+  digitalWrite(ledGrnOUT, HIGH);
+
+  // Còi 1 bíp ngắn
+  beep(1, 150, 0);
+
+  // Servo quay 90° và giữ nguyên
+  servoOUT.write(90);
+
+  Serial.println("STATUS:OPENED_OUT");
+}
+
+void closeGateOUT() {
+  if (!gateOpenOUT) return;
+
+  gateOpenOUT = false;
+
+  // Servo về 0°
+  servoOUT.write(0);
+
+  // Đèn: Đỏ sáng, Xanh tắt
+  digitalWrite(ledGrnOUT, LOW);
+  digitalWrite(ledRedOUT, HIGH);
+
+  Serial.println("STATUS:CLOSED_OUT");
+}
+
+// ══════════════════════════════════════════════════════════
+//  SETUP
+// ══════════════════════════════════════════════════════════
 void setup() {
   Serial.begin(115200);
 
-  pinMode(irInPin, INPUT_PULLUP);
-  pinMode(irOutPin, INPUT_PULLUP);
+  // Cảm biến hồng ngoại IR: Mức LOW khi có vật cản
+  pinMode(irPinIN,  INPUT_PULLUP);
+  pinMode(irPinOUT, INPUT_PULLUP);
+
+  // Đèn LED & Buzzer
+  pinMode(ledRedIN,  OUTPUT);
+  pinMode(ledGrnIN,  OUTPUT);
+  pinMode(ledRedOUT, OUTPUT);
+  pinMode(ledGrnOUT, OUTPUT);
   pinMode(buzzerPin, OUTPUT);
-  pinMode(ledRedPin, OUTPUT);
-  pinMode(ledGreenPin, OUTPUT);
 
-  // Gán chân servo với dải xung chuẩn SG90
-  barrierServo.attach(servoPin, 500, 2400);
-
-  // Vị trí ban đầu: Đóng cổng (0 độ)
-  barrierServo.write(0);
-  isGateOpen = false;
-
-  digitalWrite(ledRedPin, HIGH);
-  digitalWrite(ledGreenPin, LOW);
-  digitalWrite(buzzerPin, LOW);
-}
-
-// Hàm mở barie: CHỈ XOAY ĐÚNG 1 LẦN 90 ĐỘ RỒI GIỮ NGUYÊN
-void openGate() {
-  if (isGateOpen) {
-    // Nếu cổng đã mở rồi thì không quay lại, không kêu lại
-    gateOpenedAt = millis(); // Gia hạn thêm thời gian mở
-    return;
-  }
-
-  isGateOpen = true;
-  gateOpenedAt = millis(); // Bắt đầu đếm 30s
-
-  // Bật đèn xanh, tắt đèn đỏ
-  digitalWrite(ledRedPin, LOW);
-  digitalWrite(ledGreenPin, HIGH);
-
-  // Kêu còi 1 tiếng bíp ngắn 200ms
-  digitalWrite(buzzerPin, HIGH);
-  delay(200);
+  // Trạng thái ban đầu: Cổng đóng, LED Đỏ sáng, LED Xanh tắt
+  digitalWrite(ledRedIN,  HIGH);
+  digitalWrite(ledGrnIN,  LOW);
+  digitalWrite(ledRedOUT, HIGH);
+  digitalWrite(ledGrnOUT, LOW);
   digitalWrite(buzzerPin, LOW);
 
-  // Xoay servo lên 90 độ và GIỮ NGUYÊN
-  barrierServo.write(90);
-  Serial.println("STATUS:OPENED");
+  // Cấp phát Timer cho ESP32PWM (Tránh xung đột 2 servo)
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+
+  servoIN.setPeriodHertz(50);
+  servoOUT.setPeriodHertz(50);
+
+  servoIN.attach(servoPinIN,   500, 2400);
+  servoOUT.attach(servoPinOUT, 500, 2400);
+
+  servoIN.write(0);
+  delay(100);
+  servoOUT.write(0);
+
+  Serial.println("BOOT:OK — NexusPort Dual-Lane Gate (IN:D19, OUT:D4)");
 }
 
-// Hàm đóng barie: Hạ servo về 0 độ
-void closeGate() {
-  if (!isGateOpen) {
-    // Nếu cổng đã đóng rồi thì không làm gì thêm
-    return;
-  }
-
-  isGateOpen = false;
-
-  // Xoay servo về 0 độ
-  barrierServo.write(0);
-
-  // Đổi đèn: Đỏ sáng (cổng đóng), Xanh tắt
-  digitalWrite(ledGreenPin, LOW);
-  digitalWrite(ledRedPin, HIGH);
-  Serial.println("STATUS:CLOSED");
-}
-
+// ══════════════════════════════════════════════════════════
+//  LOOP
+// ══════════════════════════════════════════════════════════
 void loop() {
-  // 1. TỰ ĐỘNG ĐÓNG SAU ĐÚNG 30 GIÂY MỞ
-  if (isGateOpen && (millis() - gateOpenedAt >= AUTO_CLOSE_MS)) {
-    closeGate();
+  unsigned long now = millis();
+
+  // 1. TỰ ĐỘNG ĐÓNG SAU 30 GIÂY MỖI LÀN
+  if (gateOpenIN  && (now - openedAtIN  >= AUTO_CLOSE_MS)) closeGateIN();
+  if (gateOpenOUT && (now - openedAtOUT >= AUTO_CLOSE_MS)) closeGateOUT();
+
+  // 2. CẢM BIẾN IR LÀN VÀO (D19) — Dùng Edge Detection: Vừa đưa tay/xe vào là kích hoạt ngay!
+  bool isBlockedIN = (digitalRead(irPinIN) == LOW);
+  if (isBlockedIN && !lastIrStateIN) {
+    if (!gateOpenIN && (now - lastTriggerIN > COOLDOWN_MS)) {
+      lastTriggerIN = now;
+      Serial.println("[IR_IN:DETECTED] -> Send CAPTURE_IN");
+      Serial.println("CAPTURE_IN");
+    }
   }
+  lastIrStateIN = isBlockedIN;
 
-  // 2. CẢM BIẾN IR: Khi phát hiện xe (LOW) & Cổng chưa mở & Không đang chờ OCR & Hết cooldown
-  bool irInTriggered = (digitalRead(irInPin) == LOW);
-  bool irOutTriggered = (digitalRead(irOutPin) == LOW);
-  bool cooldownOk  = (millis() - lastFailTime > FAIL_COOLDOWN_MS);
-
-  if ((irInTriggered || irOutTriggered) && !isGateOpen && !isWaitingForOCR && cooldownOk) {
-    // Giữ CAPTURE cũ cho làn vào để tương thích với phiên bản Python cũ.
-    Serial.println(irOutTriggered ? "CAPTURE:OUT" : "CAPTURE");
-    isWaitingForOCR = true;
-    requestTime = millis();
-    delay(500); // Chống dội tín hiệu
+  // 3. CẢM BIẾN IR LÀN RA (D4) — Dùng Edge Detection
+  bool isBlockedOUT = (digitalRead(irPinOUT) == LOW);
+  if (isBlockedOUT && !lastIrStateOUT) {
+    if (!gateOpenOUT && (now - lastTriggerOUT > COOLDOWN_MS)) {
+      lastTriggerOUT = now;
+      Serial.println("[IR_OUT:DETECTED] -> Send CAPTURE_OUT");
+      Serial.println("CAPTURE_OUT");
+    }
   }
+  lastIrStateOUT = isBlockedOUT;
 
-  // 3. LẮNG NGHE LỆNH TỪ MÁY TÍNH GỬI XUỐNG
+  // 4. LẮNG NGHE LỆNH TỪ MÁY TÍNH
   if (Serial.available() > 0) {
     String command = Serial.readStringUntil('\n');
     command.trim();
 
-    if (command == "OPEN") {
-      openGate();
-      isWaitingForOCR = false;
+    // ── Làn Vào ──
+    if (command == "OPEN_IN" || command == "OPEN") {
+      openGateIN();
+    } else if (command == "CLOSE_IN" || command == "CLOSE") {
+      closeGateIN();
+    } else if (command == "FAIL_IN" || command == "FAIL") {
+      beep(2, 100, 100);
 
-    } else if (command == "CLOSE") {
-      closeGate();
-      isWaitingForOCR = false;
+    // ── Làn Ra ──
+    } else if (command == "OPEN_OUT") {
+      openGateOUT();
+    } else if (command == "CLOSE_OUT") {
+      closeGateOUT();
+    } else if (command == "FAIL_OUT") {
+      beep(2, 100, 100);
 
-    } else if (command == "FAIL") {
-      // Chỉ kêu 2 tiếng bíp khi xe không hợp lệ (không xoay servo)
-      for (int i = 0; i < 2; i++) {
-        digitalWrite(buzzerPin, HIGH);
-        delay(100);
-        digitalWrite(buzzerPin, LOW);
-        delay(100);
-      }
-      isWaitingForOCR = false;
-      lastFailTime = millis();
+    // ── Ping ──
+    } else if (command == "PING") {
+      Serial.println("PONG");
     }
-  }
-
-  // 4. Timeout chờ phản hồi OCR (10s)
-  if (isWaitingForOCR && (millis() - requestTime > OCR_RESPONSE_TIMEOUT_MS)) {
-    isWaitingForOCR = false;
-    lastFailTime = millis();
   }
 }

@@ -60,6 +60,9 @@ class ESP32Controller:
         self.capture_lane = "IN"
         # Callback tùy chọn gọi khi có CAPTURE (ngoài Event)
         self._on_capture: Optional[Callable] = None
+        # Callback riêng cho 2 làn
+        self._on_capture_in: Optional[Callable] = None
+        self._on_capture_out: Optional[Callable] = None
 
         self._running = False
         self._reader_thread: Optional[threading.Thread] = None
@@ -71,17 +74,25 @@ class ESP32Controller:
     # Public API
     # ------------------------------------------------------------------
 
-    def start(self, on_capture: Optional[Callable] = None) -> bool:
+    def start(
+        self,
+        on_capture: Optional[Callable] = None,
+        on_capture_in: Optional[Callable] = None,
+        on_capture_out: Optional[Callable] = None,
+    ) -> bool:
         """
         Khởi động kết nối Serial và thread đọc nền.
 
         Args:
-            on_capture: Callback(lane) gọi khi nhận CAPTURE_IN/OUT.
-                        CAPTURE cũ được hiểu là làn IN.
+            on_capture     : Callback(lane) gọi khi nhận CAPTURE_IN/OUT hoặc CAPTURE.
+            on_capture_in  : Callback() gọi khi nhận CAPTURE_IN (làn Vào).
+            on_capture_out : Callback() gọi khi nhận CAPTURE_OUT (làn Ra).
         Returns:
             True nếu kết nối thành công ngay, False nếu đang retry.
         """
         self._on_capture = on_capture
+        self._on_capture_in = on_capture_in
+        self._on_capture_out = on_capture_out
         self._running = True
 
         self._reader_thread = threading.Thread(
@@ -106,16 +117,42 @@ class ESP32Controller:
         logger.info("[ESP32] Controller stopped.")
 
     def send_open(self):
-        """Gửi lệnh OPEN xuống ESP32 → mở barrier, bật LED xanh, kêu buzzer 1 tiếng."""
-        self._send("OPEN")
+        """Gửi lệnh OPEN xuống ESP32 → mở barrier làn Vào (backward compat)."""
+        self._send("OPEN_IN")
 
     def send_close(self):
-        """Gửi lệnh CLOSE xuống ESP32 → đóng barrier, tắt LED xanh, bật LED đỏ."""
-        self._send("CLOSE")
+        """Gửi lệnh CLOSE xuống ESP32 → đóng barrier làn Vào (backward compat)."""
+        self._send("CLOSE_IN")
 
     def send_fail(self):
-        """Gửi lệnh FAIL xuống ESP32 → báo lỗi 2 tiếng buzzer, giữ barrier đóng."""
-        self._send("FAIL")
+        """Gửi lệnh FAIL xuống ESP32 → báo lỗi làn Vào (backward compat)."""
+        self._send("FAIL_IN")
+
+    # ── Làn Vào (IN) ──
+    def send_open_in(self):
+        """Gửi lệnh OPEN_IN → mở barrier làn Vào, bật LED xanh, kêu buzzer."""
+        self._send("OPEN_IN")
+
+    def send_close_in(self):
+        """Gửi lệnh CLOSE_IN → đóng barrier làn Vào, bật LED đỏ."""
+        self._send("CLOSE_IN")
+
+    def send_fail_in(self):
+        """Gửi lệnh FAIL_IN → báo lỗi 2 tiếng buzzer, giữ barrier làn Vào đóng."""
+        self._send("FAIL_IN")
+
+    # ── Làn Ra (OUT) ──
+    def send_open_out(self):
+        """Gửi lệnh OPEN_OUT → mở barrier làn Ra, bật LED xanh, kêu buzzer."""
+        self._send("OPEN_OUT")
+
+    def send_close_out(self):
+        """Gửi lệnh CLOSE_OUT → đóng barrier làn Ra, bật LED đỏ."""
+        self._send("CLOSE_OUT")
+
+    def send_fail_out(self):
+        """Gửi lệnh FAIL_OUT → báo lỗi 2 tiếng buzzer, giữ barrier làn Ra đóng."""
+        self._send("FAIL_OUT")
 
     def wait_for_capture(self, timeout: float = 30.0) -> bool:
         """
@@ -298,11 +335,23 @@ class ESP32Controller:
                     logger.info("[ESP32] CAPTURE signal received for lane %s — triggering OCR", lane)
                     self.capture_lane = lane
                     self.capture_event.set()
+                    # Callback on_capture(lane)
                     if self._on_capture:
                         try:
                             self._on_capture(lane)
                         except Exception as cb_err:
                             logger.error("[ESP32] on_capture callback error: %s", cb_err)
+                    # Callback theo từng làn
+                    if lane == "IN" and self._on_capture_in:
+                        try:
+                            self._on_capture_in()
+                        except Exception as cb_err:
+                            logger.error("[ESP32] on_capture_in callback error: %s", cb_err)
+                    elif lane == "OUT" and self._on_capture_out:
+                        try:
+                            self._on_capture_out()
+                        except Exception as cb_err:
+                            logger.error("[ESP32] on_capture_out callback error: %s", cb_err)
 
             except serial.SerialException as e:
                 logger.error("[ESP32] Serial read error: %s — will reconnect", e)
