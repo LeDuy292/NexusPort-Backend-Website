@@ -10,6 +10,8 @@ const driverBookingRoutes = require('./modules/driver-bookings/driver-bookings.r
 const dispatchRoutes = require('./modules/booking-dispatch/dispatch.routes');
 const gateIotRoutes = require('./modules/gate-iot/gate-iot.routes');
 const shippingLineRoutes = require('./modules/shipping-line/shippingLine.routes');
+const importDocumentsRoutes = require('./modules/import-documents/importDocuments.routes');
+const blImportRoutes = require('./modules/bl-import/blImport.routes');
 const cargoNotificationRoutes = require('./modules/cargo-notifications/cargoNotification.routes');
 const { nodeEnv } = require('./config/env');
 
@@ -153,6 +155,10 @@ const mountedRouters = [
   { prefix: '/gate', tag: 'Gate IoT Direct', secured: false, router: gateIotRoutes },
   { prefix: '/api/shipping-line', tag: 'Shipping Line', secured: false, router: shippingLineRoutes },
   { prefix: '/shipping-line', tag: 'Shipping Line Direct', secured: false, router: shippingLineRoutes },
+  { prefix: '/api/import-documents', tag: 'Import Documents', secured: false, router: importDocumentsRoutes },
+  { prefix: '/api/bl-imports', tag: 'BL Imports', secured: false, router: blImportRoutes },
+  { prefix: '/import-documents', tag: 'Import Documents Direct', secured: false, router: importDocumentsRoutes },
+  { prefix: '/bl-imports', tag: 'BL Imports Direct', secured: false, router: blImportRoutes },
   { prefix: '/api/cargo-notifications', tag: 'Cargo Notifications', secured: false, router: cargoNotificationRoutes },
   { prefix: '/cargo-notifications', tag: 'Cargo Notifications Direct', secured: false, router: cargoNotificationRoutes },
   { prefix: '/api/driver-bookings', tag: 'Driver Bookings', secured: true, router: driverBookingRoutes },

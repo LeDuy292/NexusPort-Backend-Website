@@ -14,7 +14,7 @@ async function main() {
       WHERE contype='f' AND (conrelid::regclass::text ~ '(manifest|lading|delivery_order|shipping_instruction)' OR confrelid::regclass::text ~ '(manifest|lading|delivery_order|shipping_instruction)')`)).rows);
     console.log('REFERENCES', (await c.query(`SELECT table_schema,table_name,column_name FROM information_schema.columns WHERE table_schema IN ('public','shipping')
       AND lower(column_name) ~ '(bl_number|blid|bl_id|bill_of_lading|manifest)' ORDER BY table_schema,table_name,column_name`)).rows);
-    for (const table of ['edo_orders','np_sl_edo_orders','np_sl_shipping_containers']) {
+    for (const table of ['edo_orders']) {
       if ((await c.query('SELECT to_regclass($1) AS name',['public.'+table])).rows[0].name)
         console.log('LEGACY_LINKS',table,(await c.query(`SELECT count(*) AS total,count(bl_id) AS linked FROM ${table}`)).rows[0]);
     }

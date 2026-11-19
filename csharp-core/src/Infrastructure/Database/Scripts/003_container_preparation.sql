@@ -147,19 +147,7 @@ CREATE TABLE IF NOT EXISTS container_movements (
 
 CREATE INDEX IF NOT EXISTS idx_container_movements_no ON container_movements (container_no, moved_at DESC);
 
--- 6. Dữ liệu e-D/O giải phóng container (EDoRecord)
-CREATE TABLE IF NOT EXISTS edo_records (
-    id UUID PRIMARY KEY,
-    container_no VARCHAR(50) NOT NULL,
-    seal_no VARCHAR(50) NOT NULL,
-    release_status VARCHAR(30) NOT NULL DEFAULT 'Valid',
-    hold_flag VARCHAR(30) NOT NULL DEFAULT 'None',
-    expires_at TIMESTAMPTZ NOT NULL,
-    free_time_until TIMESTAMPTZ NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS uq_edo_records_container ON edo_records (container_no);
+-- 6. e-D/O (EDoRecord): edo_records là view từ delivery_orders, tạo bởi migration 20261120_061 (không còn là bảng).
 
 -- 7. Danh mục ngoại lệ bãi (ExceptionItem)
 CREATE TABLE IF NOT EXISTS exception_items (
@@ -197,9 +185,4 @@ CREATE INDEX IF NOT EXISTS idx_outbox_pending ON preparation_outbox_messages (pu
 -- ==============================================================================
 -- Dữ liệu mẫu (Seed Data) chuẩn hóa cho e-D/O
 -- ==============================================================================
-INSERT INTO edo_records (id, container_no, seal_no, release_status, hold_flag, expires_at, free_time_until, created_at)
-VALUES 
-    ('11111111-1111-1111-1111-111111111111', 'MSKU9012345', 'SEAL-VN-90812', 'Valid', 'None', CURRENT_TIMESTAMP + INTERVAL '3 days', CURRENT_TIMESTAMP + INTERVAL '2 days', CURRENT_TIMESTAMP),
-    ('22222222-2222-2222-2222-222222222222', 'CMAU7812340', 'SEAL-CMA-44120', 'Valid', 'None', CURRENT_TIMESTAMP + INTERVAL '5 days', CURRENT_TIMESTAMP + INTERVAL '4 days', CURRENT_TIMESTAMP),
-    ('33333333-3333-3333-3333-333333333333', 'TCLU5567891', 'SEAL-TC-12345', 'Valid', 'CustomsHold', CURRENT_TIMESTAMP + INTERVAL '2 days', CURRENT_TIMESTAMP + INTERVAL '1 day', CURRENT_TIMESTAMP)
-ON CONFLICT (container_no) DO NOTHING;
+

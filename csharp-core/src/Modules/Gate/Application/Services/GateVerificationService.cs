@@ -27,6 +27,7 @@ public class GateVerificationService : IGateVerificationService
     private readonly INotificationService? _notificationService;
     private readonly ILogger<GateVerificationService> _logger;
     private readonly IMessageBrokerService _messageBroker;
+    private readonly IS3StorageService? _storage;
 
     public GateVerificationService(
         IGateVerificationRepository verificationRepository,
@@ -34,8 +35,10 @@ public class GateVerificationService : IGateVerificationService
         AppDbContext context,
         ILogger<GateVerificationService> logger,
         IMessageBrokerService messageBroker,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        IS3StorageService? storage = null)
     {
+        _storage = storage;
         _verificationRepository = verificationRepository;
         _ruleEngine = ruleEngine;
         _context = context;
@@ -43,6 +46,29 @@ public class GateVerificationService : IGateVerificationService
         _messageBroker = messageBroker;
         _notificationService = notificationService;
     }
+
+    // Ảnh bằng chứng đi vào dưới dạng data URL base64 (hàng trăm KB/ảnh). Đẩy lên S3 và chỉ lưu khóa đối tượng trong DB.
+    private async Task<string?> StoreImageAsync(string? value, string kind, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(value) || _storage == null) return value;
+        var m = Regex.Match(value, @"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$", RegexOptions.Singleline);
+        if (!m.Success) return value;
+        try
+        {
+            var bytes = Convert.FromBase64String(m.Groups[2].Value);
+            var ext = m.Groups[1].Value.EndsWith("png", StringComparison.OrdinalIgnoreCase) ? ".png" : ".jpg";
+            var url = await _storage.UploadBytesAsync(bytes, $"{kind}{ext}", m.Groups[1].Value, "NexusPort/gate-evidence", ct);
+            var key = Uri.UnescapeDataString(new Uri(url).AbsolutePath.TrimStart('/'));
+            var at = key.IndexOf("NexusPort/", StringComparison.Ordinal);
+            return at >= 0 ? key[at..] : value;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Không đẩy được ảnh {Kind} lên S3, giữ nguyên dữ liệu gốc.", kind);
+            return value;
+        }
+    }
+    private string? ImageLink(string? stored) => _storage == null || string.IsNullOrWhiteSpace(stored) ? stored : _storage.GetPresignedUrl(stored);
 
     public async Task<GateVerificationResultDto> VerifyGateScanAsync(GateRecognitionEventDto request, CancellationToken cancellationToken = default)
     {
@@ -194,8 +220,8 @@ public class GateVerificationService : IGateVerificationService
             DriverId = driverId,
             DriverName = driverName,
 
-            VehiclePlateImageUrl = request.VehiclePlateImageUrl,
-            OverviewImageUrl = request.OverviewImageUrl,
+            VehiclePlateImageUrl = await StoreImageAsync(request.VehiclePlateImageUrl, "plate", cancellationToken),
+            OverviewImageUrl = await StoreImageAsync(request.OverviewImageUrl, "overview", cancellationToken),
 
             Notes = manual ? $"[Manual: {request.ManualReason}] {message}" : message,
             ProcessedBy = manual ? "GATE_OFFICER" : "AI_YOLO_SYSTEM"
@@ -252,8 +278,8 @@ public class GateVerificationService : IGateVerificationService
             },
             ImageEvidence = new GateVerificationEvidenceInfo
             {
-                VehiclePlateImageUrl = record.VehiclePlateImageUrl,
-                OverviewImageUrl = record.OverviewImageUrl
+                VehiclePlateImageUrl = ImageLink(record.VehiclePlateImageUrl),
+                OverviewImageUrl = ImageLink(record.OverviewImageUrl)
             }
         };
     }
@@ -610,7 +636,7 @@ public class GateVerificationService : IGateVerificationService
         return Regex.Replace(plate, @"[^a-zA-Z0-9]", string.Empty).ToUpperInvariant();
     }
 
-    private static GateVerificationRecordDto MapToDto(GateVerificationRecord r)
+    private GateVerificationRecordDto MapToDto(GateVerificationRecord r)
     {
         return new GateVerificationRecordDto
         {
@@ -634,8 +660,8 @@ public class GateVerificationService : IGateVerificationService
             VehiclePlate = r.VehiclePlate,
             DriverId = r.DriverId,
             DriverName = r.DriverName,
-            VehiclePlateImageUrl = r.VehiclePlateImageUrl,
-            OverviewImageUrl = r.OverviewImageUrl,
+            VehiclePlateImageUrl = ImageLink(r.VehiclePlateImageUrl),
+            OverviewImageUrl = ImageLink(r.OverviewImageUrl),
             Notes = r.Notes,
             ProcessedBy = r.ProcessedBy,
             CreatedAt = r.CreatedAt

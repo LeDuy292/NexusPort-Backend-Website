@@ -1,0 +1,7669 @@
+{
+ "exportedAt": "2026-11-19T18:09:39.131Z",
+ "migrations": [
+  "005",
+  "20260925_001",
+  "20261002_002",
+  "20261003_003",
+  "20261003_004",
+  "20261009_005",
+  "20261012_006",
+  "20261017_007",
+  "20261017_008",
+  "20261017_009",
+  "20261017_010",
+  "20261017_011",
+  "20261017_012",
+  "20261017_013",
+  "20261017_014",
+  "20261017_015",
+  "20261017_016",
+  "20261017_017",
+  "20261018_018",
+  "20261018_019",
+  "20261018_020",
+  "20261022_021",
+  "20261025_022",
+  "20261029_026",
+  "20261029_027",
+  "20261030_028",
+  "20261031_029",
+  "20261104_030",
+  "20261104_031",
+  "20261105_032",
+  "20261106_033",
+  "20261108_035",
+  "20261108_036",
+  "20261109_034",
+  "20261109_035",
+  "20261109_036",
+  "20261109_037",
+  "20261109_038",
+  "20261109_039",
+  "20261109_040",
+  "20261110_034",
+  "20261110_041",
+  "20261112_042",
+  "20261113_043",
+  "20261113_044",
+  "20261114_044",
+  "20261114_045",
+  "20261114_046",
+  "20261114_047",
+  "20261114_048",
+  "20261119_043",
+  "20261119_049",
+  "20261119_050",
+  "20261119_051",
+  "20261119_052",
+  "20261119_053",
+  "20261119_054",
+  "20261119_055",
+  "20261119_056",
+  "20261119_057",
+  "20261119_058",
+  "20261120_059",
+  "20261120_060",
+  "20261120_061",
+  "20261120_062",
+  "20261120_063"
+ ],
+ "tables": {
+  "Equipments": {
+   "columns": {
+    "Id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "EquipmentCode": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "Name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "EquipmentType": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "BlockCode": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "Status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "OperatorId": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "OperatorName": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "Description": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "CreatedAt": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "CreatedBy": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "UpdatedAt": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "UpdatedBy": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "IsDeleted": {
+     "type": "boolean",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (\"Id\")"
+   ],
+   "triggers": []
+  },
+  "account_invitations": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "user_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "request_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "token_hash": {
+     "type": "character",
+     "nullable": false
+    },
+    "expires_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "used_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "account_requests": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "role": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "requested_by": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "username": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "email": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "profile": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "reviewed_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "reviewed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "user_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "audit_logs": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "user_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "action": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "module": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "target_table": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "target_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "old_data": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "new_data": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "ip_address": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "bills_of_lading": {
+   "columns": {
+    "id": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "bl_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "shipping_line_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "voyage_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "shipper_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "consignee_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "consignee_customer_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "port_of_loading": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "port_of_discharge": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "delivery_term": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "bl_release_type": {
+     "type": "enum_bills_of_lading_bl_release_type",
+     "nullable": true
+    },
+    "local_charges_amount": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "local_charges_paid": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "payment_transaction_ref": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "is_customs_cleared": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "liner_hold": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "liner_hold_reason": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "package_count": {
+     "type": "integer",
+     "nullable": true
+    },
+    "total_gross_weight": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "cargo_description": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "booking_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "direction": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "shipper_tax_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "consignee_tax_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "notify_party": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "vessel_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "voyage_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "pol": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "pod": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "shipped_on_board_date": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "confirmation_deadline": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "freight_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "containers": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "draft_version": {
+     "type": "integer",
+     "nullable": true
+    },
+    "qr_data": {
+     "type": "text",
+     "nullable": true
+    },
+    "bl_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "package_unit": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "measurement_cbm": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "freight_amount_usd": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "freight_paid": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "freight_payment_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "local_charges_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "source_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "source_reference": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "issue_date": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "attached_files": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "consignee_hold": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "consignee_hold_reason": {
+     "type": "text",
+     "nullable": true
+    },
+    "is_customs_hold": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "is_carrier_hold": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "in_manifest": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "vessel_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "shipper_company_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "consignee_company_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_bills_of_lading_sync_containers",
+    "trg_bills_of_lading_fill_vessel",
+    "trg_bills_of_lading_fill_company"
+   ]
+  },
+  "bl_containers": {
+   "columns": {
+    "bl_id": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "seal_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "container_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "tare_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "gross_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "vgm_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "direction": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "active": {
+     "type": "boolean",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (bl_id, container_no)"
+   ],
+   "triggers": []
+  },
+  "bl_post_issuance_requests": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "import_shipment_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "bl_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "request_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "initiated_by": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "requested_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "payload": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "fee_vnd": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "fee_paid": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "resolution_note": {
+     "type": "text",
+     "nullable": true
+    },
+    "resolved_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "resolved_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "original_due_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "original_returned_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "reminder_sent_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "overdue_notified_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "booking_batch_trips": {
+   "columns": {
+    "batch_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "sequence_number": {
+     "type": "integer",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "UNIQUE (booking_id)",
+    "PRIMARY KEY (batch_id, sequence_number)"
+   ],
+   "triggers": [
+    "trg_validate_booking_batch_trip"
+   ]
+  },
+  "booking_batches": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "batch_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "request_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "request_hash": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "booking_type": {
+     "type": "booking_type",
+     "nullable": false
+    },
+    "cargo_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "description": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "shared_documents": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "created_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "documents_confirmed_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "UNIQUE (batch_code)",
+    "UNIQUE (carrier_id, request_id)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "booking_containers": {
+   "columns": {
+    "booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "declaration_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_visit_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (booking_id, container_id)"
+   ],
+   "triggers": [
+    "trg_link_booking_container",
+    "trg_validate_changed_link"
+   ]
+  },
+  "booking_dispatch_outbox": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "kind": {
+     "type": "text",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "published_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "booking_dispatch_state": {
+   "columns": {
+    "booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "status": {
+     "type": "text",
+     "nullable": false
+    },
+    "action": {
+     "type": "text",
+     "nullable": false
+    },
+    "arrived_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "ready_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "called_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "call_expires_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "acknowledged_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "hold_until": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "message": {
+     "type": "text",
+     "nullable": true
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "updated_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (booking_id)"
+   ],
+   "triggers": [
+    "trg_booking_dispatch_changed",
+    "trg_dispatch_gate_entry_order"
+   ]
+  },
+  "booking_documents": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_operation_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "document_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "document_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "file_url": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "file_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "file_size_bytes": {
+     "type": "bigint",
+     "nullable": true
+    },
+    "issuer": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "verification_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "verified_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "verified_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "rejection_reason": {
+     "type": "text",
+     "nullable": true
+    },
+    "expiry_date": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "booking_operations": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "operation_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "sequence_number": {
+     "type": "integer",
+     "nullable": false
+    },
+    "expected_gate_direction": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_iso_size": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "cargo_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "cargo_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "carrier_booking_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "bill_of_lading_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "delivery_order_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "customs_declaration_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "seal_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "gross_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "temperature_setpoint": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "temperature_unit": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "un_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "dg_class": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "special_handling_requirements": {
+     "type": "text",
+     "nullable": true
+    },
+    "verification_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "verified_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "verified_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "verification_notes": {
+     "type": "text",
+     "nullable": true
+    },
+    "eir_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "eir_issued_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "container_condition": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "bookings": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "truck_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "booking_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "booking_type": {
+     "type": "booking_type",
+     "nullable": false
+    },
+    "status": {
+     "type": "booking_status",
+     "nullable": false
+    },
+    "appointment_start": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "appointment_end": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "approved_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "approved_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "rejected_reason": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "canceled_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "vehicle_plate": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "vehicle_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "driver_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "valid_from": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "valid_to": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "gate_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "description": {
+     "type": "text",
+     "nullable": true
+    },
+    "is_reefer_power_required": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "target_temperature": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "temperature_unit": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "temp_tolerance": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "reefer_plug_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "reefer_plug_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "reefer_power_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "required_power_kw": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "is_combined": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "trip_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "customer_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "vehicle_snapshot": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "driver_snapshot": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "trailer_number": {
+     "type": "text",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_booking_journey_lifecycle",
+    "trg_driver_booking_changed",
+    "trg_invalidate_booking_dispatch",
+    "trg_invalidate_booking_dispatch_vehicle",
+    "trg_validate_journey_schedule"
+   ]
+  },
+  "cargo_notifications": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "recipient_user_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "recipient_company_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "company_tax_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "recipient_role": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "event_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "direction": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "priority": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "title": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "message": {
+     "type": "text",
+     "nullable": true
+    },
+    "data": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "action_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "action_label": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "action_url": {
+     "type": "text",
+     "nullable": true
+    },
+    "document_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "document_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "dedup_key": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "is_read": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "read_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "cargo_reminders": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "recipient_company_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "company_tax_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "target_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "target_id": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "milestone": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "due_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "remind_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "title": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "message": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "carrier_users": {
+   "columns": {
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "user_id": {
+     "type": "uuid",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (carrier_id, user_id)"
+   ],
+   "triggers": []
+  },
+  "carriers": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "company_name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "tax_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "address": {
+     "type": "text",
+     "nullable": true
+    },
+    "phone": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "email": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "contact_person": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "status": {
+     "type": "company_status",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "container_cargo_types": {
+   "columns": {
+    "code": {
+     "type": "cargo_type",
+     "nullable": false
+    },
+    "name_vi": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "requires_power": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "sort_order": {
+     "type": "integer",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (code)"
+   ],
+   "triggers": []
+  },
+  "container_confirmation_audits": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "condition": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "notes": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "container_status_after": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "confirmed_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)",
+    "UNIQUE (booking_id, container_id)"
+   ],
+   "triggers": []
+  },
+  "container_declarations": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "declared_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "load_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "cargo_type": {
+     "type": "cargo_type",
+     "nullable": true
+    },
+    "gross_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "required_power_kw": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "customer_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "seal_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "import_batch_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "source_row_number": {
+     "type": "integer",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_lock_declaration"
+   ]
+  },
+  "container_identity_repairs": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "old_number": {
+     "type": "text",
+     "nullable": false
+    },
+    "new_number": {
+     "type": "text",
+     "nullable": true
+    },
+    "action": {
+     "type": "text",
+     "nullable": false
+    },
+    "reason": {
+     "type": "text",
+     "nullable": false
+    },
+    "before_snapshot": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "container_import_batches": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "source_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "file_name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "file_size_bytes": {
+     "type": "bigint",
+     "nullable": false
+    },
+    "import_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "total_rows": {
+     "type": "integer",
+     "nullable": false
+    },
+    "success_rows": {
+     "type": "integer",
+     "nullable": false
+    },
+    "duplicate_rows": {
+     "type": "integer",
+     "nullable": false
+    },
+    "failed_rows": {
+     "type": "integer",
+     "nullable": false
+    },
+    "created_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "completed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "container_import_rows": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "import_batch_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "row_number": {
+     "type": "integer",
+     "nullable": false
+    },
+    "normalized_container_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "result_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_visit_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "raw_data": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "errors": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "container_movements": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "movement_type": {
+     "type": "movement_type",
+     "nullable": false
+    },
+    "from_slot_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "to_slot_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "from_area": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "to_area": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "equipment_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "requested_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "performed_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "started_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "completed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "note": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "moved_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "work_order_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "container_positions": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "slot_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "placed_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "placed_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "removed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "is_current": {
+     "type": "boolean",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "container_types": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "size": {
+     "type": "container_size",
+     "nullable": false
+    },
+    "category": {
+     "type": "container_category",
+     "nullable": false
+    },
+    "description": {
+     "type": "text",
+     "nullable": true
+    },
+    "tare_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "max_gross_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "container_visit_access": {
+   "columns": {
+    "container_visit_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "granted_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "granted_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (container_visit_id, carrier_id)"
+   ],
+   "triggers": []
+  },
+  "container_visits": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "visit_reference": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "vessel_call_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "visit_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "load_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "cargo_type": {
+     "type": "cargo_type",
+     "nullable": true
+    },
+    "gross_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "bl_booking_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "customer_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "transport_company_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "valid_to": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "started_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "completed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "source_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "movement_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "data_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "source_reference": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "seal_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "expected_arrival_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "expected_available_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "requested_pickup_date": {
+     "type": "date",
+     "nullable": true
+    },
+    "declared_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "import_batch_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "source_row_number": {
+     "type": "integer",
+     "nullable": true
+    },
+    "requested_service_date": {
+     "type": "date",
+     "nullable": true
+    },
+    "required_power_kw": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "declaration_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "pickup_code": {
+     "type": "text",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_container_visits_updated_at",
+    "trg_snapshot_visit",
+    "trg_protect_visit"
+   ]
+  },
+  "containers": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_type_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "vessel_call_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "seal_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "cargo_type": {
+     "type": "cargo_type",
+     "nullable": false
+    },
+    "status": {
+     "type": "container_status",
+     "nullable": false
+    },
+    "gross_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "is_reefer": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "is_dangerous": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "is_perishable": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "is_oversized": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "expected_gate_out_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "arrived_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "left_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "required_power_kw": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "shipping_line_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "iso_size_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "equipment_description": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "external_length_mm": {
+     "type": "integer",
+     "nullable": true
+    },
+    "external_width_mm": {
+     "type": "integer",
+     "nullable": true
+    },
+    "external_height_mm": {
+     "type": "integer",
+     "nullable": true
+    },
+    "tare_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "max_gross_mass_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "capacity_m3": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "manufacturer": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "identity_quarantined": {
+     "type": "boolean",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "dangerous_goods": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "imo_class": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "un_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "hazard_level": {
+     "type": "severity_level",
+     "nullable": false
+    },
+    "description": {
+     "type": "text",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "UNIQUE (container_id)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "delivery_order_containers": {
+   "columns": {
+    "delivery_order_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "seal_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "tare_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "gross_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "cargo_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "temperature_c": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "cargo_description": {
+     "type": "text",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (delivery_order_id, container_no)"
+   ],
+   "triggers": []
+  },
+  "delivery_orders": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "do_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "bl_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "consignee_name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "consignee_tax_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "vessel_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "voyage_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "valid_until": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "issued_date": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "empty_return_depot": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "containers": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "hold_reason": {
+     "type": "text",
+     "nullable": true
+    },
+    "qr_data": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "free_time_days": {
+     "type": "integer",
+     "nullable": true
+    },
+    "pin_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "issued_by": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "release_officer": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "notes": {
+     "type": "text",
+     "nullable": true
+    },
+    "cancelled_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "cancel_reason": {
+     "type": "text",
+     "nullable": true
+    },
+    "cancelled_by": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "vessel_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "consignee_company_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_delivery_orders_fill_vessel",
+    "trg_delivery_orders_fill_company",
+    "trg_delivery_orders_sync_containers"
+   ]
+  },
+  "driver_booking_notifications": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "user_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "event_key": {
+     "type": "text",
+     "nullable": false
+    },
+    "title": {
+     "type": "text",
+     "nullable": false
+    },
+    "message": {
+     "type": "text",
+     "nullable": false
+    },
+    "is_read": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "driver_route_instructions": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "from_gate": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "to_block_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "route_detail": {
+     "type": "text",
+     "nullable": true
+    },
+    "map_data": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "issued_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "driver_route_progress": {
+   "columns": {
+    "gate_transaction_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "arrived_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "current_node_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "destination_key": {
+     "type": "text",
+     "nullable": true
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (gate_transaction_id, container_id)"
+   ],
+   "triggers": [
+    "trg_smart_route_validate_progress"
+   ]
+  },
+  "drivers": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "full_name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "phone": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "id_card_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "license_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "status": {
+     "type": "driver_status",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "photo_url": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "id_card_front_url": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "id_card_back_url": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "license_image_url": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "license_back_image_url": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "id_card_expiry_date": {
+     "type": "timestamp without time zone",
+     "nullable": true
+    },
+    "license_expiry_date": {
+     "type": "timestamp without time zone",
+     "nullable": true
+    },
+    "user_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "email": {
+     "type": "character varying",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "eir_damage_observations": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "eir_transaction_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "condition_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "component_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "damage_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "description": {
+     "type": "text",
+     "nullable": false
+    },
+    "length_cm": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "width_cm": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "height_cm": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "severity": {
+     "type": "severity_level",
+     "nullable": true
+    },
+    "observed_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "observed_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "raw_payload": {
+     "type": "jsonb",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_protect_receipt_child"
+   ]
+  },
+  "eir_media": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "eir_transaction_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_visit_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "gate_transaction_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "truck_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "subject_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "media_kind": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "capture_stage": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "movement_direction": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "view_label": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "sequence_no": {
+     "type": "integer",
+     "nullable": false
+    },
+    "media_url": {
+     "type": "text",
+     "nullable": true
+    },
+    "storage_provider": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "bucket_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "storage_key": {
+     "type": "text",
+     "nullable": true
+    },
+    "mime_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "file_size_bytes": {
+     "type": "bigint",
+     "nullable": true
+    },
+    "sha256": {
+     "type": "character",
+     "nullable": true
+    },
+    "camera_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "captured_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "captured_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "detected_value": {
+     "type": "text",
+     "nullable": true
+    },
+    "recognition_confidence": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "ai_result": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "metadata": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "is_primary": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_protect_receipt_child"
+   ]
+  },
+  "eir_seals": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "eir_transaction_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "sequence_no": {
+     "type": "smallint",
+     "nullable": false
+    },
+    "seal_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "raw_value": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "seal_condition": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "notes": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_protect_receipt_child"
+   ]
+  },
+  "eir_transactions": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "reference_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_visit_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "gate_transaction_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "activity": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "eir_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "terminal_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "terminal_name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "operator_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "operator_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "customer_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "location_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_slot_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "gate_label": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "lane_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "valid_to": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "check_in_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "check_out_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "bl_booking_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "load_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "iso_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "container_type_description": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "size_feet": {
+     "type": "smallint",
+     "nullable": true
+    },
+    "cargo_type_description": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "gross_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "temperature_c": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "ventilation_description": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "imdg_class": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "sound_damage_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "remark": {
+     "type": "text",
+     "nullable": true
+    },
+    "vessel_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "voyage_in": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "voyage_out": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "vessel_datetime_1": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "vessel_datetime_2": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "transport_company_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "truck_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "plate_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "empty_return_place": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "terminal_signatory": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "transportation_signatory": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "source_system": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "source_file_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "raw_payload": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "issued_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "created_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "declaration_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "required_power_kw": {
+     "type": "numeric",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_eir_transactions_updated_at",
+    "trg_protect_receipt"
+   ]
+  },
+  "eport_catalog_audit": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "entity_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "actor_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "action": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "before_data": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "after_data": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "eport_service_bills": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "draft_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "request_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "actor_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "external_reference": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "total": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "currency": {
+     "type": "character",
+     "nullable": false
+    },
+    "fees": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "note": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "fingerprint": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "eport_bill_immutable"
+   ]
+  },
+  "eport_service_drafts": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "created_by": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "flow": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "main_service_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "content": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "source_snapshot": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "container_snapshots": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "eport_service_draft_workflow"
+   ]
+  },
+  "eport_service_email_verifications": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "draft_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "actor_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "email": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "source_hash": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "source_payload": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "code_hash": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "salt": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "attempts": {
+     "type": "integer",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "expires_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "verified_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "invalidated_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "eport_service_mail_queue": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "draft_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "kind": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "recipient": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "payload": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "attempts": {
+     "type": "integer",
+     "nullable": false
+    },
+    "available_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "lease_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "last_error": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "sent_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "eport_service_order_events": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "draft_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "actor_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "action": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "from_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "to_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "reason": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "request_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "fingerprint": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "data": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "eport_service_order_event_immutable"
+   ]
+  },
+  "eport_service_order_states": {
+   "columns": {
+    "draft_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "approval_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "payment_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (draft_id)"
+   ],
+   "triggers": []
+  },
+  "eport_service_payments": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "draft_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "request_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "method": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "order_code": {
+     "type": "bigint",
+     "nullable": false
+    },
+    "payment_link_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "checkout_url": {
+     "type": "text",
+     "nullable": true
+    },
+    "qr_code": {
+     "type": "text",
+     "nullable": true
+    },
+    "gateway_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "gateway_error": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "amount": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "currency": {
+     "type": "character",
+     "nullable": false
+    },
+    "customer_reference": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "bank_reference": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "reason": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "created_by": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "transfer_amount": {
+     "type": "numeric",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "eport_service_payment_identity"
+   ]
+  },
+  "eport_service_registrations": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "draft_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "confirmed_by": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "draft_version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "quote_token": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "payment_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "currency": {
+     "type": "character",
+     "nullable": false
+    },
+    "total": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "snapshot": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "confirmed_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "eport_dispatcher_submission",
+    "eport_service_registration_email_guard",
+    "eport_service_registration_workflow",
+    "eport_service_registration_immutable"
+   ]
+  },
+  "eport_services": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "description": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "direction": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "unit": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "icon": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "conditions": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "is_active": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "requires_approval": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "eport_tariffs": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "service_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "size": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "equipment": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "amount": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "currency": {
+     "type": "character",
+     "nullable": false
+    },
+    "unit": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "effective_from": {
+     "type": "date",
+     "nullable": false
+    },
+    "effective_to": {
+     "type": "date",
+     "nullable": true
+    },
+    "is_active": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "note": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "created_by": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "retired_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "retired_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "equipment": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "type": {
+     "type": "equipment_type",
+     "nullable": false
+    },
+    "status": {
+     "type": "equipment_status",
+     "nullable": false
+    },
+    "current_block_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "UNIQUE (code)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "exception_items": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "category": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "entity_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "reason": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "severity": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "resolved_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "notes": {
+     "type": "character varying",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "export_booking_containers": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "export_booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "declaration_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "type_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "seal_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "vgm_kg": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "cargo_type": {
+     "type": "text",
+     "nullable": false
+    },
+    "target_temperature": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "un_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "dg_class": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "customs_document_url": {
+     "type": "text",
+     "nullable": true
+    },
+    "customs_cleared": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "active": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "gate_in_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "loaded_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "exclusion_reason": {
+     "type": "text",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "export_booking_drafts": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "created_by": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "updated_by": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "content": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "last_request_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "content_hash": {
+     "type": "text",
+     "nullable": false
+    },
+    "submitted_booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "export_bookings": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "voyage_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_type_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "quantity": {
+     "type": "integer",
+     "nullable": false
+    },
+    "commodity_description": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "port_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "si": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "si_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "draft": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "draft_version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "freight_paid": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "bl_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "created_by": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "submission": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "preparation": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "booking_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "shipping_line_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "shipper_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "shipper_customer_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "port_of_discharge": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "equipment_size_type": {
+     "type": "enum_export_bookings_equipment_size_type",
+     "nullable": true
+    },
+    "required_grade": {
+     "type": "enum_export_bookings_required_grade",
+     "nullable": true
+    },
+    "allocation_mode": {
+     "type": "enum_export_bookings_allocation_mode",
+     "nullable": true
+    },
+    "total_qty": {
+     "type": "integer",
+     "nullable": true
+    },
+    "picked_up_empty_qty": {
+     "type": "integer",
+     "nullable": true
+    },
+    "gated_in_full_qty": {
+     "type": "integer",
+     "nullable": true
+    },
+    "allocated_seal_prefix": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "booking_valid_until": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "allow_auto_late_gate_in": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "line_user_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "request_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "request_hash": {
+     "type": "text",
+     "nullable": true
+    },
+    "draft_deadline": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "amendment_request": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "amendment_fee_vnd": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "amendment_fee_status": {
+     "type": "character varying",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_export_bookings_fill_line"
+   ]
+  },
+  "export_document_files": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "uploaded_by": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "object_key": {
+     "type": "text",
+     "nullable": false
+    },
+    "original_name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "content_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "size_bytes": {
+     "type": "bigint",
+     "nullable": false
+    },
+    "sha256": {
+     "type": "character",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "UNIQUE (object_key)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "export_gate_links": {
+   "columns": {
+    "gate_booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "export_booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "export_container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (gate_booking_id)"
+   ],
+   "triggers": []
+  },
+  "export_history": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "export_booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "voyage_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "event": {
+     "type": "text",
+     "nullable": false
+    },
+    "actor_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "description": {
+     "type": "text",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "export_inbox": {
+   "columns": {
+    "event_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "export_booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "voyage_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "event": {
+     "type": "text",
+     "nullable": false
+    },
+    "payload_hash": {
+     "type": "text",
+     "nullable": false
+    },
+    "received_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (event_id)"
+   ],
+   "triggers": []
+  },
+  "export_manifests": {
+   "columns": {
+    "voyage_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "snapshot": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "status": {
+     "type": "text",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "sent_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (voyage_id)"
+   ],
+   "triggers": []
+  },
+  "export_outbox": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "export_booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "voyage_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "event": {
+     "type": "text",
+     "nullable": false
+    },
+    "payload": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "delivered_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "export_source_reservations": {
+   "columns": {
+    "export_booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "declaration_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "active": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (export_booking_id, container_id)"
+   ],
+   "triggers": []
+  },
+  "export_voyages": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "line_user_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "vessel_name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "voyage_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "port_of_loading": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "port_of_discharge": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "etd": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "eta": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "receive_from": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "cy_cutoff": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "vgm_cutoff": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "si_cutoff": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "departed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "shipping_line_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "vessel_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_export_voyages_fill_line",
+    "trg_export_voyages_fill_vessel"
+   ]
+  },
+  "gate_barrier_commands": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "gate_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "gate_code": {
+     "type": "text",
+     "nullable": false
+    },
+    "action": {
+     "type": "text",
+     "nullable": false
+    },
+    "status": {
+     "type": "text",
+     "nullable": false
+    },
+    "source": {
+     "type": "text",
+     "nullable": false
+    },
+    "verification_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "entry_order_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "requested_by": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "reason": {
+     "type": "text",
+     "nullable": true
+    },
+    "requested_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "actual_seal_number": {
+     "type": "character varying",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "gate_entry_orders": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "truck_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "vehicle_plate": {
+     "type": "text",
+     "nullable": false
+    },
+    "status": {
+     "type": "text",
+     "nullable": false
+    },
+    "dispatch_version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "issued_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "issued_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "valid_from": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "valid_until": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "acknowledged_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "consumed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "gate_transaction_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "gate_transaction_containers": {
+   "columns": {
+    "gate_transaction_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (gate_transaction_id, container_id)"
+   ],
+   "triggers": []
+  },
+  "gate_transactions": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "gate_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "truck_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "gate_type": {
+     "type": "gate_type",
+     "nullable": false
+    },
+    "status": {
+     "type": "gate_status",
+     "nullable": false
+    },
+    "checked_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "plate_number_detected": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "checked_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "completed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "block_reason": {
+     "type": "text",
+     "nullable": true
+    },
+    "booking_operation_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "recognition_result": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "override_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "override_reason": {
+     "type": "text",
+     "nullable": true
+    },
+    "eir_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "actual_seal_number": {
+     "type": "character varying",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_export_gate_passage",
+    "trg_finish_pickup_visit"
+   ]
+  },
+  "gate_verification_records": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "verification_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "gate_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "lane_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "verification_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "failure_reason": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "verified_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "detected_plate": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "plate_confidence": {
+     "type": "double precision",
+     "nullable": true
+    },
+    "rfid_tag": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "vehicle_detected": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "camera_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "booking_number": {
+     "type": "text",
+     "nullable": true
+    },
+    "truck_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "vehicle_plate": {
+     "type": "text",
+     "nullable": true
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "driver_name": {
+     "type": "text",
+     "nullable": true
+    },
+    "plate_image_url": {
+     "type": "text",
+     "nullable": true
+    },
+    "overview_image_url": {
+     "type": "text",
+     "nullable": true
+    },
+    "notes": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "processed_by": {
+     "type": "text",
+     "nullable": true
+    },
+    "ocr_raw_data": {
+     "type": "text",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "gates": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "location": {
+     "type": "text",
+     "nullable": true
+    },
+    "is_active": {
+     "type": "boolean",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "import_shipment_containers": {
+   "columns": {
+    "shipment_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "iso_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "seal_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "gross_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (shipment_id, container_no)"
+   ],
+   "triggers": []
+  },
+  "import_shipments": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "bl_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "pre_alert_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "line_user_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "consignee_company_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "vessel_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "voyage_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "port_of_loading": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "port_of_discharge": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "etd": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "eta": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "bl_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "freight_terms": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "shipper": {
+     "type": "text",
+     "nullable": true
+    },
+    "consignee": {
+     "type": "text",
+     "nullable": true
+    },
+    "notify_party": {
+     "type": "text",
+     "nullable": true
+    },
+    "cargo_description": {
+     "type": "text",
+     "nullable": true
+    },
+    "containers": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "reconciled_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "mismatch": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "mismatch_note": {
+     "type": "text",
+     "nullable": true
+    },
+    "notice": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "notice_version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "notice_deadline": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "auto_accepted": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "invoice_info": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "contact_info": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "amendment_request": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "authorization_file_url": {
+     "type": "text",
+     "nullable": true
+    },
+    "release_check": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "do_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "shipping_line_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "vessel_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "UNIQUE (bl_number)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_import_shipments_fill_line",
+    "trg_import_shipments_fill_vessel",
+    "trg_import_shipments_sync_containers"
+   ]
+  },
+  "invoices": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "invoice_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "status": {
+     "type": "invoice_status",
+     "nullable": false
+    },
+    "subtotal": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "tax_amount": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "total_amount": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "paid_amount": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "issued_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "issued_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "due_date": {
+     "type": "date",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "nexusport_schema_versions": {
+   "columns": {
+    "version": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "description": {
+     "type": "text",
+     "nullable": false
+    },
+    "applied_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (version)"
+   ],
+   "triggers": []
+  },
+  "notifications": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "receiver_user_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "receiver_carrier_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "channel": {
+     "type": "notification_channel",
+     "nullable": false
+    },
+    "title": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "message": {
+     "type": "text",
+     "nullable": false
+    },
+    "is_read": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "read_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "scheduled_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "sent_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "payments": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "invoice_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "method": {
+     "type": "payment_method",
+     "nullable": false
+    },
+    "status": {
+     "type": "payment_status",
+     "nullable": false
+    },
+    "amount": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "transaction_ref": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "paid_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "permissions": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "module": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "description": {
+     "type": "text",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "UNIQUE (code)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "persistent_yard_reservations": {
+   "columns": {
+    "id": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "booking_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "block_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "bay": {
+     "type": "integer",
+     "nullable": true
+    },
+    "row_no": {
+     "type": "integer",
+     "nullable": true
+    },
+    "tier": {
+     "type": "integer",
+     "nullable": true
+    },
+    "size": {
+     "type": "integer",
+     "nullable": true
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "data": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "pre_alert_containers": {
+   "columns": {
+    "pre_alert_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "iso_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "seal_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "vgm_kg": {
+     "type": "numeric",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (pre_alert_id, container_no)"
+   ],
+   "triggers": []
+  },
+  "preparation_configs": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "lead_time_minutes": {
+     "type": "integer",
+     "nullable": false
+    },
+    "max_rehandle_per_task": {
+     "type": "integer",
+     "nullable": false
+    },
+    "staging_block_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "reschedule_grace_minutes": {
+     "type": "integer",
+     "nullable": false
+    },
+    "delay_check_interval_seconds": {
+     "type": "integer",
+     "nullable": false
+    },
+    "estimated_minutes_per_move": {
+     "type": "integer",
+     "nullable": false
+    },
+    "weight_due_near": {
+     "type": "integer",
+     "nullable": false
+    },
+    "weight_reefer": {
+     "type": "integer",
+     "nullable": false
+    },
+    "weight_expiring_free_time": {
+     "type": "integer",
+     "nullable": false
+    },
+    "outbound_lead_time_minutes": {
+     "type": "integer",
+     "nullable": false
+    },
+    "reefer_max_unplug_minutes": {
+     "type": "integer",
+     "nullable": false
+    },
+    "closing_time_grace_minutes": {
+     "type": "integer",
+     "nullable": false
+    },
+    "marshalling_mode": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "preparation_outbox_messages": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "event_id": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "event_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "payload": {
+     "type": "text",
+     "nullable": false
+    },
+    "version": {
+     "type": "integer",
+     "nullable": false
+    },
+    "occurred_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "published_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "retry_count": {
+     "type": "integer",
+     "nullable": false
+    },
+    "error": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "preparation_tasks": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "direction": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "service_order_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "slot_booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "target_ready_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "start_by": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "priority": {
+     "type": "integer",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "planned_rehandle_count": {
+     "type": "integer",
+     "nullable": false
+    },
+    "actual_rehandle_count": {
+     "type": "integer",
+     "nullable": false
+    },
+    "voyage_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "vessel_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "voyage_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "stowage_position": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "loading_sequence": {
+     "type": "integer",
+     "nullable": true
+    },
+    "quay_crane_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "pod": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "vgm_weight": {
+     "type": "double precision",
+     "nullable": true
+    },
+    "is_vgm_verified": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "is_customs_cleared": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "has_hold_flag": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "ready_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "cancel_reason": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "note": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "row_version": {
+     "type": "bigint",
+     "nullable": false
+    },
+    "vessel_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_preparation_tasks_fill_vessel"
+   ]
+  },
+  "preparation_work_orders": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "preparation_task_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "yard_task_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "sequence": {
+     "type": "integer",
+     "nullable": false
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "from_slot_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "to_slot_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "equipment_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "assignee_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "priority": {
+     "type": "integer",
+     "nullable": false
+    },
+    "due_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "started_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "completed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "fail_reason": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "charge_party": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "selection_reason": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "row_version": {
+     "type": "bigint",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "reefer_alerts": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "alert_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "session_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "plug_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "alert_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "severity": {
+     "type": "alert_severity",
+     "nullable": false
+    },
+    "status": {
+     "type": "reefer_alert_status",
+     "nullable": false
+    },
+    "message": {
+     "type": "text",
+     "nullable": false
+    },
+    "payload": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "acknowledged_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "acknowledged_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "resolved_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "resolved_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "resolution_notes": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "reefer_plugs": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "slot_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "plug_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "is_available": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "is_power_on": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "usage_status": {
+     "type": "socket_usage_status",
+     "nullable": false
+    },
+    "technical_status": {
+     "type": "socket_technical_status",
+     "nullable": false
+    },
+    "voltage_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "max_power_kw": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "last_maintained_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "reefer_power_requests": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "request_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "target_temperature": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "temperature_unit": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "temp_tolerance": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "cargo_description": {
+     "type": "text",
+     "nullable": true
+    },
+    "special_instructions": {
+     "type": "text",
+     "nullable": true
+    },
+    "status": {
+     "type": "reefer_request_status",
+     "nullable": false
+    },
+    "requested_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "cancelled_reason": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "booking_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "required_power_kw": {
+     "type": "numeric",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "reefer_power_sessions": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "plug_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "assigned_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "started_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "ended_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "is_active": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "last_checked_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "note": {
+     "type": "text",
+     "nullable": true
+    },
+    "request_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "session_status": {
+     "type": "power_session_status",
+     "nullable": false
+    },
+    "actual_power_status": {
+     "type": "actual_power_status",
+     "nullable": false
+    },
+    "assigned_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "power_confirmed_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "termination_reason": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "parent_session_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "billable_hours": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "booking_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "required_power_kw": {
+     "type": "numeric",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "reefer_temperature_records": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "session_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "supply_temperature": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "return_temperature": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "temperature_unit": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "ambient_temperature": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "data_source": {
+     "type": "temp_data_source",
+     "nullable": false
+    },
+    "is_abnormal": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "recorded_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "device_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "notes": {
+     "type": "text",
+     "nullable": true
+    },
+    "recorded_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "roles": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "description": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "UNIQUE (code)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "shipment_document_events": {
+   "columns": {
+    "id": {
+     "type": "bigint",
+     "nullable": false
+    },
+    "direction": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "file_ref": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "document_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "action": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "from_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "to_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "actor_user_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "actor_username": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "actor_role": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "channel": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "field_changes": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "document_version": {
+     "type": "integer",
+     "nullable": true
+    },
+    "snapshot": {
+     "type": "jsonb",
+     "nullable": true
+    },
+    "note": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_sde_immutable"
+   ]
+  },
+  "shipment_pre_alerts": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "export_booking_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "bl_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "vessel_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "voyage_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "port_of_loading": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "port_of_discharge": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "etd": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "eta": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "bl_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "freight_terms": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "shipper": {
+     "type": "text",
+     "nullable": true
+    },
+    "consignee": {
+     "type": "text",
+     "nullable": true
+    },
+    "notify_party": {
+     "type": "text",
+     "nullable": true
+    },
+    "containers": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "payload": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "sent_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "received_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "vessel_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "UNIQUE (bl_number)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_shipment_pre_alerts_fill_vessel",
+    "trg_shipment_pre_alerts_sync_containers"
+   ]
+  },
+  "shipping_line_accounts": {
+   "columns": {
+    "user_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "shipping_line_id": {
+     "type": "uuid",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (user_id)"
+   ],
+   "triggers": []
+  },
+  "shipping_line_documents": {
+   "columns": {
+    "seq": {
+     "type": "bigint",
+     "nullable": false
+    },
+    "kind": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "doc_key": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "data": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (kind, doc_key)"
+   ],
+   "triggers": []
+  },
+  "shipping_line_prefixes": {
+   "columns": {
+    "prefix": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "shipping_line_id": {
+     "type": "uuid",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (prefix)"
+   ],
+   "triggers": []
+  },
+  "shipping_lines": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "full_name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "short_name": {
+     "type": "character varying",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "shipping_manifest_bills": {
+   "columns": {
+    "manifest_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "owner_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "bl_number": {
+     "type": "character varying",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (owner_id, bl_number)"
+   ],
+   "triggers": []
+  },
+  "shipping_manifests": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "owner_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "request_key": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "payload": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "revision": {
+     "type": "integer",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "UNIQUE (owner_id, request_key)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "slot_reservations": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "slot_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "work_order_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "reserved_until": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "smart_yard_conditions": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "map_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "target_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "target_id": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "restricted": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "congestion": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "source": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "valid_until": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "observed_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_by": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "UNIQUE (map_id, target_type, target_id)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "smart_yard_maps": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "version": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "map_data": {
+     "type": "jsonb",
+     "nullable": false
+    },
+    "is_active": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "source": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "updated_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)",
+    "UNIQUE (version)"
+   ],
+   "triggers": []
+  },
+  "transport_trip_history": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "trip_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "from_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "to_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "changed_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "note": {
+     "type": "text",
+     "nullable": true
+    },
+    "changed_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "transport_trips": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "trip_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "booking_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "booking_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "truck_plate": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "truck_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "container_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "cargo_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "gate_in_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "gate_out_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_block": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_slot": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_zone": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_instructions": {
+     "type": "text",
+     "nullable": true
+    },
+    "yard_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_address": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_lat": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "yard_lng": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "seal_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "container_condition": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "recipient_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "acknowledged_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "vehicle_picked_up_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "container_picked_up_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "gate_in_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "in_transit_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "arrived_at_yard_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "container_delivered_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "gate_out_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "vehicle_returned_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "completed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "appointment_start": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "appointment_end": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "note": {
+     "type": "text",
+     "nullable": true
+    },
+    "assigned_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)",
+    "UNIQUE (trip_code)",
+    "UNIQUE (trip_code)",
+    "UNIQUE (trip_code)"
+   ],
+   "triggers": []
+  },
+  "trucks": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "carrier_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "plate_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "vehicle_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "status": {
+     "type": "truck_status",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "rfid_tag": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "description": {
+     "type": "text",
+     "nullable": true
+    },
+    "registration_image_url": {
+     "type": "text",
+     "nullable": true
+    },
+    "photo_url": {
+     "type": "text",
+     "nullable": true
+    },
+    "current_location": {
+     "type": "text",
+     "nullable": true
+    },
+    "max_payload_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "payload_confirmed_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "payload_confirmed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "payload_registration_image_url": {
+     "type": "text",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)",
+    "UNIQUE (plate_number)"
+   ],
+   "triggers": []
+  },
+  "unclaimed_consignee_queue": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "manifest_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "bl_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "consignee_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "consignee_tax_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "container_count": {
+     "type": "integer",
+     "nullable": true
+    },
+    "vessel_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "voyage_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "eta": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "claimed_by_user_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "claimed_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "vessel_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_unclaimed_consignee_queue_fill_vessel"
+   ]
+  },
+  "users": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "username": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "email": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "password": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "role": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "full_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "is_active": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "invitation_pending": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "email_verified_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "reset_token": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "reset_token_exp": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "session_id": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "UNIQUE (email)",
+    "PRIMARY KEY (id)",
+    "UNIQUE (username)"
+   ],
+   "triggers": []
+  },
+  "vessel_calls": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "vessel_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "call_code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "eta": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "etd": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "ata": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "atd": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "status": {
+     "type": "vessel_call_status",
+     "nullable": false
+    },
+    "created_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "UNIQUE (call_code)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "vessels": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "imo_number": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "call_sign": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "operator_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "capacity_teu": {
+     "type": "integer",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "UNIQUE (imo_number)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "yard_blocks": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "code": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "zone": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "max_capacity": {
+     "type": "integer",
+     "nullable": false
+    },
+    "current_occupancy": {
+     "type": "integer",
+     "nullable": false
+    },
+    "is_reefer_area": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "is_dangerous_area": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "is_oversized_area": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "is_near_gate": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "is_active": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "layout_version": {
+     "type": "text",
+     "nullable": true
+    },
+    "bay_modules": {
+     "type": "integer",
+     "nullable": true
+    },
+    "row_count": {
+     "type": "integer",
+     "nullable": true
+    },
+    "tier_count": {
+     "type": "integer",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "UNIQUE (code)",
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "yard_gate_out_requests": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "trip_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_id": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "container_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "cargo_type": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "driver_name": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "driver_phone": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "truck_plate": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "gate_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "booking_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "carrier_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "vessel_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "weight_kg": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "seal_number": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "yard_block": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "yard_bay": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_row": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_tier": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_slot": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "slot_status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "released_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "blocking_containers": {
+     "type": "integer",
+     "nullable": true
+    },
+    "rtg_crane": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "rtg_operator": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "flow_step": {
+     "type": "integer",
+     "nullable": true
+    },
+    "status": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "urgency": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "condition": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "verified_container_id": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "verified_seal": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "verified_no_damage": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "verified_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "verified_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "loaded_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "requested_time": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "note": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "vessel_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_yard_gate_out_requests_fill_vessel"
+   ]
+  },
+  "yard_operation_events": {
+   "columns": {
+    "Id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "operation_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "driver_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "operation_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "event_type": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "delivery_status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "occurred_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "published_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "delivery_error": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (\"Id\")"
+   ],
+   "triggers": []
+  },
+  "yard_receipts": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_no": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "expected_seal_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "actual_seal_no": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "is_seal_intact": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "is_matching_container": {
+     "type": "boolean",
+     "nullable": true
+    },
+    "condition": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "notes": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "received_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "received_by": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "inspector_name": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "yard_block_code": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "location_coordinate": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "created_by": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "updated_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "updated_by": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "is_deleted": {
+     "type": "boolean",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "yard_restack_plan_steps": {
+   "columns": {
+    "Id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "PlanId": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "StepNumber": {
+     "type": "integer",
+     "nullable": false
+    },
+    "ContainerNo": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "ContainerType": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "IsTargetContainer": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "StepType": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "FromLocation": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "ToLocation": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "Status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "EquipmentCode": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "OperatorName": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "EstimatedDurationMinutes": {
+     "type": "integer",
+     "nullable": false
+    },
+    "Fee": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "Reason": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "YardTaskId": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "CreatedAt": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "UpdatedAt": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "CompletedAt": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "IsDeleted": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "CreatedBy": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "UpdatedBy": {
+     "type": "character varying",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (\"Id\")"
+   ],
+   "triggers": []
+  },
+  "yard_restack_plans": {
+   "columns": {
+    "Id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "PlanCode": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "TargetContainerNo": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "TargetContainerType": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "TargetLocation": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "BlockCode": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "TargetDestination": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "TotalMoves": {
+     "type": "integer",
+     "nullable": false
+    },
+    "RestackBackToOriginal": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "Status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "EstimatedMinutes": {
+     "type": "integer",
+     "nullable": false
+    },
+    "EstimatedFee": {
+     "type": "numeric",
+     "nullable": false
+    },
+    "IsBillable": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "Notes": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "AssignedEquipmentCode": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "AssignedOperatorName": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "CreatedBy": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "CreatedAt": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "UpdatedAt": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "CompletedAt": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "IsDeleted": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "UpdatedBy": {
+     "type": "character varying",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (\"Id\")"
+   ],
+   "triggers": []
+  },
+  "yard_slot_reservations": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "slot_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "container_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "reserved_by": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "reserved_from": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "reserved_to": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "reason": {
+     "type": "text",
+     "nullable": true
+    },
+    "created_at": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": []
+  },
+  "yard_slots": {
+   "columns": {
+    "id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "block_id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "bay": {
+     "type": "integer",
+     "nullable": false
+    },
+    "row_no": {
+     "type": "integer",
+     "nullable": false
+    },
+    "tier": {
+     "type": "integer",
+     "nullable": false
+    },
+    "status": {
+     "type": "yard_slot_status",
+     "nullable": false
+    },
+    "max_weight_kg": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "has_reefer_plug": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "container_length_ft": {
+     "type": "smallint",
+     "nullable": true
+    },
+    "module_start": {
+     "type": "integer",
+     "nullable": true
+    },
+    "module_span": {
+     "type": "integer",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (id)"
+   ],
+   "triggers": [
+    "trg_tien_sa_slot_footprint"
+   ]
+  },
+  "yard_tasks": {
+   "columns": {
+    "Id": {
+     "type": "uuid",
+     "nullable": false
+    },
+    "TaskCode": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "OperationType": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "ContainerId": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "ContainerNo": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "ContainerType": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "CargoType": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "VehicleId": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "VehiclePlate": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "DriverId": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "DriverName": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "FromLocation": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "ToLocation": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "BlockCode": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "EquipmentId": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "EquipmentCode": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "EquipmentType": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "OperatorId": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "OperatorName": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "Priority": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "Status": {
+     "type": "character varying",
+     "nullable": false
+    },
+    "DueTime": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "AssignedAt": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "AssignedBy": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "StartTime": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "EndTime": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "ExpectedSealNo": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "ActualSealNo": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "Condition": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "ReceivedAt": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "ReceivedBy": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "CompletedLocation": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "Notes": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "CreatedAt": {
+     "type": "timestamp with time zone",
+     "nullable": false
+    },
+    "CreatedBy": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "UpdatedAt": {
+     "type": "timestamp with time zone",
+     "nullable": true
+    },
+    "UpdatedBy": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "IsDeleted": {
+     "type": "boolean",
+     "nullable": false
+    },
+    "InternalFee": {
+     "type": "numeric",
+     "nullable": true
+    },
+    "ShiftingReason": {
+     "type": "character varying",
+     "nullable": true
+    },
+    "booking_id": {
+     "type": "uuid",
+     "nullable": true
+    },
+    "container_visit_id": {
+     "type": "uuid",
+     "nullable": true
+    }
+   },
+   "constraints": [
+    "PRIMARY KEY (\"Id\")"
+   ],
+   "triggers": []
+  }
+ }
+}

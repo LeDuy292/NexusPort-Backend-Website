@@ -4,13 +4,31 @@ const {
   vessels,
   voyages,
   cutOffHistory,
-  billsOfLading,
   shippingInstructions,
   manifests,
-  deliveryOrders,
   portReconciliationRecords,
   resetData,
 } = require('./shippingLine.data');
+const repo = require('./shippingLine.repository');
+const { QueryTypes } = require('sequelize');
+const { recordDocumentEvent } = require('../document-workflow/documentEvents');
+const { wrapService, resetStored } = require('./shippingLine.state');
+
+// Gắn thông tin e-D/O (đang hiệu lực / đã hủy gần nhất) vào một B/L
+function attachEdo(bl, edos) {
+  const mine = edos.filter(d => repo.norm(d.blNumber) === repo.norm(bl.blNumber));
+  const activeEdo = mine.find(d => d.status !== 'CANCELLED');
+  const lastCancelledEdo = mine.find(d => d.status === 'CANCELLED');
+  return {
+    ...bl,
+    edoIssued: Boolean(activeEdo),
+    edoNumber: activeEdo ? activeEdo.edoNumber : null,
+    activeEdo: activeEdo || null,
+    lastCancelledEdo: !activeEdo && lastCancelledEdo ? lastCancelledEdo : null,
+  };
+}
+
+const blEventRef = (bl) => bl.bookingNo || bl.blNumber;
 
 // ISO 6346 validation helper: 4 chữ cái (mã chủ sở hữu/loại) + 6 số sê-ri + 1 chữ số kiểm tra (Check digit)
 function validateContainerNumberISO(containerNo) {
@@ -60,6 +78,7 @@ class ShippingLineService {
   // Khôi phục dữ liệu mẫu về trạng thái gốc
   async resetSeedData() {
     const summary = resetData();
+    await resetStored();
     return summary;
   }
 
@@ -67,6 +86,8 @@ class ShippingLineService {
   // 1. DASHBOARD OVERVIEW
   // ═══════════════════════════════════════════════════════════════════════════
   async getDashboardSummary() {
+    const billsOfLading = await repo.listBls();
+    const deliveryOrders = await repo.listDos();
     // 1. KPIs
     const totalVessels = vessels.length;
     const activeVoyages = voyages.filter(v => ['SCHEDULED', 'IN_TRANSIT', 'BERTHED', 'OPERATING'].includes(v.status)).length;
@@ -194,6 +215,33 @@ class ShippingLineService {
     );
   }
 
+  async createVessel(payload = {}, user = 'shipping01') {
+    const vesselName = String(payload.vesselName || '').trim().replace(/\s+/g, ' ').toUpperCase();
+    const imoNumber = String(payload.imoNumber || '').replace(/\D/g, '');
+    const callSign = String(payload.callSign || '').trim().toUpperCase();
+    const capacityTeu = Number(payload.capacityTeu);
+    if (!vesselName) throw new Error('Tên tàu là bắt buộc');
+    if (!/^\d{7}$/.test(imoNumber)) throw new Error('Số IMO gồm đúng 7 chữ số');
+    if (!callSign) throw new Error('Hô hiệu (Call Sign) là bắt buộc');
+    if (!Number.isFinite(capacityTeu) || capacityTeu <= 0) throw new Error('Sức chở (TEU) phải lớn hơn 0');
+    if (vessels.some(v => v.imoNumber === imoNumber)) throw new Error(`Số IMO ${imoNumber} đã có trong danh mục`);
+    if (vessels.some(v => v.vesselName.toUpperCase() === vesselName)) throw new Error(`Tàu ${vesselName} đã có trong danh mục`);
+
+    const vessel = {
+      id: `ves-${Date.now()}`,
+      vesselName,
+      imoNumber,
+      callSign,
+      flag: String(payload.flag || '').trim() || 'Chưa cập nhật',
+      vesselType: String(payload.vesselType || '').trim() || 'Container Ship',
+      capacityTeu: Math.round(capacityTeu),
+      status: 'ACTIVE',
+      createdBy: user,
+    };
+    vessels.unshift(vessel);
+    return vessel;
+  }
+
   async getVoyages(filters = {}) {
     let result = [...voyages];
     if (filters.status) {
@@ -215,6 +263,7 @@ class ShippingLineService {
     const voy = voyages.find(v => v.id === id || v.voyageNumber === id);
     if (!voy) throw new Error('Không tìm thấy thông tin chuyến tàu');
 
+    const billsOfLading = await repo.listBls();
     const relatedManifests = manifests.filter(m => m.voyageNumber === voy.voyageNumber);
     const relatedBls = billsOfLading.filter(b => b.voyageNumber === voy.voyageNumber);
     const history = cutOffHistory.filter(h => h.voyageNumber === voy.voyageNumber);
@@ -250,7 +299,7 @@ class ShippingLineService {
     }
 
     const newVoyage = {
-      id: `voy-${Date.now().toString().slice(-4)}`,
+      id: `voy-${Date.now()}`,
       voyageNumber,
       vesselId: vessel.id,
       vesselName: vessel.vesselName,
@@ -344,6 +393,7 @@ class ShippingLineService {
   }
 
   async getManifestDetail(id) {
+    const billsOfLading = await repo.listBls();
     const mnf = manifests.find(m => m.id === id || m.manifestNumber === id);
     if (!mnf) throw new Error('Không tìm thấy bản khai hàng hóa (Manifest)');
 
@@ -441,6 +491,7 @@ class ShippingLineService {
 
   // Lấy danh sách Vận đơn (B/L) ứng viên cho chuyến tàu (dùng cho tạo manifest xuất khẩu tự động)
   async getCandidateBlsForVoyage(voyageNumber) {
+    const billsOfLading = await repo.listBls();
     if (!voyageNumber) return { candidateBls: [], totalContainers: 0, hasUnissuedBls: false };
     const matchedBls = billsOfLading.filter(b => b.voyageNumber === voyageNumber);
     const voy = voyages.find(v => v.voyageNumber === voyageNumber);
@@ -525,6 +576,7 @@ class ShippingLineService {
   }
 
   async createManifest(payload, user = 'shipping01') {
+    const billsOfLading = await repo.listBls();
     const inputRecords = payload.records || payload.containers || [];
     if (!payload.voyageNumber || !inputRecords.length) {
       throw new Error('Chuyến tàu và danh sách container là bắt buộc');
@@ -696,7 +748,7 @@ class ShippingLineService {
     }
 
     const newManifest = {
-      id: `mnf-${Date.now().toString().slice(-4)}`,
+      id: `mnf-${Date.now()}`,
       manifestNumber,
       version,
       voyageNumber: voy ? voy.voyageNumber : payload.voyageNumber,
@@ -720,6 +772,7 @@ class ShippingLineService {
   }
 
   async resolveManifestException(manifestId, recordId, updatedData, user = 'shipping01') {
+    const billsOfLading = await repo.listBls();
     const mnf = manifests.find(m => m.id === manifestId || m.manifestNumber === manifestId);
     if (!mnf) throw new Error('Không tìm thấy Manifest');
 
@@ -1009,17 +1062,8 @@ class ShippingLineService {
   // 4. BILL OF LADING (B/L) MANAGEMENT
   // ═══════════════════════════════════════════════════════════════════════════
   async getBillsOfLading(filters = {}) {
-    let result = billsOfLading.map(b => {
-      const activeEdo = deliveryOrders.find(d => d.blNumber === b.blNumber && d.status !== 'CANCELLED');
-      const lastCancelledEdo = deliveryOrders.find(d => d.blNumber === b.blNumber && d.status === 'CANCELLED');
-      return {
-        ...b,
-        edoIssued: Boolean(activeEdo),
-        edoNumber: activeEdo ? activeEdo.edoNumber : null,
-        activeEdo: activeEdo || null,
-        lastCancelledEdo: !activeEdo && lastCancelledEdo ? lastCancelledEdo : null,
-      };
-    });
+    const [bls, edos] = await Promise.all([repo.listBls(), repo.listDos()]);
+    let result = bls.map(b => attachEdo(b, edos));
     if (filters.status) {
       result = result.filter(b => b.status === filters.status);
     }
@@ -1029,37 +1073,20 @@ class ShippingLineService {
     if (filters.search) {
       const q = filters.search.trim().toLowerCase();
       result = result.filter(
-        b => b.blNumber.toLowerCase().includes(q) ||
-             b.shipper.toLowerCase().includes(q) ||
-             b.consignee.toLowerCase().includes(q) ||
-             (b.containers && b.containers.some(c => c.containerNumber.toLowerCase().includes(q)))
+        b => (b.blNumber || '').toLowerCase().includes(q) ||
+             (b.shipper || '').toLowerCase().includes(q) ||
+             (b.consignee || '').toLowerCase().includes(q) ||
+             (b.containers && b.containers.some(c => (c.containerNumber || '').toLowerCase().includes(q)))
       );
     }
     return result;
   }
 
   async getBillOfLadingDetail(id) {
-    const rawBl = (id || '').trim();
-    const cleanNo = rawBl.replace(/\s+/g, '').toUpperCase();
-    const bl = billsOfLading.find(b => 
-      b.id === id || 
-      b.blNumber === rawBl || 
-      b.blNumber?.toUpperCase() === rawBl.toUpperCase() ||
-      b.blNumber?.replace(/\s+/g, '').toUpperCase() === cleanNo
-    );
+    const bl = await repo.findBl(id);
     if (!bl) throw new Error('Không tìm thấy Vận đơn (Bill of Lading)');
-
-    const activeEdo = deliveryOrders.find(d => d.blNumber === bl.blNumber && d.status !== 'CANCELLED');
-    const lastCancelledEdo = deliveryOrders.find(d => d.blNumber === bl.blNumber && d.status === 'CANCELLED');
-
-    return {
-      ...bl,
-      edoIssued: Boolean(activeEdo),
-      edoNumber: activeEdo ? activeEdo.edoNumber : null,
-      activeEdo: activeEdo || null,
-      lastCancelledEdo: !activeEdo && lastCancelledEdo ? lastCancelledEdo : null,
-      containers: bl.containers || [],
-    };
+    const edos = await repo.listDos();
+    return { ...attachEdo(bl, edos), containers: bl.containers || [] };
   }
 
   // Lấy danh sách Hướng dẫn gửi hàng (SI) phục vụ tạo B/L xuất khẩu
@@ -1101,7 +1128,8 @@ class ShippingLineService {
       }
     }
 
-    if (billsOfLading.some(b => b.blNumber === blNumber && b.status !== 'CANCELLED')) {
+    const billsOfLading = await repo.listBls();
+    if (billsOfLading.some(b => repo.norm(b.blNumber) === repo.norm(blNumber) && b.status !== 'CANCELLED')) {
       throw new Error(`Số vận đơn ${blNumber} đã tồn tại trong hệ thống`);
     }
 
@@ -1141,7 +1169,6 @@ class ShippingLineService {
     const isFreightPrepaid = freightStatus === 'PREPAID';
 
     const newBl = {
-      id: `bl-${Date.now().toString().slice(-4)}`,
       blNumber,
       direction,
       blType: payload.blType || 'ORIGINAL',
@@ -1172,12 +1199,29 @@ class ShippingLineService {
       containers,
     };
 
-    billsOfLading.unshift(newBl);
-    return newBl;
+    let saved;
+    try {
+      saved = await repo.insertBl(newBl);
+    } catch (err) {
+      if (err?.original?.code === '23505' || err?.parent?.code === '23505') {
+        throw new Error(`Số vận đơn ${blNumber} đã tồn tại trong hệ thống`);
+      }
+      throw err;
+    }
+    await recordDocumentEvent({
+      direction,
+      fileRef: blEventRef(saved),
+      documentType: 'BL',
+      action: saved.status === 'DRAFT' ? 'DRAFT_CREATED' : 'ISSUED',
+      toStatus: saved.status,
+      actor: { username: user },
+      snapshot: saved,
+    });
+    return saved;
   }
 
   async updateBlStatus(id, newStatus, user = 'shipping01') {
-    const bl = billsOfLading.find(b => b.id === id || b.blNumber === id);
+    const bl = await repo.findBl(id);
     if (!bl) throw new Error('Không tìm thấy vận đơn');
 
     const validStatuses = ['DRAFT', 'ISSUED', 'SURRENDERED', 'TELEX_RELEASED', 'CANCELLED'];
@@ -1185,48 +1229,49 @@ class ShippingLineService {
       throw new Error('Trạng thái vận đơn không hợp lệ');
     }
 
-    bl.status = newStatus;
-    return bl;
+    const updated = await repo.updateBl(bl.id, { status: newStatus });
+    await recordDocumentEvent({
+      direction: bl.direction,
+      fileRef: blEventRef(bl),
+      documentType: 'BL',
+      action: 'STATUS_CHANGED',
+      fromStatus: bl.status,
+      toStatus: newStatus,
+      actor: { username: user },
+    });
+    return updated;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // 5. DELIVERY ORDER (eDO) & LINER HOLD MANAGEMENT
   // ═══════════════════════════════════════════════════════════════════════════
   async getDeliveryOrders(filters = {}) {
-    let result = [...deliveryOrders];
+    let result = await repo.listDos();
     if (filters.status) {
       result = result.filter(d => d.status === filters.status);
     }
     if (filters.search) {
       const q = filters.search.trim().toLowerCase();
       result = result.filter(
-        d => d.edoNumber.toLowerCase().includes(q) ||
-             d.blNumber.toLowerCase().includes(q) ||
-             d.consignee.toLowerCase().includes(q)
+        d => (d.edoNumber || '').toLowerCase().includes(q) ||
+             (d.blNumber || '').toLowerCase().includes(q) ||
+             (d.consignee || '').toLowerCase().includes(q)
       );
     }
     return result;
   }
 
   async getDeliveryOrderDetail(id) {
-    const edo = deliveryOrders.find(d => d.id === id || d.edoNumber === id);
+    const edo = await repo.findDo(id);
     if (!edo) throw new Error('Không tìm thấy lệnh giao hàng eDO');
-
-    return {
-      ...edo,
-      containers: edo.containers || [],
-    };
+    return { ...edo, containers: edo.containers || [] };
   }
 
   // Luồng kiểm tra 4 điều kiện cốt lõi phát hành eDO (Eligibility Check)
   async checkEdoEligibility(blNumber) {
     const rawBl = (blNumber || '').trim();
     const cleanBlNo = rawBl.replace(/\s+/g, '').toUpperCase();
-    const bl = billsOfLading.find(b => 
-      b.blNumber === rawBl || 
-      b.blNumber.toUpperCase() === rawBl.toUpperCase() ||
-      b.blNumber.replace(/\s+/g, '').toUpperCase() === cleanBlNo
-    );
+    const bl = await repo.findBl(rawBl);
 
     if (!bl) {
       return {
@@ -1335,8 +1380,9 @@ class ShippingLineService {
     }
 
     // ── KIỂM TRA 5: KIỂM SOÁT TRÙNG LẶP LỆNH GIAO HÀNG (eDO DUPLICATE CHECK) ──
-    const activeEdo = deliveryOrders.find(d => d.blNumber === bl.blNumber && d.status !== 'CANCELLED');
-    const lastCancelledEdo = deliveryOrders.find(d => d.blNumber === bl.blNumber && d.status === 'CANCELLED');
+    const blEdos = (await repo.listDos()).filter(d => repo.norm(d.blNumber) === repo.norm(bl.blNumber));
+    const activeEdo = blEdos.find(d => d.status !== 'CANCELLED');
+    const lastCancelledEdo = blEdos.find(d => d.status === 'CANCELLED');
     const isEdoNotDuplicate = !activeEdo;
 
     let duplicateDetail = '';
@@ -1475,7 +1521,7 @@ class ShippingLineService {
     }
 
     const bl = check.bl;
-    const edoNumber = `EDO-2026-${(deliveryOrders.length + 110).toString()}`;
+    const edoNumber = await repo.nextDoNumber();
     const selectedContainers = (bl.containers || [])
       .filter(c => !containerNumbers || containerNumbers.includes(c.containerNumber))
       .map(c => ({
@@ -1487,7 +1533,6 @@ class ShippingLineService {
       }));
 
     const newEdo = {
-      id: `edo-${Date.now().toString().slice(-4)}`,
       edoNumber,
       blNumber: bl.blNumber,
       voyageNumber: bl.voyageNumber,
@@ -1505,32 +1550,50 @@ class ShippingLineService {
       notes: notes || 'Lệnh phát hành hợp lệ, đủ điều kiện làm thủ tục lấy container tại cổng cảng',
     };
 
-    deliveryOrders.unshift(newEdo);
+    // Khóa dòng B/L để hai yêu cầu đồng thời không cùng phát hành được 2 lệnh còn hiệu lực
+    const saved = await repo.sequelize.transaction(async (transaction) => {
+      await repo.sequelize.query('SELECT id FROM bills_of_lading WHERE id = :id FOR UPDATE', {
+        replacements: { id: bl.id }, transaction, type: QueryTypes.SELECT,
+      });
+      const [dup] = await repo.sequelize.query(
+        `SELECT do_number FROM delivery_orders
+          WHERE upper(regexp_replace(bl_number, '\\s+', '', 'g')) = :n AND status IN ('RELEASED', 'HELD') LIMIT 1`,
+        { replacements: { n: repo.norm(bl.blNumber) }, transaction, type: QueryTypes.SELECT },
+      );
+      if (dup) {
+        throw new Error(`TỪ CHỐI PHÁT HÀNH: Vận đơn ${bl.blNumber} đã có lệnh giao hàng điện tử ${dup.do_number} đang có hiệu lực.`);
+      }
+      return repo.insertDo(newEdo, { transaction });
+    });
 
-    // Cập nhật trạng thái trên B/L
-    bl.edoIssued = true;
-    bl.edoNumber = edoNumber;
-    bl.activeEdo = newEdo;
+    await recordDocumentEvent({
+      direction: 'IMPORT',
+      fileRef: bl.blNumber,
+      documentType: 'DO',
+      action: 'ISSUED',
+      toStatus: 'ISSUED',
+      actor: { username: user },
+      snapshot: saved,
+    });
 
-    return newEdo;
-
-    return newEdo;
+    return saved;
   }
 
   // Thu hồi B/L gốc để giải phóng hàng
   async surrenderBl(idOrBlNumber, user = 'shipping01') {
-    const raw = (idOrBlNumber || '').trim();
-    const cleanNo = raw.replace(/\s+/g, '').toUpperCase();
-    const bl = billsOfLading.find(b => 
-      b.id === raw || 
-      b.blNumber === raw ||
-      b.blNumber.toUpperCase() === raw.toUpperCase() ||
-      b.blNumber.replace(/\s+/g, '').toUpperCase() === cleanNo
-    );
+    const found = await repo.findBl(idOrBlNumber);
+    if (!found) throw new Error('Không tìm thấy vận đơn để thu hồi');
 
-    if (!bl) throw new Error('Không tìm thấy vận đơn để thu hồi');
-
-    bl.status = 'SURRENDERED';
+    const bl = await repo.updateBl(found.id, { status: 'SURRENDERED' });
+    await recordDocumentEvent({
+      direction: found.direction,
+      fileRef: blEventRef(found),
+      documentType: 'BL',
+      action: 'SURRENDERED',
+      fromStatus: found.status,
+      toStatus: 'SURRENDERED',
+      actor: { username: user },
+    });
     const check = await this.checkEdoEligibility(bl.blNumber);
     return {
       bl,
@@ -1541,22 +1604,23 @@ class ShippingLineService {
 
   // Thu phí dịch vụ cho vận đơn (Cước biển & Local Charges)
   async collectBlFees(idOrBlNumber, user = 'shipping01') {
-    const raw = (idOrBlNumber || '').trim();
-    const cleanNo = raw.replace(/\s+/g, '').toUpperCase();
-    const bl = billsOfLading.find(b => 
-      b.id === raw || 
-      b.blNumber === raw ||
-      b.blNumber.toUpperCase() === raw.toUpperCase() ||
-      b.blNumber.replace(/\s+/g, '').toUpperCase() === cleanNo
-    );
+    const found = await repo.findBl(idOrBlNumber);
+    if (!found) throw new Error('Không tìm thấy vận đơn để thu phí');
 
-    if (!bl) throw new Error('Không tìm thấy vận đơn để thu phí');
-
-    bl.localChargesStatus = 'PAID';
-    if (bl.freightStatus === 'COLLECT') {
-      bl.freightPaid = true;
-      bl.freightPaymentStatus = 'PAID';
+    const patch = { localChargesStatus: 'PAID' };
+    if (found.freightStatus === 'COLLECT') {
+      patch.freightPaid = true;
+      patch.freightPaymentStatus = 'PAID';
     }
+    const bl = await repo.updateBl(found.id, patch);
+    await recordDocumentEvent({
+      direction: found.direction,
+      fileRef: blEventRef(found),
+      documentType: 'PAYMENT',
+      action: 'FEES_COLLECTED',
+      actor: { username: user },
+      fieldChanges: Object.entries(patch).map(([field, value]) => ({ field, old: found[field], new: value })),
+    });
 
     const check = await this.checkEdoEligibility(bl.blNumber);
     return {
@@ -1568,43 +1632,54 @@ class ShippingLineService {
 
   // Gia hạn eDO
   async extendEdo(id, newValidUntil, reason, user = 'shipping01') {
-    const edo = deliveryOrders.find(d => d.id === id || d.edoNumber === id);
+    const edo = await repo.findDo(id);
     if (!edo) throw new Error('Không tìm thấy eDO');
 
-    edo.validUntil = newValidUntil;
-    edo.status = 'ISSUED';
-    edo.notes = `${edo.notes || ''} | Gia hạn đến ${newValidUntil} (Lý do: ${reason || 'Yêu cầu từ chủ hàng'})`;
-    return edo;
+    const updated = await repo.updateDo(edo.id, {
+      validUntil: newValidUntil,
+      status: 'ISSUED',
+      notes: `${edo.notes || ''} | Gia hạn đến ${newValidUntil} (Lý do: ${reason || 'Yêu cầu từ chủ hàng'})`,
+    });
+    await recordDocumentEvent({
+      direction: 'IMPORT',
+      fileRef: edo.blNumber,
+      documentType: 'DO',
+      action: 'EXTENDED',
+      fromStatus: edo.status,
+      toStatus: 'ISSUED',
+      actor: { username: user },
+      fieldChanges: [{ field: 'validUntil', old: edo.validUntil, new: newValidUntil }],
+      note: reason || null,
+    });
+    return updated;
   }
 
   // Hủy eDO
   async cancelEdo(id, reason, user = 'shipping01') {
-    const edo = deliveryOrders.find(d => d.id === id || d.edoNumber === id);
+    const edo = await repo.findDo(id);
     if (!edo) throw new Error('Không tìm thấy eDO');
 
-    const cancelledAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
-    edo.status = 'CANCELLED';
-    edo.cancelledAt = cancelledAt;
-    edo.cancelReason = reason || 'Sai lệch thông tin / Yêu cầu hủy để cấp lại';
-    edo.cancelledBy = user;
-    edo.notes = `Hủy bởi ${user} ngày ${cancelledAt}. Lý do: ${edo.cancelReason}`;
-
-    // Cập nhật lại B/L tương ứng để mở khóa quyền phát hành lại lệnh eDO
-    const remainingActive = deliveryOrders.find(d => d.blNumber === edo.blNumber && d.status !== 'CANCELLED' && d.id !== edo.id && d.edoNumber !== edo.edoNumber);
-    const targetBl = billsOfLading.find(b => b.blNumber === edo.blNumber);
-    if (targetBl) {
-      targetBl.edoIssued = Boolean(remainingActive);
-      targetBl.edoNumber = remainingActive ? remainingActive.edoNumber : null;
-      targetBl.activeEdo = remainingActive || null;
-      targetBl.lastCancelledEdo = {
-        id: edo.id,
-        edoNumber: edo.edoNumber,
-        cancelledAt: edo.cancelledAt,
-        reason: edo.cancelReason,
-      };
-    }
-
-    return edo;
+    const cancelledAt = repo.fromDb(new Date());
+    const cancelReason = reason || 'Sai lệch thông tin / Yêu cầu hủy để cấp lại';
+    const updated = await repo.updateDo(edo.id, {
+      status: 'CANCELLED',
+      cancelledAt,
+      cancelReason,
+      cancelledBy: user,
+      notes: `Hủy bởi ${user} ngày ${cancelledAt}. Lý do: ${cancelReason}`,
+    });
+    await recordDocumentEvent({
+      direction: 'IMPORT',
+      fileRef: edo.blNumber,
+      documentType: 'DO',
+      action: 'CANCELLED',
+      fromStatus: edo.status,
+      toStatus: 'CANCELLED',
+      actor: { username: user },
+      note: cancelReason,
+    });
+    // Trạng thái e-D/O trên B/L được suy ra từ bảng delivery_orders nên không cần cập nhật lại B/L
+    return updated;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1617,30 +1692,23 @@ class ShippingLineService {
     let matchedEdo = null;
     let matchedCont = null;
 
+    const deliveryOrders = await repo.listDos();
     for (const edo of deliveryOrders) {
       const cont = (edo.containers || []).find(c => c.containerNumber === cleanNo);
       if (cont) {
-        matchedEdo = edo;
-        matchedCont = cont;
-        break;
+        // Ưu tiên e-D/O đang hiệu lực: một e-D/O cũ đã hủy không được che e-D/O mới của cùng container
+        if (!matchedEdo || matchedEdo.status === 'CANCELLED') { matchedEdo = edo; matchedCont = cont; }
+        if (matchedEdo.status !== 'CANCELLED') break;
       }
     }
 
+    // Không có e-D/O hợp lệ thì không được giao container
     if (!matchedEdo) {
-      // Đối với container thuộc lệnh bãi Tiên Sa đã qua cổng kiểm soát,
-      // theo quy chuẩn nghiệp vụ TOS: phương tiện vào cổng bắt buộc đã có e-D/O hoàn tất trước đó.
-      const autoEdo = {
-        id: `edo-${cleanNo.toLowerCase()}`,
-        edoNumber: `EDO-2026-${cleanNo.slice(0, 4)}-${Math.floor(10000 + Math.random() * 90000)}`,
-        blNumber: `BL-NXP-${cleanNo}`,
-        consignee: 'CÔNG TY CP TIÊN SA LOGISTICS (ĐÃ ĐỐI SOÁT CỔNG)',
-        validUntil: '2026-12-31 23:59:59',
-        status: 'ISSUED',
-        containers: [{ containerNumber: cleanNo, pickupDepot: 'Bãi Container Cảng Tiên Sa' }],
+      return {
+        canGateOut: false,
+        reason: `Container ${cleanNo} chưa có e-D/O do Hãng tàu phát hành.`,
+        status: 'EDO_NOT_FOUND',
       };
-      deliveryOrders.push(autoEdo);
-      matchedEdo = autoEdo;
-      matchedCont = autoEdo.containers[0];
     }
 
     // 2. Kiểm tra trạng thái eDO
@@ -1678,5 +1746,7 @@ class ShippingLineService {
   }
 }
 
-module.exports = new ShippingLineService();
+// Chuyến tàu, manifest, cut-off và SI được lưu trong DB: xem shippingLine.state.js
+module.exports = wrapService(new ShippingLineService());
+module.exports.validateContainerNumberISO = validateContainerNumberISO;
 

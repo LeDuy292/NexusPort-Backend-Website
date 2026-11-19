@@ -3,6 +3,7 @@
 const { sequelize } = require('../../config/database');
 const { getIO } = require('../../config/socket');
 const shippingLineService = require('../shipping-line/shippingLine.service');
+const { recordDocumentEvent } = require('../document-workflow/documentEvents');
 
 /**
  * Format ngày giờ theo chuẩn tiếng Việt
@@ -1728,25 +1729,64 @@ class CargoNotificationService {
   /**
    * XÁC NHẬN DRAFT B/L (HÀNH ĐỘNG KÈM THEO CỦA MỤC 3.2 SỐ 9)
    */
-  async confirmDraftBL({ bookingNo, blNumber, userId }) {
+  async confirmDraftBL({ bookingNo, blNumber, userId, actor }) {
     if (!bookingNo && !blNumber) {
       throw new Error('Cần cung cấp bookingNo hoặc blNumber.');
     }
 
-    const [updated] = await sequelize.query(`
-      UPDATE export_bookings
-      SET status = 'draft_confirmed',
-          draft = jsonb_set(COALESCE(draft, '{}'::jsonb), '{confirmed_at}', to_jsonb(now()::text)),
-          updated_at = now()
-      WHERE booking_no = :bookingNo OR bl_number = :blNumber
-      RETURNING *
-    `, {
-      replacements: { bookingNo: bookingNo || blNumber, blNumber: blNumber || bookingNo },
-      type: sequelize.QueryTypes.UPDATE,
-    });
+    const replacements = { bookingNo: bookingNo || blNumber, blNumber: blNumber || bookingNo };
 
-    const b = updated?.[0];
-    const targetKey = b?.bl_number || blNumber || bookingNo;
+    // Dùng cùng từ vựng trạng thái với ExportBookingService (C#): si_status Draft -> Confirmed.
+    const [current] = await sequelize.query(`
+      SELECT id, booking_no, bl_number, si_status, draft, draft_version
+      FROM export_bookings
+      WHERE booking_no = :bookingNo OR bl_number = :blNumber
+      LIMIT 1
+    `, { replacements, type: sequelize.QueryTypes.SELECT });
+
+    if (!current) {
+      const err = new Error('Không tìm thấy hồ sơ hàng xuất tương ứng.');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (current.si_status !== 'Draft' || !current.draft) {
+      const err = new Error(
+        current.si_status === 'Confirmed'
+          ? 'Bản nháp vận đơn đã được xác nhận trước đó.'
+          : 'Hãng tàu chưa gửi bản nháp vận đơn để xác nhận.',
+      );
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const [updatedRows] = await sequelize.query(`
+      UPDATE export_bookings
+      SET si_status = 'Confirmed',
+          version = version + 1,
+          updated_at = now()
+      WHERE id = :id AND si_status = 'Draft'
+      RETURNING *
+    `, { replacements: { id: current.id } });
+
+    const b = updatedRows?.[0];
+    if (!b) {
+      const err = new Error('Bản nháp vừa được thay đổi. Vui lòng tải lại và kiểm tra trước khi xác nhận.');
+      err.statusCode = 409;
+      throw err;
+    }
+    const targetKey = b.bl_number || blNumber || bookingNo;
+
+    await recordDocumentEvent({
+      direction: 'EXPORT',
+      fileRef: b.booking_no,
+      documentType: 'DRAFT_BL',
+      action: 'CONFIRMED',
+      fromStatus: 'Draft',
+      toStatus: 'Confirmed',
+      actor: actor || { id: userId },
+      documentVersion: current.draft_version,
+      snapshot: current.draft,
+    });
 
     // Tự động hủy reminder xác nhận draft
     await this.cancelRemindersByTarget('DRAFT_BL_CONFIRM', targetKey);

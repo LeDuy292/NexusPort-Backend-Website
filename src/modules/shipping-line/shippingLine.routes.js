@@ -36,6 +36,12 @@ router.get('/vessels', asyncHandler(async (req, res) => {
   res.json({ success: true, data });
 }));
 
+router.post('/vessels', ...manifestWriter, asyncHandler(async (req, res) => {
+  const user = req.user ? req.user.username : 'shipping01';
+  const data = await shippingLineService.createVessel(req.body, user);
+  res.status(201).json({ success: true, message: 'Thêm tàu thành công', data });
+}));
+
 router.get('/voyages', asyncHandler(async (req, res) => {
   const data = await shippingLineService.getVoyages(req.query);
   res.json({ success: true, data });
