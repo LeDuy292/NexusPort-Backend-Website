@@ -75,6 +75,8 @@ if (-not [string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
 }
 
 $connection['Maximum Pool Size'] = if ([string]::IsNullOrWhiteSpace($env:DB_POOL_MAX)) { 3 } else { $env:DB_POOL_MAX }
+# Gate verification writes UTC timestamps through Npgsql's legacy timestamp mapping.
+$connection['Timezone'] = 'UTC'
 # Windows PowerShell adapts dictionary members as keys. Read the CLR property.
 $env:ConnectionStrings__DefaultConnection = $connection.psbase.ConnectionString
 

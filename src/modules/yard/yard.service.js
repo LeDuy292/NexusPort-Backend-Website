@@ -330,53 +330,6 @@ function lookupSlotMap(slotMap, block, bay, row) {
 }
 
 /**
- * Tạo danh sách key chuẩn hóa cho cột stack ô bãi để đối soát chính xác 100% giữa
- * Sơ đồ Bản đồ Bãi 2D (A, B, C, D) và Lệnh xuất bãi (A01, B02, B04).
- */
-function getNormalizedSlotKeys(block, bay, row) {
-  const b = String(block || 'B').trim().toUpperCase();
-  const bayNum = parseInt(bay, 10);
-  const rowNum = parseInt(row, 10);
-  const keys = new Set();
-  keys.add(`${b}:${bayNum}:${rowNum}`);
-  const letter = b.replace(/[^A-Z]/g, '');
-  if (letter) {
-    keys.add(`${letter}:${bayNum}:${rowNum}`);
-    const numPart = b.replace(/^[A-Z]+/, '');
-    if (numPart) {
-      keys.add(`${letter}${numPart.padStart(2, '0')}:${bayNum}:${rowNum}`);
-    }
-  }
-  return Array.from(keys);
-}
-
-function buildSlotMap(snapshot) {
-  const slotMap = new Map();
-  for (const s of (snapshot?.slots || [])) {
-    if (s.containerNumber || s.containerId) {
-      const keys = getNormalizedSlotKeys(s.block, s.bay, s.row);
-      for (const k of keys) {
-        if (!slotMap.has(k)) slotMap.set(k, new Map());
-        slotMap.get(k).set(Number(s.tier), s);
-      }
-    }
-  }
-  return slotMap;
-}
-
-function lookupSlotMap(slotMap, block, bay, row) {
-  if (!slotMap) return [];
-  const keys = getNormalizedSlotKeys(block, bay, row);
-  for (const k of keys) {
-    if (slotMap.has(k)) {
-      const tierMap = slotMap.get(k);
-      return tierMap instanceof Map ? Array.from(tierMap.values()) : tierMap;
-    }
-  }
-  return [];
-}
-
-/**
  * Lấy danh sách yêu cầu xuất / chuẩn bị container bãi (Hỗ trợ Chiều Nhập 5A và Chiều Xuất 5B).
  * @param {Object} query - { direction, status, search, urgency, vessel, page, limit }
  */

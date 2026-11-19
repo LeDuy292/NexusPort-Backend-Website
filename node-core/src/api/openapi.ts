@@ -161,8 +161,9 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
     } } } },
   },
   'GET /api/v1/dispatcher/smart-routes': {
-    summary: 'Monitor actual Gate In, yard arrival, container handover and Gate Out for dispatched trucks',
+    summary: 'Monitor Gate In, yard arrival, container handover and Gate Out for the selected booking',
     security: [{ BearerAuth: [] }],
+    parameters: [{ name: 'bookingId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
   },
   'PUT /api/v1/dispatcher/smart-routes/conditions': {
     summary: 'Set a temporary road restriction or congestion observation on the active yard map',

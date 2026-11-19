@@ -7,8 +7,7 @@ Dịch vụ tự động quản lý phần cứng Cổng Cảng thông minh (ESP
 - Quản lý luồng video camera cho 2 làn (Vào / Ra).
 - Cung cấp frame ảnh phục vụ MJPEG live streaming lên Web UI.
 - Tự động gọi SmartPortGatePipeline để OCR biển số xe (Azure Vision + YOLO ONNX).
-- Đối soát biển số với Backend Node.js (/api/gate/verify-plate).
-- Ra quyết định điều khiển Servo Barrier: 'OPEN' hoặc 'FAIL'.
+- Gửi lượt quét làn vào đến Cổng để đối soát và cấp quyền mở barie.
 - Phát sự kiện Realtime tới màn hình Gate Officer qua Socket.IO.
 """
 
@@ -25,6 +24,7 @@ import cv2
 import numpy as np
 import requests
 from dotenv import load_dotenv
+from pathlib import Path
 
 from .pipeline import SmartPortGatePipeline
 from .esp32_controller import ESP32Controller
@@ -32,6 +32,8 @@ from .esp32_controller import ESP32Controller
 logger = logging.getLogger("hardware_gate_service")
 
 # ── Cấu hình ─────────────────────────────────────────────────────────────────
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 EXPRESS_URL   = os.getenv("EXPRESS_BASE_URL", "http://localhost:3001").rstrip("/")
 GATE_CODE_IN  = os.getenv("GATE_CODE_IN",  "GATE_IN_A")
 LANE_CODE_IN  = os.getenv("LANE_CODE_IN",  "LANE_01")
@@ -517,19 +519,12 @@ class HardwareGateService:
 
             logger.info("[process_passage] Kết quả OCR: plate='%s' (conf=%.3f)", plate_number, ocr_conf)
 
-            # 3. Kiểm tra tính hợp lệ qua Backend
-            is_valid = False
-            if plate_number:
-                is_valid = verify_plate_with_backend(plate_number, gate_code)
-
-            # 4. Điều khiển ESP32 — gửi lệnh đúng theo từng làn
-            if is_valid:
-                logger.info("[process_passage] ✅ Biển số %s HỢP LỆ → Gửi lệnh OPEN_%s xuống ESP32", plate_number, lane)
+            if lane == "IN" and plate_number:
+                # The Gate Officer workflow verifies the order before requesting a physical open.
+                decision = "AWAITING_GATE"
+            elif lane == "OUT" and plate_number and verify_plate_with_backend(plate_number, gate_code):
                 if self.esp32:
-                    if lane == "IN":
-                        self.esp32.send_open_in()
-                    else:
-                        self.esp32.send_open_out()
+                    self.esp32.send_open_out()
                 decision = "OPEN"
             else:
                 logger.info("[process_passage] ❌ Biển số '%s' KHÔNG hợp lệ / không đọc được → Gửi FAIL_%s", plate_number, lane)
@@ -589,7 +584,7 @@ class HardwareGateService:
             }
 
             url = f"{EXPRESS_URL}/api/gate/iot-event"
-            requests.post(url, json=payload, timeout=2.0)
+            requests.post(url, json=payload, headers={"X-Gate-IoT-Key": os.getenv("GATE_IOT_SHARED_KEY", "")}, timeout=2.0)
             logger.info("[broadcast] Đã gửi thông tin xe '%s' (%s) lên Gate Control UI qua Socket.IO", plate, decision)
         except Exception as e:
             logger.warning("[broadcast] Không gửi được event lên Backend: %s", e)
@@ -618,14 +613,10 @@ class HardwareGateService:
                 "gateCode": GATE_CODE_OUT if lane == "OUT" else GATE_CODE_IN,
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
             }
-            requests.post(url, json=payload, timeout=2.0)
+            requests.post(url, json=payload, headers={"X-Gate-IoT-Key": os.getenv("GATE_IOT_SHARED_KEY", "")}, timeout=2.0)
             logger.info("[broadcast] Đã gửi trạng thái Barie (%s: %s) lên Express Backend qua Socket.IO", lane, state)
         except Exception as e:
             logger.warning("[broadcast] Không gửi được trạng thái barie lên Backend: %s", e)
-
-    def manual_open(self) -> Dict[str, Any]:
-        """Cưỡng bức mở cổng Làn Vào từ giao diện Web (backward compat)."""
-        return self.manual_open_in()
 
     def manual_close(self) -> Dict[str, Any]:
         """Cưỡng bức đóng cổng Làn Vào từ giao diện Web (backward compat)."""
@@ -636,13 +627,20 @@ class HardwareGateService:
         return self.manual_fail_in()
 
     # ── Làn Vào (IN) ──
-    def manual_open_in(self) -> Dict[str, Any]:
-        """Cưỡng bức mở cổng Làn Vào từ giao diện Web."""
-        self.barrier_state_in = "opened"
-        if self.esp32:
-            self.esp32.send_open_in()
-            return {"success": True, "message": "Đã gửi lệnh OPEN_IN xuống ESP32"}
-        return {"success": False, "message": "ESP32 chưa kết nối"}
+    def open_authorized_in(self, command_id: str) -> Dict[str, Any]:
+        if not self.esp32 or not self.esp32.connected:
+            return {"success": False, "message": "ESP32 chưa kết nối"}
+        try:
+            response = requests.post(
+                f"{EXPRESS_URL}/api/gate/barrier-commands/{command_id}/claim-hardware", timeout=4
+            )
+            accepted = response.ok and response.json().get("accepted") is True
+        except (requests.RequestException, ValueError):
+            return {"success": False, "message": "Không xác thực được lệnh mở barie"}
+        if not accepted:
+            return {"success": False, "message": "Lệnh mở barie đã hết hạn, đã dùng hoặc chưa hợp lệ"}
+        success = self.esp32.send_open_in()
+        return {"success": success, "message": "Đã gửi lệnh mở barie" if success else "Lỗi kết nối ESP32"}
 
     def manual_close_in(self) -> Dict[str, Any]:
         """Cưỡng bức đóng cổng Làn Vào từ giao diện Web."""

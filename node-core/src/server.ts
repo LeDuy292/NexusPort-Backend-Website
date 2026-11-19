@@ -13,8 +13,6 @@ const server = createServer(app);
 const realtimeGateway = new DriverRealtimeGateway(server);
 const broker = RabbitMQClient.getInstance();
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-let reconnectAttempts = 0;
-let realtimeStarting = false;
 let stopping = false;
 let databaseWarmupRunning = false;
 let databaseWarmupTimer: ReturnType<typeof setTimeout> | undefined;
