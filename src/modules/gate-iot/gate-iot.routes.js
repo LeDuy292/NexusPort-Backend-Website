@@ -69,28 +69,25 @@ router.get('/verify-plate', async (req, res) => {
  */
 router.post('/iot-event', (req, res) => {
   const io = getIO();
-  const eventData = req.body;
+  const eventData = req.body || {};
 
-  if (!eventData || !eventData.detectedPlate) {
-    return res.status(400).json({
-      success: false,
-      message: 'Thiếu trường detectedPlate trong dữ liệu sự kiện IoT.',
-    });
-  }
+  const detectedPlate = (eventData.detectedPlate || '').trim();
 
   const payload = {
     gateCode: eventData.gateCode || 'GATE_IN_A',
-    laneCode: eventData.laneCode || 'LANE_01',
+    laneCode: eventData.laneCode || (eventData.lane === 'OUT' ? 'LANE_02' : 'LANE_01'),
+    lane: eventData.lane || (eventData.laneCode === 'LANE_02' ? 'OUT' : 'IN'),
     cameraId: eventData.cameraId || 'CAM_GATE_01',
-    detectedPlate: eventData.detectedPlate,
-    plateConfidence: eventData.plateConfidence || 0.98,
+    detectedPlate: detectedPlate || 'KHÔNG_NHẬN_DIỆN',
+    plateConfidence: eventData.plateConfidence || 0.0,
     vehicleDetected: eventData.vehicleDetected !== false,
     vehicleType: eventData.vehicleType || 'container_truck',
     vehiclePlateImageUrl: eventData.vehiclePlateImageUrl || null,
     overviewImageUrl: eventData.overviewImageUrl || null,
     timestamp: eventData.timestamp || new Date().toISOString(),
-    verificationType: eventData.verificationType || 'AI_GATE_IN',
+    verificationType: eventData.verificationType || (eventData.lane === 'OUT' ? 'AI_GATE_OUT' : 'AI_GATE_IN'),
     source: eventData.source || 'IoT_Camera',
+    decision: eventData.decision || (detectedPlate ? 'SUCCESS' : 'FAIL'),
   };
 
   if (io) {
