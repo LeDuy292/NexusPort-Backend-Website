@@ -43,7 +43,7 @@ public sealed partial class ServiceDraftService
         else
         {
             var hasBookingCode = !string.IsNullOrEmpty(input.Source.BookingNumber) || !string.IsNullOrEmpty(input.Source.ReferenceNumber);
-            Require(input.Source.BookingId.HasValue || hasBookingCode, "Nhập mã eBooking xuất khẩu trước khi xác thực.");
+            Require(input.Source.BookingId.HasValue || hasBookingCode, "Nhập số vận đơn hàng xuất trước khi xác thực.");
         }
         var email = await RegisteredEmail(ct);
         Require(workflowEmail != null, "Dịch vụ gửi email xác thực chưa sẵn sàng. Vui lòng thử lại sau.", 503, "SERVICE_EMAIL_UNAVAILABLE");

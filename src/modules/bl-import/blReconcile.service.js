@@ -144,7 +144,7 @@ async function myBill(user, blNumber) {
   const mine = bl && bl.status !== 'CANCELLED' && bl.status !== 'DRAFT' && (direction === 'EXPORT' ? belongsTo(company, bl.shipper) : belongsTo(company, bl.consignee));
   if (!mine) throw httpError(404, 'Không tìm thấy vận đơn.');
   const containers = await containerStates(bl);
-  const events = await getDocumentEvents(direction, direction === 'EXPORT' ? (bl.bookingNo || bl.blNumber) : bl.blNumber).catch(() => []);
+  const events = await getDocumentEvents(direction, bl.blNumber).catch(() => []);
   return {
     blNumber: bl.blNumber, direction, status: bl.status, blType: bl.blType, voyageNumber: bl.voyageNumber, vesselName: bl.vesselName, pol: bl.pol, pod: bl.pod,
     shipper: bl.shipper, consignee: bl.consignee, notifyParty: bl.notifyParty, cargoDescription: bl.cargoDescription, grossWeightKg: bl.grossWeightKg,

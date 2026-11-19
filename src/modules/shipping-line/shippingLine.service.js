@@ -13,6 +13,8 @@ const repo = require('./shippingLine.repository');
 const { QueryTypes } = require('sequelize');
 const { recordDocumentEvent } = require('../document-workflow/documentEvents');
 const { wrapService, resetStored } = require('./shippingLine.state');
+const { buildVoyageNumber } = require('./voyageNumber');
+const voyageSync = require('./voyageSync');
 
 // Gắn thông tin e-D/O (đang hiệu lực / đã hủy gần nhất) vào một B/L
 function attachEdo(bl, edos) {
@@ -243,9 +245,13 @@ class ShippingLineService {
   }
 
   async getVoyages(filters = {}) {
+    await voyageSync.syncFromDb(voyages, vessels);
     let result = [...voyages];
     if (filters.status) {
       result = result.filter(v => v.status === filters.status);
+    } else if (String(filters.includeCompleted) !== 'true') {
+      // Chuyến đã rời cảng hoặc hoàn tất không còn nhận khai báo: ẩn khỏi danh sách mặc định
+      result = result.filter(v => !['DEPARTED', 'COMPLETED'].includes(v.status));
     }
     if (filters.search) {
       const q = filters.search.trim().toLowerCase();
@@ -284,19 +290,29 @@ class ShippingLineService {
     const vessel = vessels.find(v => v.id === payload.vesselId);
     if (!vessel) throw new Error('Tàu được chọn không hợp lệ');
 
-    // Tự động sinh mã chuyến tàu nếu để trống
+    await voyageSync.syncFromDb(voyages, vessels);
+    // Mã chuyến theo quy tắc chung (voyageNumber.js); kiểm tra trùng trên cả chuyến của Hãng tàu và chuyến xuất trong DB
+    const dbVoyages = (await repo.sequelize.query('SELECT voyage_number FROM export_voyages', { type: QueryTypes.SELECT })).map((r) => r.voyage_number);
+    const taken = [...voyages.map((v) => v.voyageNumber), ...dbVoyages].map((no) => String(no || '').toUpperCase());
     let voyageNumber = payload.voyageNumber ? payload.voyageNumber.trim().toUpperCase() : '';
     if (!voyageNumber) {
-      const words = vessel.vesselName.split(' ');
-      const prefix = words.length >= 2 ? (words[0][0] + words[1][0]).toUpperCase() : vessel.vesselName.slice(0, 2).toUpperCase();
-      const num = 2605 + voyages.length + 1;
-      voyageNumber = `${prefix}-${num}W`;
+      voyageNumber = buildVoyageNumber({ vesselName: vessel.vesselName, eta: payload.eta, pol: payload.pol, pod: payload.pod, taken });
     }
-
-    const exists = voyages.some(v => v.voyageNumber.toUpperCase() === voyageNumber);
-    if (exists) {
+    if (!/^[A-Z0-9][A-Z0-9-]{2,19}$/.test(voyageNumber)) {
+      throw new Error('Mã chuyến tàu chỉ gồm chữ in hoa, số và dấu gạch ngang (3-20 ký tự)');
+    }
+    if (taken.includes(voyageNumber)) {
       throw new Error(`Mã chuyến tàu ${voyageNumber} đã tồn tại trong hệ thống`);
     }
+
+    // Mốc thời gian phải do người dùng nhập, đúng thứ tự: VGM ≤ hạ bãi (CY) < ETD, ETA < ETD, hạn chót chưa qua
+    const at = (v) => (v ? new Date(String(v).includes('T') ? v : String(v).replace(' ', 'T') + '+07:00') : null);
+    const [eta, etd, cy, vgm] = [at(payload.eta), at(payload.etd), at(payload.cyCutOff), at(payload.vgmCutOff)];
+    if (![eta, etd, cy, vgm].every((d) => d && !Number.isNaN(d.getTime()))) throw new Error('Cần nhập đủ ETA, ETD, hạn chót hạ bãi và hạn chót nộp VGM');
+    if (cy <= new Date() || vgm <= new Date()) throw new Error('Hạn chót hạ bãi và hạn chót nộp VGM phải ở thời điểm sau hiện tại');
+    if (vgm > cy) throw new Error('Hạn chót nộp VGM không được sau hạn chót hạ bãi');
+    if (cy >= etd) throw new Error('Hạn chót hạ bãi phải trước giờ tàu rời cảng (ETD)');
+    if (eta >= etd) throw new Error('Giờ tàu đến (ETA) phải trước giờ tàu rời cảng (ETD)');
 
     const newVoyage = {
       id: `voy-${Date.now()}`,
@@ -305,12 +321,12 @@ class ShippingLineService {
       vesselName: vessel.vesselName,
       pol: payload.pol || 'Cảng Tiên Sa, Đà Nẵng (VNDAD)',
       pod: payload.pod || 'Tokyo, Nhật Bản (JPTYO)',
-      eta: payload.eta || '2026-11-20 08:00',
-      etd: payload.etd || '2026-11-21 18:00',
+      eta: payload.eta,
+      etd: payload.etd,
       ata: null,
       atd: null,
-      cyCutOff: payload.cyCutOff || '2026-11-19 20:00',
-      vgmCutOff: payload.vgmCutOff || '2026-11-19 12:00',
+      cyCutOff: payload.cyCutOff,
+      vgmCutOff: payload.vgmCutOff,
       status: payload.status || 'SCHEDULED',
       terminal: payload.terminal || 'Bến số 1 (TS-01) - Cảng Tiên Sa',
       remarks: payload.remarks || '',
@@ -318,6 +334,8 @@ class ShippingLineService {
       containerCount: 0,
     };
 
+    // Chuyến xuất ghi luôn vào danh sách chuyến xuất trong DB (booking / ePort dùng chung)
+    newVoyage.dbVoyageId = await voyageSync.createInDb(newVoyage, user);
     voyages.unshift(newVoyage);
     return newVoyage;
   }
@@ -364,14 +382,24 @@ class ShippingLineService {
       extraFields.atd = nowStr;
     }
 
+    if (payload.voyageNumber && String(payload.voyageNumber).trim().toUpperCase() !== String(current.voyageNumber).toUpperCase()) {
+      throw new Error('Mã chuyến tàu được hệ thống cấp và không thể đổi');
+    }
     voyages[idx] = {
       ...current,
       ...payload,
+      voyageNumber: current.voyageNumber,
       ...extraFields,
       id: current.id,
       voyageNumber: current.voyageNumber,
     };
 
+    try {
+      await voyageSync.updateInDb(voyages[idx]);
+    } catch (err) {
+      voyages[idx] = current; // DB không nhận mốc giờ mới thì giữ nguyên chuyến
+      throw err;
+    }
     return voyages[idx];
   }
 
@@ -1194,6 +1222,7 @@ class ShippingLineService {
       edoNumber: null,
       sourceType: payload.sourceType || 'MANUAL', // MANUAL, MANIFEST_IMPORT, SI_EXPORT
       sourceReference: payload.sourceReference || null,
+      bookingNo: payload.bookingNo || null,
       issueDate: new Date().toISOString().replace('T', ' ').slice(0, 16),
       attachedFiles: [],
       containers,

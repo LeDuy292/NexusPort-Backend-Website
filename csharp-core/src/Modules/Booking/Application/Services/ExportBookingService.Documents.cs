@@ -194,29 +194,4 @@ public sealed partial class ExportBookingService
             $"B/L draft [{S(b, "bookingNumber")}] cần xác nhận",
             $"Hãng tàu đã gửi B/L draft. Hạn xác nhận: {deadline.AddHours(7):dd/MM/yyyy HH:mm}. Yêu cầu sửa sau hạn chót sẽ bị tính phí sửa đổi; nếu quá hạn mà không phản hồi, draft được coi là đã chấp nhận.",
             $"draft-{S(b, "bookingNumber")}-v{draftVersion}", ct);
-
-    /// <summary>Pre-alert gửi đầu nhập sau khi phát hành B/L, ghi cùng transaction với việc phát hành.</summary>
-    private async Task CreatePreAlert(JsonObject b, JsonObject v, JsonObject issued, List<JsonObject> retained, string number, CancellationToken ct)
-    {
-        var si = issued["si"] as JsonObject ?? new JsonObject();
-        var containers = new JsonArray(retained.Select(x => (JsonNode)new JsonObject
-        {
-            ["containerNumber"] = S(x, "containerNumber") is { Length: > 0 } cn ? cn : S(x, "container_no"),
-            ["sealNumber"] = S(x, "sealNumber"), ["vgmKg"] = x["vgmKg"]?.DeepClone(), ["isoType"] = S(x, "typeCode")
-        }).ToArray());
-        var payload = new JsonObject
-        {
-            ["blNumber"] = number, ["bookingNo"] = S(b, "bookingNumber"), ["vesselName"] = S(v, "vesselName"), ["voyageNumber"] = S(v, "voyageNumber"),
-            ["portOfLoading"] = S(v, "portOfLoading"), ["portOfDischarge"] = S(v, "portOfDischarge"), ["etd"] = v["etd"]?.DeepClone(), ["eta"] = v["eta"]?.DeepClone(),
-            ["blType"] = S(si, "blType"), ["freightTerms"] = S(si, "freightTerms"), ["shipper"] = S(si, "shipper"), ["consignee"] = S(si, "consignee"),
-            ["notifyParty"] = S(si, "notifyParty"), ["containers"] = containers, ["onBoardAt"] = issued["onBoardAt"]?.DeepClone(), ["issuedAt"] = issued["issuedAt"]?.DeepClone()
-        };
-        await Exec("""
-            INSERT INTO shipment_pre_alerts(export_booking_id,booking_no,bl_number,vessel_name,voyage_number,port_of_loading,port_of_discharge,etd,eta,bl_type,freight_terms,shipper,consignee,notify_party,containers,payload)
-            VALUES(@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7::timestamptz,@p8::timestamptz,@p9,@p10,@p11,@p12,@p13,@p14::jsonb,@p15::jsonb)
-            ON CONFLICT (bl_number) DO NOTHING
-            """, ct, G(b, "id"), S(b, "bookingNumber"), number, S(v, "vesselName"), S(v, "voyageNumber"), S(v, "portOfLoading"), S(v, "portOfDischarge"),
-            S(v, "etd"), S(v, "eta"), S(si, "blType"), S(si, "freightTerms"), S(si, "shipper"), S(si, "consignee"), S(si, "notifyParty"),
-            containers.ToJsonString(), payload.ToJsonString());
-    }
 }

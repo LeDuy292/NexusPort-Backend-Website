@@ -47,12 +47,9 @@ public sealed partial class ExportBookingService
         issued["loadingEvidence"]=new JsonArray(retained.Select(x=>(JsonNode)x).ToArray());
         await Exec("UPDATE export_bookings SET status='BlIssued',bl_number=@p0,si=@p1::jsonb,draft=@p2::jsonb,freight_paid=@p3,version=version+1,updated_at=now() WHERE id=@p4",ct,number,si.ToJsonString(),issued.ToJsonString(),request.IsPaid,id);
         await History(id,G(b,"voyageId"),"BlIssued","Hãng tàu phát hành B/L "+number+" ("+request.BlType+").",ct);
-        // Pre-alert cho đầu nhập được tạo cùng transaction: B/L đã phát hành thì pre-alert phải tồn tại.
-        await CreatePreAlert(b,v,issued,retained,number,ct);
-        await History(id,G(b,"voyageId"),"PreAlertSent","Hãng tàu gửi pre-alert (bản sao B/L, danh sách container, hình thức B/L và điều kiện cước) cho đầu nhập.",ct);
+        // Hàng xuất dỡ ở cảng khác: không mở hồ sơ hàng nhập tại cảng này (hồ sơ nhập chỉ mở từ bản khai nhập).
         await tx.CommitAsync(ct);
         await DocEvent(S(b,"bookingNumber"),"BL","ISSUED",null,"BlIssued",null,null,null,issued,ct);
-        await DocEvent(S(b,"bookingNumber"),"PRE_ALERT","SENT",null,"SENT",null,null,null,null,ct);
         return await Detail(id,ct);
     }
     private static void EventShape(ExportPortEventRequest request)

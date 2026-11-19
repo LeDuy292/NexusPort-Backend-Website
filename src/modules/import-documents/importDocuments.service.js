@@ -235,7 +235,14 @@ async function get(id, actor) {
 }
 
 async function listCompanies() {
-  const rows = await sequelize.query('SELECT id, company_name AS "companyName", tax_code AS "taxCode" FROM carriers ORDER BY company_name LIMIT 300', { type: QueryTypes.SELECT });
+  // Chỉ công ty có tài khoản vai trò Transport Company đang hoạt động (người gửi / nhận hàng hợp lệ)
+  const rows = await sequelize.query(
+    `SELECT c.id, c.company_name AS "companyName", c.tax_code AS "taxCode" FROM carriers c
+      WHERE EXISTS (SELECT 1 FROM carrier_users cu JOIN users u ON u.id = cu.user_id
+                     WHERE cu.carrier_id = c.id AND u.role = 'Transport Company' AND u.is_active)
+      ORDER BY c.company_name LIMIT 300`,
+    { type: QueryTypes.SELECT },
+  );
   return rows;
 }
 

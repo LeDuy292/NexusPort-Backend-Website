@@ -19,9 +19,8 @@ const countBy = (rows, key = 'status') => Object.fromEntries(rows.map((r) => [r[
 async function getDashboard(actor) {
   const r = { me: actor.id, all: actor.role === 'Administrator' };
 
-  const [voyageStatus, bookingStatus, manifestRows, importStatus, requestRows, lineRow] = await Promise.all([
+  const [voyageStatus, manifestRows, importStatus, requestRows, lineRow] = await Promise.all([
     run(`SELECT status, count(*)::int n FROM export_voyages v WHERE ${scope('v.line_user_id')} GROUP BY 1`, r),
-    run(`SELECT b.status, count(*)::int n FROM export_bookings b WHERE ${scope('b.line_user_id')} GROUP BY 1`, r),
     run(`SELECT upper(m.payload->>'direction') AS direction, m.payload->>'status' AS status, count(*)::int n
            FROM shipping_manifests m WHERE ${scope('m.owner_id')} GROUP BY 1, 2`, r),
     run(`SELECT s.status, count(*)::int n FROM import_shipments s WHERE ${scope('s.line_user_id')} GROUP BY 1`, r),
@@ -37,8 +36,8 @@ async function getDashboard(actor) {
     `SELECT v.id, v.vessel_name AS "vesselName", v.voyage_number AS "voyageNumber", v.port_of_loading AS pol,
             v.port_of_discharge AS pod, v.etd, v.eta, v.cy_cutoff AS "cyCutoff", v.vgm_cutoff AS "vgmCutoff",
             v.si_cutoff AS "siCutoff", v.status,
-            (SELECT count(*)::int FROM export_bookings b WHERE b.voyage_id = v.id) AS bookings,
-            (SELECT count(*)::int FROM export_bookings b WHERE b.voyage_id = v.id AND b.status = 'Pending') AS "bookingsPending",
+            (SELECT count(*)::int FROM bills_of_lading l WHERE upper(l.voyage_number) = upper(v.voyage_number)
+                AND lower(l.direction) = 'export' AND l.status NOT IN ('DRAFT', 'CANCELLED')) AS bills,
             (SELECT count(*)::int FROM export_booking_containers c JOIN export_bookings b ON b.id = c.export_booking_id WHERE b.voyage_id = v.id) AS containers
        FROM export_voyages v WHERE ${scope('v.line_user_id')} AND v.status NOT IN ('Departed', 'Cancelled')
       ORDER BY v.etd ASC LIMIT 8`, r);
@@ -96,7 +95,6 @@ async function getDashboard(actor) {
   }
 
   const voyageCount = countBy(voyageStatus);
-  const bookingCount = countBy(bookingStatus);
   const importCount = countBy(importStatus);
   const requests = countBy(requestRows);
   const sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
@@ -108,7 +106,7 @@ async function getDashboard(actor) {
     for (const [label, at] of [['CY cut-off', v.cyCutoff], ['VGM cut-off', v.vgmCutoff], ['SI cut-off', v.siCutoff]]) {
       if (at && new Date(at) > new Date() && new Date(at) <= soon) {
         alerts.push({ id: `cut-${v.id}-${label}`, type: 'WARNING', title: `${label} chuyến ${v.voyageNumber} (${v.vesselName}) trong 48 giờ tới`,
-          description: `Hạn: ${new Date(at).toISOString()}. Còn ${v.bookingsPending} booking chưa khai container.`, targetPath: '/shipping-line/voyages' });
+          description: `Hạn: ${new Date(at).toISOString()}. Đã phát hành ${v.bills} vận đơn, ${v.containers} container.`, targetPath: '/shipping-line/voyages' });
       }
     }
   }
@@ -127,7 +125,6 @@ async function getDashboard(actor) {
     generatedAt: new Date().toISOString(),
     export: {
       voyages: { total: sum(voyageCount), byStatus: voyageCount },
-      bookings: { total: sum(bookingCount), byStatus: bookingCount },
       manifests: manifest,
       bills: bills || { total: 0, issued: 0, notIssued: 0 },
       upcomingVoyages: voyages,
