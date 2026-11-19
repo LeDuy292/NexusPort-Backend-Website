@@ -13,6 +13,78 @@ const ownShippingLine = `SELECT a.shipping_line_id FROM shipping_line_accounts a
   WHERE u.id=? AND u.role='Shipping Line' AND u.is_active`;
 
 export class ContainerJourneyRepository {
+  async getYardOverview() {
+    const result = await query(`
+      WITH local_day AS (
+        SELECT (now() AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS today
+      ), inbound_today AS (
+        SELECT count(DISTINCT v.id)::int AS total
+        FROM container_visits v
+        JOIN booking_containers bc ON bc.container_visit_id=v.id AND bc.container_id=v.container_id
+        JOIN bookings b ON b.id=bc.booking_id
+        CROSS JOIN local_day d
+        WHERE v.visit_status='planned'
+          AND yard_booking_direction(b.id,bc.container_id)='dropoff'
+          AND b.status::text NOT IN ('rejected','canceled','expired')
+          AND (b.appointment_start AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=d.today
+      ), outbound_today AS (
+        SELECT count(DISTINCT scheduled.visit_id)::int AS total
+        FROM (
+          SELECT v.id AS visit_id
+          FROM container_visits v
+          JOIN booking_containers bc ON bc.container_visit_id=v.id AND bc.container_id=v.container_id
+          JOIN bookings b ON b.id=bc.booking_id
+          CROSS JOIN local_day d
+          WHERE v.visit_status='active'
+            AND yard_booking_direction(b.id,bc.container_id)='pickup'
+            AND b.status::text NOT IN ('rejected','canceled','expired')
+            AND (b.appointment_start AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=d.today
+          UNION
+          SELECT v.id AS visit_id
+          FROM container_visits v
+          JOIN booking_containers bc ON bc.container_visit_id=v.id AND bc.container_id=v.container_id
+          JOIN bookings gate_booking ON gate_booking.id=bc.booking_id
+          JOIN export_gate_links l ON l.gate_booking_id=gate_booking.id
+          JOIN export_booking_containers e ON e.id=l.export_container_id AND e.container_id=v.container_id
+          JOIN export_bookings eb ON eb.id=e.export_booking_id
+          JOIN export_voyages ev ON ev.id=eb.voyage_id
+          CROSS JOIN local_day d
+          WHERE v.visit_status='active' AND e.active AND e.status='GateIn'
+            AND eb.status NOT IN ('Cancelled','Rejected')
+            AND (ev.etd AT TIME ZONE 'Asia/Ho_Chi_Minh')::date=d.today
+        ) scheduled
+      ), overdue_visits AS (
+        SELECT DISTINCT ON (v.id)
+          v.id,
+          (b.appointment_start AT TIME ZONE 'Asia/Ho_Chi_Minh')::date AS booking_day
+        FROM container_visits v
+        JOIN booking_containers bc ON bc.container_visit_id=v.id AND bc.container_id=v.container_id
+        JOIN bookings b ON b.id=bc.booking_id
+        WHERE v.visit_status='active'
+          AND yard_booking_direction(b.id,bc.container_id)='dropoff'
+          AND b.status::text NOT IN ('rejected','canceled','expired')
+          AND NOT EXISTS (
+            SELECT 1 FROM export_gate_links l
+            JOIN export_booking_containers e ON e.id=l.export_container_id
+            WHERE l.gate_booking_id=bc.booking_id AND e.container_id=v.container_id AND e.status='Loaded'
+          )
+        ORDER BY v.id,b.appointment_start
+      )
+      SELECT
+        (SELECT today FROM local_day)::text AS "today",
+        (SELECT total FROM inbound_today) AS "expectedInboundToday",
+        (SELECT total FROM outbound_today) AS "expectedOutboundToday",
+        (SELECT count(*)::int FROM container_visits v WHERE v.visit_status='active'
+          AND NOT EXISTS (
+            SELECT 1 FROM booking_containers bc JOIN export_gate_links l ON l.gate_booking_id=bc.booking_id
+            JOIN export_booking_containers e ON e.id=l.export_container_id
+            WHERE bc.container_visit_id=v.id AND e.container_id=v.container_id AND e.status='Loaded'
+          )) AS "yardInventory",
+        (SELECT count(*)::int FROM overdue_visits,local_day WHERE booking_day <= today - 5) AS "overdue"
+    `);
+    return result.rows[0];
+  }
+
   async lookup(number: string) {
     if (!/^[A-Z]{4}\d{7}$/.test(number)) throw new AppError('Nhập đầy đủ số Container gồm 11 ký tự.', 422);
     const result = await query(`SELECT c.id,c.container_no AS "containerNumber",ct.id AS "containerTypeId",
@@ -87,13 +159,27 @@ export class ContainerJourneyRepository {
     const plate = String(filters.plateNumber ?? '').replace(/[^a-z0-9]/gi, '').toUpperCase();
     const customer = String(filters.customerName ?? '').trim();
     const status = reader ? String(filters.visitStatus ?? '').trim() : '';
+    const sort = String(filters.sort ?? '').trim();
     const from = filters.dateFrom ? new Date(String(filters.dateFrom)) : null;
     const to = filters.dateTo ? new Date(String(filters.dateTo)) : null;
     if ((from && !Number.isFinite(from.getTime())) || (to && !Number.isFinite(to.getTime())) || (from && to && from > to))
       throw new AppError('Khoảng thời gian không hợp lệ.', 422);
     const canReadPrivate = !reader || ['Administrator', 'Dispatcher', 'Yard Staff', 'Gate Officer'].includes(reader.role);
+    const loadedOnVessel = `EXISTS(SELECT 1 FROM booking_containers vessel_bc
+      JOIN export_gate_links vessel_link ON vessel_link.gate_booking_id=vessel_bc.booking_id
+      JOIN export_booking_containers vessel_container ON vessel_container.id=vessel_link.export_container_id
+      WHERE vessel_bc.container_visit_id=v.id AND vessel_bc.container_id=v.container_id
+        AND vessel_container.container_id=v.container_id AND vessel_container.status='Loaded')`;
+    const vesselLoadedAt = `(SELECT max(vessel_container.loaded_at) FROM booking_containers vessel_bc
+      JOIN export_gate_links vessel_link ON vessel_link.gate_booking_id=vessel_bc.booking_id
+      JOIN export_booking_containers vessel_container ON vessel_container.id=vessel_link.export_container_id
+      WHERE vessel_bc.container_visit_id=v.id AND vessel_bc.container_id=v.container_id
+        AND vessel_container.container_id=v.container_id AND vessel_container.status='Loaded')`;
+    const recentActivity = sort === 'recentActivity' && !!reader && canReadPrivate;
+    if (sort && sort !== 'recentActivity') throw new AppError('Kiểu sắp xếp lượt bãi không hợp lệ.', 422);
+    if (sort === 'recentActivity' && !recentActivity) throw new AppError('Vai trò này không được xem danh sách hoạt động bãi.', 403);
     if (!canReadPrivate && (plate || customer)) throw new AppError('Vai trò này không được lọc theo xe hoặc khách hàng.', 403);
-    if (!number && !plate && !customer && !(reader && (status || from || to)))
+    if (!number && !plate && !customer && !(reader && (status || from || to)) && !recentActivity)
       throw new AppError('Nhập số Container hoặc chọn ít nhất một bộ lọc.', 422);
     if (number && !/^[A-Z0-9]{4,11}$/.test(number)) throw new AppError('Số Container tìm kiếm không hợp lệ.', 422);
     if (plate && plate.length < 4) throw new AppError('Biển số xe cần ít nhất 4 ký tự.', 422);
@@ -105,6 +191,7 @@ export class ContainerJourneyRepository {
     const limit = Math.max(1, Math.min(Math.trunc(Number(filters.limit)) || 20, 50));
     const params: unknown[] = [];
     const where: string[] = [];
+    if (recentActivity && !number && !plate && !customer && !status && !from && !to) where.push('TRUE');
     const bind = (value: unknown) => '$' + params.push(value);
     const add = (sql: string, value: unknown) => where.push(sql.replace(/\?/g, bind(value)));
     const bookingsForVisit = 'FROM booking_containers bc JOIN bookings b ON b.id=bc.booking_id';
@@ -128,15 +215,18 @@ export class ContainerJourneyRepository {
     if (plate) add(`(EXISTS(SELECT 1 FROM eir_transactions ex WHERE ex.container_visit_id=v.id AND regexp_replace(upper(ex.plate_number),'[^A-Z0-9]','','g') LIKE ?)
       OR EXISTS(SELECT 1 FROM booking_containers bx JOIN bookings b ON b.id=bx.booking_id LEFT JOIN trucks t ON t.id=b.truck_id
       WHERE bx.container_visit_id=v.id AND regexp_replace(upper(COALESCE(b.vehicle_plate,t.plate_number)),'[^A-Z0-9]','','g') LIKE ?))`, plate + '%');
-    if (status) add('v.visit_status=?', status);
+    if (status === 'active') where.push(`v.visit_status='active' AND NOT ${loadedOnVessel}`);
+    else if (status === 'completed') where.push(`(v.visit_status='completed' OR (v.visit_status='active' AND ${loadedOnVessel}))`);
+    else if (status) add('v.visit_status=?', status);
     if (from || to) {
       const fromParam = from && bind(from);
       const toParam = to && bind(to);
       const inRange = (column: string) => [
         fromParam && `${column}>=${fromParam}`, toParam && `${column}<${toParam}`,
       ].filter(Boolean).join(' AND ');
+        const completedAt = `COALESCE(v.completed_at,${vesselLoadedAt})`;
       where.push(reader
-        ? `((${inRange('v.started_at')}) OR (${inRange('v.completed_at')}) OR EXISTS(
+        ? `((${inRange('v.started_at')}) OR (${inRange(completedAt)}) OR EXISTS(
             SELECT 1 ${bookingsForVisit} WHERE bc.container_visit_id=v.id${bookingScope}
             AND b.status::text NOT IN ('rejected','canceled','expired') AND ${inRange('b.appointment_start')}))`
         : inRange('COALESCE(v.started_at,v.created_at)'));
@@ -146,10 +236,15 @@ export class ContainerJourneyRepository {
     const bookingCode = canReadPrivate || bookingScope ? 'b.booking_code' : 'NULL';
     const direction = reader ? 'yard_booking_direction(b.id,bc.container_id)' : 'b.booking_type';
     const receiptScope = bookingScope ? ` AND EXISTS(SELECT 1 FROM bookings b WHERE b.id=e.booking_id${bookingScope})` : '';
+    const issuedReceiptFilter = reader ? " AND e.eir_status='issued'" : '';
+    const latestActivity = `GREATEST(COALESCE(v.started_at,v.created_at),COALESCE(v.completed_at,${vesselLoadedAt},v.created_at),
+      COALESCE((SELECT MAX(COALESCE(e.check_out_at,e.check_in_at)) FROM eir_transactions e
+        WHERE e.container_visit_id=v.id${issuedReceiptFilter}),v.created_at))`;
     const base = `FROM container_visits v JOIN containers c ON c.id=v.container_id JOIN container_types ct ON ct.id=c.container_type_id WHERE ${where.join(' AND ')}`;
     const total = Number((await query('SELECT count(*) ' + base,params)).rows[0].count);
     const rows = await query(`SELECT v.id,c.id AS "containerId",c.container_no AS "containerNumber",ct.code AS "containerTypeCode",
-      v.visit_reference AS "visitReference",v.visit_status AS "visitStatus",v.started_at AS "startedAt",v.completed_at AS "completedAt",
+      v.visit_reference AS "visitReference",CASE WHEN v.visit_status='active' AND ${loadedOnVessel} THEN 'completed' ELSE v.visit_status::text END AS "visitStatus",
+      v.started_at AS "startedAt",COALESCE(v.completed_at,${vesselLoadedAt}) AS "completedAt",
       ${visitPrivate('v.customer_name')} AS "customerName",${visitPrivate('v.seal_number')} AS "sealNumber",
       v.load_status AS "loadStatus",${visitPrivate('v.cargo_type')} AS "cargoType",
       ${visitPrivate('v.gross_weight_kg::float8')} AS "grossWeightKg",${visitPrivate('v.required_power_kw::float8')} AS "requiredPowerKw",
@@ -162,7 +257,7 @@ export class ContainerJourneyRepository {
        'requiredPowerKw',${visitPrivate('e.required_power_kw')},'sealNumber',${visitPrivate("(SELECT string_agg(s.seal_number,', ') FROM eir_seals s WHERE s.eir_transaction_id=e.id)")})
        ORDER BY e.check_in_at,e.id)
        FROM eir_transactions e WHERE e.container_visit_id=v.id${reader ? " AND e.eir_status='issued'" : ''}${receiptScope}) AS receipts
-      ${base} ORDER BY COALESCE(v.started_at,v.created_at) DESC,v.id LIMIT $${params.length+1} OFFSET $${params.length+2}`, [...params,limit,(page-1)*limit]);
+      ${base} ORDER BY ${latestActivity} DESC,v.id LIMIT $${params.length+1} OFFSET $${params.length+2}`, [...params,limit,(page-1)*limit]);
     return { items: rows.rows,total,page,limit,totalPages: Math.ceil(total/limit) };
   }
 

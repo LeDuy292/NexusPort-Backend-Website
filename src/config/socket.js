@@ -301,6 +301,63 @@ function emitContainerReadyForGateOut(request) {
 }
 
 /**
+ * Phát sự kiện khi container đã hoàn tất xuất cổng ra (Gate-Out).
+ * Kết thúc tính lưu bãi, container chuyển Đã ra cổng, lệnh hoàn thành.
+ */
+function emitContainerGatedOut(data) {
+  if (!io) return;
+  const payload = {
+    ...data,
+    timestamp: new Date().toISOString(),
+  };
+
+  io.to('yard:all').emit('container:gated_out', payload);
+  io.to('gate:all').emit('container:gated_out', payload);
+  io.to('dispatcher:all').emit('container:gated_out', payload);
+
+  if (data.driverId) {
+    emitToDriver(data.driverId, 'trip:status_updated', {
+      tripId: data.tripId,
+      status: 'Completed',
+      containerId: data.containerId,
+      message: 'Container đã hoàn tất thủ tục xuất cổng cảng. Chúc bạn thượng lộ bình an!',
+      timestamp: payload.timestamp,
+    });
+  }
+}
+
+/**
+ * Phát sự kiện khi bước tiến trình bãi (flow_step) của container được cập nhật.
+ * @param {Object} request
+ */
+function emitYardFlowStepUpdated(request) {
+  if (!io || !request) return;
+
+  const payload = {
+    id: request.id,
+    requestId: request.id,
+    containerId: request.container_id || request.containerId,
+    truckPlate: request.truck_plate || request.truckPlate || request.truck,
+    driverName: request.driver_name || request.driverName || request.driver,
+    flowStep: request.flow_step !== undefined ? request.flow_step : request.flowStep,
+    flow_step: request.flow_step !== undefined ? request.flow_step : request.flowStep,
+    status: request.status,
+    statusCode: request.statusCode || request.status,
+    yardSlot: request.yard_slot || request.yardSlot || request.position,
+    rtgCrane: request.rtg_crane || request.rtgCrane,
+    rtgOperator: request.rtg_operator || request.rtgOperator,
+    eirReferenceNo: request.eir_reference_no || request.eirReferenceNo,
+    note: request.note,
+    timestamp: new Date().toISOString(),
+    request,
+  };
+
+  io.to('yard:all').emit('yard:flow_step_updated', payload);
+  io.to('gate:all').emit('yard:flow_step_updated', payload);
+  io.to('dispatcher:all').emit('yard:flow_step_updated', payload);
+}
+
+/**
  * Phát sự kiện kick session cũ khi tài khoản đăng nhập trên thiết bị / phiên khác.
  * @param {string} userId
  * @param {string} reason
@@ -364,6 +421,8 @@ module.exports = {
   emitYardOutboundRequested,
   emitCraneDispatched,
   emitContainerReadyForGateOut,
+  emitContainerGatedOut,
+  emitYardFlowStepUpdated,
   hasActiveSockets,
   kickUserSockets,
 };

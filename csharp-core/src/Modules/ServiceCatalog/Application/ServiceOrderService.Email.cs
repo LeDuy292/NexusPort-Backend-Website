@@ -14,7 +14,7 @@ public sealed partial class ServiceOrderService
         var recipient = (await Rows("SELECT COALESCE((SELECT recipient FROM eport_service_mail_queue WHERE draft_id=r.draft_id AND kind='PAYMENT_NOTICE'),u.email) AS email FROM eport_service_registrations r JOIN users u ON u.id=r.confirmed_by WHERE r.draft_id=@p0", ct, id)).Single();
         Require(kind == "PAYMENT_RECEIPT" || MailAddress.TryCreate(S(recipient, "email"), out _), "Tài khoản đăng ký chưa có email hợp lệ để nhận thông báo.", 422, "SERVICE_ACCOUNT_EMAIL_REQUIRED");
         var paid = kind == "PAYMENT_RECEIPT";
-        var proof = paid ? (await Rows("SELECT number,amount,bank_reference AS reference,updated_at AS \"paidAt\" FROM eport_service_payments WHERE draft_id=@p0 AND status='SUCCEEDED'", ct, id)).SingleOrDefault() : null;
+        var proof = paid ? (await Rows("SELECT number,COALESCE(transfer_amount,amount) AS amount,bank_reference AS reference,updated_at AS \"paidAt\" FROM eport_service_payments WHERE draft_id=@p0 AND status='SUCCEEDED'", ct, id)).SingleOrDefault() : null;
         var title = paid ? "Biên lai thu phí & Xác nhận hoàn tất dịch vụ" : "Thông báo phê duyệt phí dịch vụ cảng";
 
         string E(string? text) => WebUtility.HtmlEncode(text ?? "");

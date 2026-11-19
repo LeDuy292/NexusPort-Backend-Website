@@ -40,6 +40,7 @@ CAMERA_ID_IN  = os.getenv("CAMERA_ID_IN",  "CAM_GATE_IN_01")
 GATE_CODE_OUT = os.getenv("GATE_CODE_OUT", "GATE_OUT_A")
 LANE_CODE_OUT = os.getenv("LANE_CODE_OUT", "LANE_02")
 CAMERA_ID_OUT = os.getenv("CAMERA_ID_OUT", "CAM_GATE_OUT_01")
+CAMERA_PREVIEW_TIMEOUT_SEC = 20.0
 
 
 def verify_plate_with_backend(plate_number: str, gate_code: str) -> bool:
@@ -93,7 +94,7 @@ class HardwareGateService:
         port: str = "COM8",
         baud: int = 115200,
         cam_in_idx: int = 0,
-        cam_out_idx: int = 1
+        cam_out_idx: int = 0
     ):
         if self._initialized:
             return
@@ -107,8 +108,8 @@ class HardwareGateService:
         self.pipeline: Optional[SmartPortGatePipeline] = None
         self.esp32: Optional[ESP32Controller] = None
 
-        self._cap_in: Optional[cv2.VideoCapture] = None
-        self._cap_out: Optional[cv2.VideoCapture] = None
+        self._camera_cap: Optional[cv2.VideoCapture] = None
+        self._camera_lane: Optional[str] = None
 
         # Khung hình mới nhất được cache (dùng để stream và OCR)
         self._last_frame_in: Optional[np.ndarray] = None
@@ -128,11 +129,24 @@ class HardwareGateService:
         self._running = False
         self._camera_thread: Optional[threading.Thread] = None
         self._processing_lock = threading.Lock()
+        self._camera_state_lock = threading.Lock()
+        self._camera_preview_lane: Optional[str] = None
+        self._camera_preview_expires_at: Optional[float] = None
+        self._capture_camera_lane: Optional[str] = None
+        self._frame_ready = {"IN": threading.Event(), "OUT": threading.Event()}
+        self._sensor_capture_guard = threading.Lock()
+        self._sensor_capture_pending = False
+        self.scan_status: Dict[str, Any] = {
+            "state": "WAITING_SENSOR",
+            "lane": None,
+            "source": None,
+        }
 
         # Throttle CAPTURE từ IR sensor: tránh spam khi sensor luôn LOW
-        # Mỗi làn có cooldown riêng độc lập
+        # Throttle CAPTURE từ IR sensor: tránh spam khi sensor luôn LOW
         self._last_capture_time_in: float = 0.0
         self._last_capture_time_out: float = 0.0
+        self._last_capture_time: float = 0.0
         self._capture_cooldown_sec: float = 8.0  # Tối thiểu 8s giữa 2 lần CAPTURE mỗi làn
 
     def start(self):
@@ -141,7 +155,7 @@ class HardwareGateService:
             return
         self._running = True
         logger.info("=" * 60)
-        logger.info("Khởi động HardwareGateService (ESP32 + Camera + AI)...")
+        logger.info("Khởi động HardwareGateService (ESP32 + AI; camera chờ kích hoạt)...")
         logger.info("=" * 60)
 
         # 1. Khởi tạo AI Pipeline
@@ -159,25 +173,26 @@ class HardwareGateService:
             on_capture_out=self._handle_esp32_capture_out,
         )
 
-        # 3. Mở Camera và bắt đầu luồng đọc video liên tục
-        self._open_cameras()
+        # Camera loop chỉ mở thiết bị khi có yêu cầu xem trực tiếp hoặc cảm biến báo xe.
         self._camera_thread = threading.Thread(
             target=self._camera_loop,
             name="Gate-Camera-Loop",
             daemon=True
         )
         self._camera_thread.start()
-        logger.info("[HardwareGateService] Luồng Camera background đã khởi chạy.")
+        logger.info("[HardwareGateService] Đang chờ yêu cầu bật camera hoặc tín hiệu cảm biến.")
 
     def stop(self):
         """Dừng dịch vụ và giải phóng tài nguyên."""
         self._running = False
         if self.esp32:
             self.esp32.stop()
-        if self._cap_in:
-            self._cap_in.release()
-        if self._cap_out:
-            self._cap_out.release()
+        if self._camera_thread and self._camera_thread.is_alive():
+            self._camera_thread.join(timeout=2)
+        if self._camera_cap:
+            self._camera_cap.release()
+            self._camera_cap = None
+        self._camera_lane = None
         logger.info("[HardwareGateService] Đã dừng toàn bộ dịch vụ phần cứng.")
 
     def _open_camera_by_idx(self, idx: int) -> Optional[cv2.VideoCapture]:
@@ -207,59 +222,142 @@ class HardwareGateService:
             pass
         return None
 
-    def _open_cameras(self):
-        """Mở webcam 2 làn cổng."""
-        logger.info("[HardwareGateService] Mở camera làn Vào (index %d)...", self.cam_in_idx)
-        self._cap_in = self._open_camera_by_idx(self.cam_in_idx)
-        if self._cap_in and self._cap_in.isOpened():
-            logger.info("[HardwareGateService] Camera làn Vào (index %d) đã kết nối.", self.cam_in_idx)
-        else:
-            logger.warning("[HardwareGateService] Camera làn Vào chưa kết nối (sẽ tự thử lại khi cắm).")
+    @staticmethod
+    def _normalize_lane(lane: str) -> str:
+        normalized = str(lane).upper()
+        if normalized not in ("IN", "OUT"):
+            raise ValueError("lane phải là IN hoặc OUT")
+        return normalized
 
-        self._cap_out = self._open_camera_by_idx(self.cam_out_idx)
-        if self._cap_out and self._cap_out.isOpened():
-            logger.info("[HardwareGateService] Camera làn Ra (index %d) đã kết nối.", self.cam_out_idx)
-        else:
-            logger.debug("[HardwareGateService] Camera làn Ra chưa cắm (chế độ 1 làn).")
+    def _lane_active_locked(self, lane: str) -> bool:
+        return self._selected_camera_lane_locked() == lane
+
+    def _selected_camera_lane_locked(self) -> Optional[str]:
+        if (
+            self._camera_preview_lane
+            and self._camera_preview_expires_at is not None
+            and time.monotonic() >= self._camera_preview_expires_at
+        ):
+            logger.info("[HardwareGateService] Hết thời gian xem trực tiếp; tự tắt camera preview.")
+            self._camera_preview_lane = None
+            self._camera_preview_expires_at = None
+        return self._capture_camera_lane or self._camera_preview_lane
+
+    def _reset_lane_frame(self, lane: str):
+        with self._frame_lock:
+            if lane == "IN":
+                self._last_frame_in = None
+            else:
+                self._last_frame_out = None
+        self._frame_ready[lane].clear()
+
+    def set_camera_preview(self, lane: str, enabled: bool) -> Dict[str, Any]:
+        """Bật/tắt camera quan sát theo yêu cầu từ giao diện."""
+        lane = self._normalize_lane(lane)
+        with self._camera_state_lock:
+            previous_lane = self._selected_camera_lane_locked()
+            if enabled:
+                self._camera_preview_lane = lane
+                self._camera_preview_expires_at = time.monotonic() + CAMERA_PREVIEW_TIMEOUT_SEC
+            elif self._camera_preview_lane == lane:
+                self._camera_preview_lane = None
+                self._camera_preview_expires_at = None
+            selected_lane = self._selected_camera_lane_locked()
+            if selected_lane and selected_lane != previous_lane:
+                self._reset_lane_frame(selected_lane)
+            is_active = selected_lane == lane
+            if not is_active:
+                self._reset_lane_frame(lane)
+
+        return {
+            "success": True,
+            "lane": lane,
+            "enabled": is_active,
+            "preview_enabled": self._camera_preview_lane == lane,
+            "expires_in_seconds": CAMERA_PREVIEW_TIMEOUT_SEC if enabled else 0,
+            "message": "Đã bật camera quan sát" if enabled else "Đã tắt camera quan sát",
+        }
+
+    def _begin_capture(self, lane: str):
+        lane = self._normalize_lane(lane)
+        with self._camera_state_lock:
+            self._capture_camera_lane = lane
+            self._reset_lane_frame(lane)
+
+    def _end_capture(self, lane: str):
+        with self._camera_state_lock:
+            if self._capture_camera_lane == lane:
+                self._capture_camera_lane = None
+
+    def _wait_for_camera_frame(self, lane: str, timeout: float = 5.0) -> bool:
+        return self._frame_ready[lane].wait(timeout)
 
     def _camera_loop(self):
-        """Vòng lặp đọc khung hình camera liên tục trong nền."""
-        reconnect_interval = 30.0
-        last_reconnect_check = time.time()
+        """Chỉ mở webcam cho một làn đang xem hoặc đang được quét."""
+        reconnect_interval = 3.0
+        last_open_attempt = 0.0
 
         while self._running:
+            with self._camera_state_lock:
+                selected_lane = self._selected_camera_lane_locked()
+
+            if selected_lane is None:
+                if self._camera_cap:
+                    self._camera_cap.release()
+                    self._camera_cap = None
+                self._camera_lane = None
+                time.sleep(0.03)
+                continue
+
+            if selected_lane != self._camera_lane:
+                if self._camera_cap:
+                    self._camera_cap.release()
+                self._camera_cap = None
+                self._camera_lane = selected_lane
+                last_open_attempt = 0.0
+                self._reset_lane_frame(selected_lane)
+
             now = time.time()
+            if self._camera_cap is None or not self._camera_cap.isOpened():
+                if now - last_open_attempt >= reconnect_interval:
+                    last_open_attempt = now
+                    index = self.cam_in_idx if selected_lane == "IN" else self.cam_out_idx
+                    logger.info("[HardwareGateService] Đang mở camera làn %s (index %d)...", selected_lane, index)
+                    self._camera_cap = self._open_camera_by_idx(index)
+                    if self._camera_cap:
+                        logger.info("[HardwareGateService] Camera làn %s đã kết nối.", selected_lane)
+                time.sleep(0.03)
+                continue
 
-            # Tự động kết nối lại nếu camera chưa mở
-            if (self._cap_in is None or not self._cap_in.isOpened()) and (now - last_reconnect_check > reconnect_interval):
-                last_reconnect_check = now
-                self._cap_in = self._open_camera_by_idx(self.cam_in_idx)
-
-            # Đọc camera làn Vào
-            if self._cap_in and self._cap_in.isOpened():
-                ret, frame = self._cap_in.read()
-                if ret and frame is not None:
+            ret, frame = self._camera_cap.read()
+            if ret and frame is not None:
+                with self._camera_state_lock:
+                    still_selected = self._selected_camera_lane_locked() == selected_lane
+                if still_selected:
                     with self._frame_lock:
-                        self._last_frame_in = frame
-                else:
-                    self._cap_in.release()
-                    self._cap_in = None
+                        if selected_lane == "IN":
+                            self._last_frame_in = frame
+                        else:
+                            self._last_frame_out = frame
+                    self._frame_ready[selected_lane].set()
+            else:
+                self._camera_cap.release()
+                self._camera_cap = None
+                self._reset_lane_frame(selected_lane)
 
-            # Đọc camera làn Ra
-            if self._cap_out and self._cap_out.isOpened():
-                ret, frame = self._cap_out.read()
-                if ret and frame is not None:
-                    with self._frame_lock:
-                        self._last_frame_out = frame
+            time.sleep(0.01)
 
-            time.sleep(0.03)  # ~30 FPS
+        if self._camera_cap:
+            self._camera_cap.release()
+            self._camera_cap = None
+        self._camera_lane = None
 
     def get_frame(self, lane: str = "IN") -> np.ndarray:
         """
         Lấy khung hình mới nhất. Nếu camera chưa có, tạo khung hình đồ họa trạng thái.
         """
         with self._frame_lock:
-            frame = self._last_frame_in if lane == "IN" else (self._last_frame_out or self._last_frame_in)
+            frame = self._last_frame_in if lane == "IN" else self._last_frame_out
 
         if frame is not None:
             return frame.copy()
@@ -306,48 +404,53 @@ class HardwareGateService:
                    b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n")
             time.sleep(0.04)
 
-    def _handle_esp32_capture_in(self):
-        """Được gọi khi cảm biến IR làn Vào kích hoạt 'CAPTURE_IN'."""
-        import time
-        now = time.time()
-        elapsed = now - self._last_capture_time_in
-        if elapsed < self._capture_cooldown_sec:
-            logger.info(
-                "[HardwareGateService] CAPTURE_IN bị throttle (%.1fs < cooldown %.1fs) — bỏ qua.",
-                elapsed, self._capture_cooldown_sec
-            )
-            return
-        self._last_capture_time_in = now
-        logger.info("[HardwareGateService] Tín hiệu IR CAPTURE_IN nhận được từ ESP32 (Làn Vào)!")
+    def _handle_esp32_capture(self, lane: str = "IN"):
+        """Được gọi khi cảm biến của một làn gửi tín hiệu CAPTURE."""
+        lane = self._normalize_lane(lane)
+        now = time.monotonic()
+        with self._sensor_capture_guard:
+            last_t = self._last_capture_time_out if lane == "OUT" else self._last_capture_time_in
+            elapsed = now - (last_t or self._last_capture_time)
+            if self._sensor_capture_pending or self._processing_lock.locked():
+                logger.info("[HardwareGateService] Đang xử lý lượt quét; bỏ qua tín hiệu cảm biến mới.")
+                return
+            if elapsed < self._capture_cooldown_sec:
+                logger.info(
+                    "[HardwareGateService] CAPTURE làn %s bị throttle (%.1fs < cooldown %.1fs) — bỏ qua.",
+                    lane, elapsed, self._capture_cooldown_sec
+                )
+                return
+            if lane == "OUT":
+                self._last_capture_time_out = now
+            else:
+                self._last_capture_time_in = now
+            self._last_capture_time = now
+            self._sensor_capture_pending = True
+            self.scan_status = {"state": "CAPTURING", "lane": lane, "source": "IR_SENSOR"}
+        logger.info("[HardwareGateService] Nhận tín hiệu cảm biến làn %s từ ESP32.", lane)
         threading.Thread(
-            target=self.process_passage,
-            args=("IN", "IR_SENSOR"),
+            target=self._process_sensor_passage,
+            args=(lane,),
             daemon=True
         ).start()
+
+    def _handle_esp32_capture_in(self):
+        """Callback riêng làn Vào."""
+        self._handle_esp32_capture("IN")
 
     def _handle_esp32_capture_out(self):
-        """Được gọi khi cảm biến IR làn Ra kích hoạt 'CAPTURE_OUT'."""
-        import time
-        now = time.time()
-        elapsed = now - self._last_capture_time_out
-        if elapsed < self._capture_cooldown_sec:
-            logger.info(
-                "[HardwareGateService] CAPTURE_OUT bị throttle (%.1fs < cooldown %.1fs) — bỏ qua.",
-                elapsed, self._capture_cooldown_sec
-            )
-            return
-        self._last_capture_time_out = now
-        logger.info("[HardwareGateService] Tín hiệu IR CAPTURE_OUT nhận được từ ESP32 (Làn Ra)!")
-        threading.Thread(
-            target=self.process_passage,
-            args=("OUT", "IR_SENSOR"),
-            daemon=True
-        ).start()
+        """Callback riêng làn Ra."""
+        self._handle_esp32_capture("OUT")
 
-    # Backward compat (nếu firmware cũ gửi "CAPTURE" không có hậu tố)
-    _handle_esp32_capture = _handle_esp32_capture_in
+    def _process_sensor_passage(self, lane: str):
+        try:
+            self.process_passage(lane=lane, source="IR_SENSOR")
+        finally:
+            with self._sensor_capture_guard:
+                self._sensor_capture_pending = False
+                self.scan_status = {"state": "WAITING_SENSOR", "lane": None, "source": None}
 
-    def process_passage(self, lane: str = "IN", source: str = "WEB_MANUAL") -> Dict[str, Any]:
+    def process_passage(self, lane: str = "IN", source: str = "SENSOR") -> Dict[str, Any]:
         """
         Thực hiện toàn bộ nghiệp vụ quét, OCR, đối soát và điều khiển cổng:
         1. Lấy ảnh từ camera
@@ -356,9 +459,23 @@ class HardwareGateService:
         4. Gửi tín hiệu OPEN / FAIL xuống ESP32
         5. Phát sự kiện Realtime lên màn hình Gate Control
         """
+        lane = self._normalize_lane(lane)
         with self._processing_lock:
+            self._begin_capture(lane)
+            try:
+                if not self._wait_for_camera_frame(lane):
+                    logger.error("[process_passage] Camera làn %s không có khung hình mới.", lane)
+                    if self.esp32:
+                        self.esp32.send_fail()
+                    return {"success": False, "error": "CAMERA_FRAME_TIMEOUT"}
+                frame = self.get_frame(lane)
+            finally:
+                self._end_capture(lane)
+            self.scan_status = {"state": "PROCESSING", "lane": lane, "source": source}
+            return self._process_passage_frame(lane, source, frame)
+
+    def _process_passage_frame(self, lane: str, source: str, frame: np.ndarray) -> Dict[str, Any]:
             logger.info("── Bắt đầu xử lý quét xe (Làn: %s, Nguồn: %s) ──", lane, source)
-            frame = self.get_frame(lane)
 
             success, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
             if not success:
@@ -529,19 +646,32 @@ class HardwareGateService:
 
     def get_status(self) -> Dict[str, Any]:
         """Lấy toàn bộ thông tin tình trạng phần cứng phục vụ Web Dashboard."""
+        with self._camera_state_lock:
+            active_lane = self._selected_camera_lane_locked()
+            camera_in_enabled = active_lane == "IN"
+            camera_out_enabled = active_lane == "OUT"
+            camera_connected = bool(
+                active_lane
+                and self._camera_cap
+                and self._camera_cap.isOpened()
+                and self._frame_ready[active_lane].is_set()
+            )
         return {
             "esp32": self.esp32.status() if self.esp32 else {"connected": False},
             "camera_in": {
                 "index": self.cam_in_idx,
-                "connected": self._cap_in is not None and self._cap_in.isOpened(),
+                "enabled": camera_in_enabled,
+                "connected": camera_in_enabled and camera_connected,
             },
             "camera_out": {
                 "index": self.cam_out_idx,
-                "connected": self._cap_out is not None and self._cap_out.isOpened(),
+                "enabled": camera_out_enabled,
+                "connected": camera_out_enabled and camera_connected,
             },
             "ai_pipeline": {
                 "ready": self.pipeline is not None,
                 "azure_vision": self.pipeline.ocr_service.azure_available if self.pipeline else False,
             },
+            "scan_status": self.scan_status,
             "last_event": self.last_event
         }
