@@ -65,6 +65,7 @@ class ESP32Controller:
         self._reader_thread: Optional[threading.Thread] = None
 
         self.connected = False
+        self._logged_disconnected = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -202,13 +203,14 @@ class ESP32Controller:
                     pass
             time.sleep(2)  # Chờ ESP32 reset sau khi mở cổng
             self.connected = True
-            logger.info("[ESP32] Connected to %s @ %d baud", target_port, self.baud)
+            self._logged_disconnected = False
+            logger.info("[ESP32] Đã kết nối thành công tới %s @ %d baud", target_port, self.baud)
             return True
         except serial.SerialException:
             # Thử tự động dò cổng khác nếu cổng mặc định (như COM7) không mở được
             detected_port = self._find_esp32_port()
             if detected_port and detected_port != target_port:
-                logger.info("[ESP32] Không tìm thấy %s, tự động chuyển sang %s (CH340 detected)", target_port, detected_port)
+                logger.info("[ESP32] Không tìm thấy %s, tự động chuyển sang %s (CH340/CP210x detected)", target_port, detected_port)
                 try:
                     with self._serial_lock:
                         self._serial = serial.Serial(
@@ -220,12 +222,26 @@ class ESP32Controller:
                     self.port = detected_port
                     time.sleep(2)
                     self.connected = True
-                    logger.info("[ESP32] Connected to %s @ %d baud", detected_port, self.baud)
+                    self._logged_disconnected = False
+                    logger.info("[ESP32] Đã kết nối thành công tới %s @ %d baud", detected_port, self.baud)
                     return True
                 except serial.SerialException as e2:
-                    logger.error("[ESP32] Cannot open auto-detected port %s: %s", detected_port, e2)
+                    if not self._logged_disconnected:
+                        logger.warning("[ESP32] Không thể mở cổng tự dò %s: %s", detected_port, e2)
+                        self._logged_disconnected = True
+                    else:
+                        logger.debug("[ESP32] Cannot open auto-detected port %s: %s", detected_port, e2)
             else:
-                logger.error("[ESP32] Cannot open %s and no other ESP32 port detected", target_port)
+                if not self._logged_disconnected:
+                    logger.warning(
+                        "[ESP32] Chưa cắm hoặc không phát hiện phần cứng ESP32 trên cổng %s. "
+                        "Dịch vụ AI Smart Gate vẫn hoạt động bình thường qua API / Web Camera / mô phỏng phần mềm. "
+                        "Hệ thống sẽ tự động đồng bộ ngay khi cắm cáp USB ESP32.",
+                        target_port
+                    )
+                    self._logged_disconnected = True
+                else:
+                    logger.debug("[ESP32] Đang chờ kết nối ESP32 trên cổng %s...", target_port)
             self.connected = False
             return False
 
@@ -246,13 +262,16 @@ class ESP32Controller:
         """
         while self._running:
             if not self.connected:
-                logger.info("[ESP32] Attempting to connect to %s ...", self.port)
+                if not self._logged_disconnected:
+                    logger.info("[ESP32] Đang tìm kiếm cổng kết nối phần cứng %s ...", self.port)
+                else:
+                    logger.debug("[ESP32] Polling for connection on %s ...", self.port)
                 try:
                     if not self._open_serial():
                         time.sleep(5)  # Chờ 5s trước khi thử lại
                         continue
                 except Exception as e:
-                    logger.error("[ESP32] Error opening serial port: %s", e)
+                    logger.debug("[ESP32] Error opening serial port: %s", e)
                     time.sleep(5)
                     continue
 
