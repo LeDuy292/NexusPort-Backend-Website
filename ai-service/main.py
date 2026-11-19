@@ -1,4 +1,5 @@
 import os
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"  # Tắt lớp giải mã MSMF của Windows, ép dùng DirectShow chống sọc/treo
 import base64
 import json
 import logging
@@ -10,7 +11,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -22,7 +23,7 @@ from services.hardware_gate_service import HardwareGateService
 # Khởi tạo dịch vụ phần cứng quản lý ESP32 và Camera
 camera_index = int(os.getenv("GATE_CAMERA_INDEX", os.getenv("GATE_CAMERA_IN", "0")))
 hw_service = HardwareGateService(
-    port=os.getenv("GATE_SERIAL_PORT", "COM8"),
+    port=os.getenv("GATE_SERIAL_PORT", "COM7"),
     baud=int(os.getenv("GATE_BAUD_RATE", "115200")),
     cam_in_idx=camera_index,
     cam_out_idx=camera_index
@@ -314,27 +315,69 @@ def stop_gate_camera(lane: str = "IN"):
 
 
 @app.post("/api/v1/gate/barrier/open")
-def manual_barrier_open():
+def manual_barrier_open(lane: Optional[str] = Query("IN")):
     """
-    Cưỡng bức mở Barrier từ Web UI (nút 'Mở Cổng').
+    Cưỡng bức mở Barrier từ Web UI (nút 'Mở Cổng') theo làn chỉ định (IN hoặc OUT).
     """
-    return hw_service.manual_open()
+    if (lane or "").upper() == "OUT":
+        return hw_service.manual_open_out()
+    return hw_service.manual_open_in()
+
+
+@app.post("/api/v1/gate/barrier/open/in")
+def manual_barrier_open_in():
+    """Cưỡng bức mở Barrier Làn Vào (IN)."""
+    return hw_service.manual_open_in()
+
+
+@app.post("/api/v1/gate/barrier/open/out")
+def manual_barrier_open_out():
+    """Cưỡng bức mở Barrier Làn Ra (OUT)."""
+    return hw_service.manual_open_out()
 
 
 @app.post("/api/v1/gate/barrier/close")
-def manual_barrier_close():
+def manual_barrier_close(lane: Optional[str] = Query("IN")):
     """
-    Cưỡng bức đóng Barrier từ Web UI (nút 'Hạ barie').
+    Cưỡng bức đóng Barrier từ Web UI (nút 'Hạ barie') theo làn chỉ định (IN hoặc OUT).
     """
-    return hw_service.manual_close()
+    if (lane or "").upper() == "OUT":
+        return hw_service.manual_close_out()
+    return hw_service.manual_close_in()
+
+
+@app.post("/api/v1/gate/barrier/close/in")
+def manual_barrier_close_in():
+    """Cưỡng bức đóng Barrier Làn Vào (IN)."""
+    return hw_service.manual_close_in()
+
+
+@app.post("/api/v1/gate/barrier/close/out")
+def manual_barrier_close_out():
+    """Cưỡng bức đóng Barrier Làn Ra (OUT)."""
+    return hw_service.manual_close_out()
 
 
 @app.post("/api/v1/gate/barrier/fail")
-def manual_barrier_fail():
+def manual_barrier_fail(lane: Optional[str] = Query("IN")):
     """
-    Báo lỗi / từ chối xe từ Web UI (nút 'Đóng Cổng / Báo Lỗi').
+    Báo lỗi / từ chối xe từ Web UI theo làn chỉ định (IN hoặc OUT).
     """
-    return hw_service.manual_fail()
+    if (lane or "").upper() == "OUT":
+        return hw_service.manual_fail_out()
+    return hw_service.manual_fail_in()
+
+
+@app.post("/api/v1/gate/barrier/fail/in")
+def manual_barrier_fail_in():
+    """Báo lỗi Làn Vào (IN)."""
+    return hw_service.manual_fail_in()
+
+
+@app.post("/api/v1/gate/barrier/fail/out")
+def manual_barrier_fail_out():
+    """Báo lỗi Làn Ra (OUT)."""
+    return hw_service.manual_fail_out()
 
 
 @app.get("/api/v1/gate/hardware-status")

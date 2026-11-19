@@ -79,6 +79,7 @@ public class YardSlotConfiguration : IEntityTypeConfiguration<NexusPort.Modules.
         builder.Property(x => x.Status).HasColumnName("status").HasColumnType("yard_slot_status").IsRequired();
         builder.Property(x => x.MaxWeightKg).HasColumnName("max_weight_kg");
         builder.Property(x => x.HasReeferPlug).HasColumnName("has_reefer_plug").IsRequired();
+        builder.Property(x => x.ContainerLengthFt).HasColumnName("container_length_ft");
         
         // Ignore base properties
         builder.Ignore(x => x.CreatedAt);

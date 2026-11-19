@@ -13,6 +13,7 @@ Dịch vụ tự động quản lý phần cứng Cổng Cảng thông minh (ESP
 """
 
 import os
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"  # Tắt lớp giải mã MSMF của Windows, ép dùng DirectShow chống sọc/treo
 import sys
 import time
 import logging
@@ -142,8 +143,11 @@ class HardwareGateService:
         }
 
         # Throttle CAPTURE từ IR sensor: tránh spam khi sensor luôn LOW
+        # Throttle CAPTURE từ IR sensor: tránh spam khi sensor luôn LOW
+        self._last_capture_time_in: float = 0.0
+        self._last_capture_time_out: float = 0.0
         self._last_capture_time: float = 0.0
-        self._capture_cooldown_sec: float = 10.0  # Cooldown giữa các lần cảm biến kích hoạt
+        self._capture_cooldown_sec: float = 8.0  # Tối thiểu 8s giữa 2 lần CAPTURE mỗi làn
 
     def start(self):
         """Khởi động toàn bộ dịch vụ phần cứng trong nền."""
@@ -163,8 +167,11 @@ class HardwareGateService:
 
         # 2. Khởi động kết nối ESP32
         self.esp32 = ESP32Controller(port=self.port, baud=self.baud)
-        # Gán callback xử lý khi nhận được CAPTURE từ ESP32
-        self.esp32.start(on_capture=self._handle_esp32_capture)
+        # Gán 2 callback riêng biệt cho từng làn
+        self.esp32.start(
+            on_capture_in=self._handle_esp32_capture_in,
+            on_capture_out=self._handle_esp32_capture_out,
+        )
 
         # Camera loop chỉ mở thiết bị khi có yêu cầu xem trực tiếp hoặc cảm biến báo xe.
         self._camera_thread = threading.Thread(
@@ -189,15 +196,30 @@ class HardwareGateService:
         logger.info("[HardwareGateService] Đã dừng toàn bộ dịch vụ phần cứng.")
 
     def _open_camera_by_idx(self, idx: int) -> Optional[cv2.VideoCapture]:
-        """Thử mở camera bằng nhiều backend DirectShow, MSMF hoặc Any."""
-        for backend in [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]:
-            try:
-                cap = cv2.VideoCapture(idx, backend)
-                if cap.isOpened():
-                    return cap
-                cap.release()
-            except Exception:
-                pass
+        """
+        Mở camera bằng DirectShow + ép nén MJPG 640x480 chống nhiễu sọc/treo đen màn hình.
+        """
+        try:
+            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                return cap
+            cap.release()
+        except Exception as e:
+            logger.debug("[HardwareGateService] Không mở được camera %d qua DirectShow: %s", idx, e)
+
+        # Fallback nhẹ nếu DirectShow không nhận
+        try:
+            cap = cv2.VideoCapture(idx)
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                return cap
+            cap.release()
+        except Exception:
+            pass
         return None
 
     @staticmethod
@@ -387,16 +409,21 @@ class HardwareGateService:
         lane = self._normalize_lane(lane)
         now = time.monotonic()
         with self._sensor_capture_guard:
-            elapsed = now - self._last_capture_time
+            last_t = self._last_capture_time_out if lane == "OUT" else self._last_capture_time_in
+            elapsed = now - (last_t or self._last_capture_time)
             if self._sensor_capture_pending or self._processing_lock.locked():
                 logger.info("[HardwareGateService] Đang xử lý lượt quét; bỏ qua tín hiệu cảm biến mới.")
                 return
             if elapsed < self._capture_cooldown_sec:
                 logger.info(
-                    "[HardwareGateService] CAPTURE bị throttle (%.1fs < cooldown %.1fs) — bỏ qua.",
-                    elapsed, self._capture_cooldown_sec
+                    "[HardwareGateService] CAPTURE làn %s bị throttle (%.1fs < cooldown %.1fs) — bỏ qua.",
+                    lane, elapsed, self._capture_cooldown_sec
                 )
                 return
+            if lane == "OUT":
+                self._last_capture_time_out = now
+            else:
+                self._last_capture_time_in = now
             self._last_capture_time = now
             self._sensor_capture_pending = True
             self.scan_status = {"state": "CAPTURING", "lane": lane, "source": "IR_SENSOR"}
@@ -406,6 +433,14 @@ class HardwareGateService:
             args=(lane,),
             daemon=True
         ).start()
+
+    def _handle_esp32_capture_in(self):
+        """Callback riêng làn Vào."""
+        self._handle_esp32_capture("IN")
+
+    def _handle_esp32_capture_out(self):
+        """Callback riêng làn Ra."""
+        self._handle_esp32_capture("OUT")
 
     def _process_sensor_passage(self, lane: str):
         try:
@@ -462,10 +497,14 @@ class HardwareGateService:
                     lane_code=lane_code,
                     gate_code=gate_code,
                 )
+                result["lane"] = lane
             except Exception as e:
                 logger.error("[process_passage] Lỗi AI Pipeline: %s", e)
                 if self.esp32:
-                    self.esp32.send_fail()
+                    if lane == "IN":
+                        self.esp32.send_fail_in()
+                    else:
+                        self.esp32.send_fail_out()
                 return {"success": False, "error": str(e)}
 
             plate_info   = result.get("license_plate", {})
@@ -479,16 +518,22 @@ class HardwareGateService:
             if plate_number:
                 is_valid = verify_plate_with_backend(plate_number, gate_code)
 
-            # 4. Điều khiển ESP32
+            # 4. Điều khiển ESP32 — gửi lệnh đúng theo từng làn
             if is_valid:
-                logger.info("[process_passage] ✅ Biển số %s HỢP LỆ → Gửi lệnh OPEN xuống ESP32", plate_number)
+                logger.info("[process_passage] ✅ Biển số %s HỢP LỆ → Gửi lệnh OPEN_%s xuống ESP32", plate_number, lane)
                 if self.esp32:
-                    self.esp32.send_open()
+                    if lane == "IN":
+                        self.esp32.send_open_in()
+                    else:
+                        self.esp32.send_open_out()
                 decision = "OPEN"
             else:
-                logger.info("[process_passage] ❌ Biển số '%s' KHÔNG hợp lệ / không đọc được → Gửi FAIL", plate_number)
+                logger.info("[process_passage] ❌ Biển số '%s' KHÔNG hợp lệ / không đọc được → Gửi FAIL_%s", plate_number, lane)
                 if self.esp32:
-                    self.esp32.send_fail()
+                    if lane == "IN":
+                        self.esp32.send_fail_in()
+                    else:
+                        self.esp32.send_fail_out()
                 decision = "FAIL"
 
             # 5. Cập nhật trạng thái
@@ -524,6 +569,7 @@ class HardwareGateService:
             crop_img = plate_obj.get("plate_image_base64")
 
             payload = {
+                "lane": result.get("lane", "IN"),
                 "gateCode": result.get("gate_code", GATE_CODE_IN),
                 "laneCode": result.get("lane_code", LANE_CODE_IN),
                 "cameraId": result.get("camera_id", CAMERA_ID_IN),
@@ -545,24 +591,59 @@ class HardwareGateService:
             logger.warning("[broadcast] Không gửi được event lên Backend: %s", e)
 
     def manual_open(self) -> Dict[str, Any]:
-        """Cưỡng bức mở cổng từ giao diện Web."""
-        if self.esp32:
-            self.esp32.send_open()
-            return {"success": True, "message": "Đã gửi lệnh OPEN xuống ESP32"}
-        return {"success": False, "message": "ESP32 chưa kết nối"}
+        """Cưỡng bức mở cổng Làn Vào từ giao diện Web (backward compat)."""
+        return self.manual_open_in()
 
     def manual_close(self) -> Dict[str, Any]:
-        """Cưỡng bức đóng cổng từ giao diện Web."""
-        if self.esp32:
-            self.esp32.send_close()
-            return {"success": True, "message": "Đã gửi lệnh CLOSE xuống ESP32"}
-        return {"success": False, "message": "ESP32 chưa kết nối"}
+        """Cưỡng bức đóng cổng Làn Vào từ giao diện Web (backward compat)."""
+        return self.manual_close_in()
 
     def manual_fail(self) -> Dict[str, Any]:
-        """Báo lỗi / giữ cổng đóng từ giao diện Web."""
+        """Báo lỗi Làn Vào từ giao diện Web (backward compat)."""
+        return self.manual_fail_in()
+
+    # ── Làn Vào (IN) ──
+    def manual_open_in(self) -> Dict[str, Any]:
+        """Cưỡng bức mở cổng Làn Vào từ giao diện Web."""
         if self.esp32:
-            self.esp32.send_fail()
-            return {"success": True, "message": "Đã gửi lệnh FAIL xuống ESP32"}
+            self.esp32.send_open_in()
+            return {"success": True, "message": "Đã gửi lệnh OPEN_IN xuống ESP32"}
+        return {"success": False, "message": "ESP32 chưa kết nối"}
+
+    def manual_close_in(self) -> Dict[str, Any]:
+        """Cưỡng bức đóng cổng Làn Vào từ giao diện Web."""
+        if self.esp32:
+            self.esp32.send_close_in()
+            return {"success": True, "message": "Đã gửi lệnh CLOSE_IN xuống ESP32"}
+        return {"success": False, "message": "ESP32 chưa kết nối"}
+
+    def manual_fail_in(self) -> Dict[str, Any]:
+        """Báo lỗi Làn Vào từ giao diện Web."""
+        if self.esp32:
+            self.esp32.send_fail_in()
+            return {"success": True, "message": "Đã gửi lệnh FAIL_IN xuống ESP32"}
+        return {"success": False, "message": "ESP32 chưa kết nối"}
+
+    # ── Làn Ra (OUT) ──
+    def manual_open_out(self) -> Dict[str, Any]:
+        """Cưỡng bức mở cổng Làn Ra từ giao diện Web."""
+        if self.esp32:
+            self.esp32.send_open_out()
+            return {"success": True, "message": "Đã gửi lệnh OPEN_OUT xuống ESP32"}
+        return {"success": False, "message": "ESP32 chưa kết nối"}
+
+    def manual_close_out(self) -> Dict[str, Any]:
+        """Cưỡng bức đóng cổng Làn Ra từ giao diện Web."""
+        if self.esp32:
+            self.esp32.send_close_out()
+            return {"success": True, "message": "Đã gửi lệnh CLOSE_OUT xuống ESP32"}
+        return {"success": False, "message": "ESP32 chưa kết nối"}
+
+    def manual_fail_out(self) -> Dict[str, Any]:
+        """Báo lỗi Làn Ra từ giao diện Web."""
+        if self.esp32:
+            self.esp32.send_fail_out()
+            return {"success": True, "message": "Đã gửi lệnh FAIL_OUT xuống ESP32"}
         return {"success": False, "message": "ESP32 chưa kết nối"}
 
     def get_status(self) -> Dict[str, Any]:

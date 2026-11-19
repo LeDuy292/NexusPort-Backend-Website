@@ -22,46 +22,61 @@ Get-Content -LiteralPath $envPath | ForEach-Object {
     $name = $line.Substring(0, $separatorIndex).Trim()
     $value = $line.Substring($separatorIndex + 1).Trim()
 
-    if (($value.StartsWith('"') -and $value.EndsWith('"')) -or
-        ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+    if ($value.Length -ge 2 -and (
+        ($value.StartsWith('"') -and $value.EndsWith('"')) -or
+        ($value.StartsWith("'") -and $value.EndsWith("'")))) {
         $value = $value.Substring(1, $value.Length - 2)
     }
 
     [Environment]::SetEnvironmentVariable($name, $value, 'Process')
 }
 
-$databaseUrl = [Environment]::GetEnvironmentVariable('DATABASE_URL', 'Process')
-$poolSize = [Environment]::GetEnvironmentVariable('DB_POOL_MAX', 'Process')
-if ([string]::IsNullOrWhiteSpace($poolSize)) {
-    $poolSize = '5'
-}
+$connection = [System.Data.Common.DbConnectionStringBuilder]::new()
+if (-not [string]::IsNullOrWhiteSpace($env:DATABASE_URL)) {
+    $databaseUri = $null
+    if (-not [uri]::TryCreate($env:DATABASE_URL, [UriKind]::Absolute, [ref]$databaseUri) -or
+        $databaseUri.Scheme -notin @('postgres', 'postgresql') -or
+        -not $databaseUri.Host -or $databaseUri.AbsolutePath -in @('', '/')) {
+        throw "DATABASE_URL in $envPath must be a PostgreSQL URL with a host and database name."
+    }
 
-if (-not [string]::IsNullOrWhiteSpace($databaseUrl) -and [uri]::TryCreate($databaseUrl.Trim(), [UriKind]::Absolute, [ref]$null)) {
-    $uri = [uri]$databaseUrl.Trim()
-    $userInfo = $uri.UserInfo.Split(':', 2)
-    $username = if ($userInfo.Length -gt 0) { [uri]::UnescapeDataString($userInfo[0]) } else { '' }
-    $password = if ($userInfo.Length -gt 1) { [uri]::UnescapeDataString($userInfo[1]) } else { '' }
-    $port = if ($uri.Port -gt 0) { $uri.Port } else { 5432 }
-    $database = $uri.AbsolutePath.TrimStart('/')
-    $disableSsl = $uri.Query -like '*sslmode=disable*'
-    $sslPart = if ($disableSsl) { 'SSL Mode=Disable' } else { 'SSL Mode=Require;Trust Server Certificate=true' }
-    $connectionString = "Host=$($uri.Host);Port=$port;Database=$database;Username=$username;Password=$password;$sslPart;Maximum Pool Size=$poolSize;Connection Idle Lifetime=15;Connection Pruning Interval=5"
+    $credentials = $databaseUri.UserInfo -split ':', 2
+    $connection['Host'] = $databaseUri.Host
+    $connection['Port'] = if ($databaseUri.Port -gt 0) { $databaseUri.Port } else { 5432 }
+    $connection['Database'] = [uri]::UnescapeDataString($databaseUri.AbsolutePath.TrimStart('/'))
+    $connection['Username'] = [uri]::UnescapeDataString($credentials[0])
+    if ($credentials.Length -eq 2) {
+        $connection['Password'] = [uri]::UnescapeDataString($credentials[1])
+    }
+
+    $sslMode = $env:DB_SSL_MODE
+    if ($databaseUri.Query -match '[?&]sslmode=([^&]+)') {
+        $sslMode = $Matches[1]
+    }
+    if (-not [string]::IsNullOrWhiteSpace($sslMode)) {
+        $connection['SSL Mode'] = $sslMode.Replace('-', '')
+    }
 } else {
-    $hostName = [Environment]::GetEnvironmentVariable('DB_HOST', 'Process')
-    if ([string]::IsNullOrWhiteSpace($hostName)) { $hostName = 'localhost' }
-    $port = [Environment]::GetEnvironmentVariable('DB_PORT', 'Process')
-    if ([string]::IsNullOrWhiteSpace($port)) { $port = '5432' }
-    $database = [Environment]::GetEnvironmentVariable('DB_NAME', 'Process')
-    if ([string]::IsNullOrWhiteSpace($database)) { $database = 'nexusport' }
-    $username = [Environment]::GetEnvironmentVariable('DB_USER', 'Process')
-    if ([string]::IsNullOrWhiteSpace($username)) { $username = 'postgres' }
-    $password = [Environment]::GetEnvironmentVariable('DB_PASSWORD', 'Process')
-    $sslMode = [Environment]::GetEnvironmentVariable('DB_SSL_MODE', 'Process')
-    if ([string]::IsNullOrWhiteSpace($sslMode)) { $sslMode = 'Disable' }
-    $connectionString = "Host=$hostName;Port=$port;Database=$database;Username=$username;Password=$password;SSL Mode=$sslMode;Maximum Pool Size=$poolSize;Connection Idle Lifetime=15;Connection Pruning Interval=5"
+    $requiredAivenVariables = @('AIVEN_DB_HOST', 'AIVEN_DB_PORT', 'AIVEN_DB_NAME', 'AIVEN_DB_USER', 'AIVEN_DB_PASSWORD')
+    $missingVariables = $requiredAivenVariables | Where-Object {
+        [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_, 'Process'))
+    }
+    if ($missingVariables) {
+        throw "Set DATABASE_URL in $envPath, or provide all Aiven settings. Missing: $($missingVariables -join ', ')"
+    }
+
+    $connection['Host'] = $env:AIVEN_DB_HOST
+    $connection['Port'] = $env:AIVEN_DB_PORT
+    $connection['Database'] = $env:AIVEN_DB_NAME
+    $connection['Username'] = $env:AIVEN_DB_USER
+    $connection['Password'] = $env:AIVEN_DB_PASSWORD
+    $connection['SSL Mode'] = 'Require'
+    $connection['Trust Server Certificate'] = $true
 }
 
-[Environment]::SetEnvironmentVariable('ConnectionStrings__DefaultConnection', $connectionString, 'Process')
+$connection['Maximum Pool Size'] = if ([string]::IsNullOrWhiteSpace($env:DB_POOL_MAX)) { 3 } else { $env:DB_POOL_MAX }
+# Windows PowerShell adapts dictionary members as keys. Read the CLR property.
+$env:ConnectionStrings__DefaultConnection = $connection.psbase.ConnectionString
 
 # Hand a previous run of this checkout over to this terminal. Never stop a
 # different application just because it happens to use the configured port.
@@ -88,7 +103,7 @@ foreach ($listenPort in $listenPorts) {
     }
 }
 
-Write-Host "Starting NexusPort.Api with PostgreSQL ($database)..."
+Write-Host "Starting NexusPort.Api with PostgreSQL ($($connection['Database']))..."
 # This script loads the checkout's local settings. A deployed API can explicitly
 # choose Production and --no-launch-profile instead.
 if ([string]::IsNullOrWhiteSpace($env:ASPNETCORE_ENVIRONMENT)) {

@@ -99,6 +99,41 @@ public sealed partial class ExportBookingService
                 """,ct,request.ExportContainerId,G(c,"containerId"),D(c,"gateInAt"));
             Require(positions.Count>0,"Yard","Chưa có bằng chứng container đã hạ đúng lượt bãi. Gate In xe chưa đủ điều kiện ghi nhận xếp tàu.");
             await Exec("UPDATE export_booking_containers SET status='Loaded',loaded_at=@p0 WHERE id=@p1",ct,request.OccurredAt,request.ExportContainerId);
+            // Loaded is the physical end of this container's yard stay, just as
+            // completed GateOut is for a truck Pickup. Close the visit and free
+            // its slot at the actual loading time so storage aging stops here.
+            await Exec("""
+                UPDATE container_positions p SET is_current=false,removed_at=@p0
+                FROM export_gate_links l JOIN booking_containers bc ON bc.booking_id=l.gate_booking_id
+                WHERE l.export_container_id=@p1 AND p.container_id=bc.container_id AND p.is_current
+                """,ct,request.OccurredAt,request.ExportContainerId);
+            await Exec("""
+                UPDATE yard_slot_reservations r SET reserved_to=@p0
+                FROM export_gate_links l JOIN booking_containers bc ON bc.booking_id=l.gate_booking_id
+                WHERE l.export_container_id=@p1 AND r.container_id=bc.container_id AND r.reserved_to IS NULL
+                """,ct,request.OccurredAt,request.ExportContainerId);
+            await Exec("""
+                UPDATE yard_slots s SET status='empty'::yard_slot_status
+                WHERE s.status IN ('occupied','reserved') AND s.id IN (
+                  SELECT p.slot_id FROM container_positions p
+                  JOIN export_gate_links l ON l.export_container_id=@p0
+                  JOIN booking_containers bc ON bc.booking_id=l.gate_booking_id AND bc.container_id=p.container_id
+                  WHERE p.removed_at=@p1 AND p.is_current=false
+                )
+                  AND NOT EXISTS(SELECT 1 FROM container_positions p WHERE p.slot_id=s.id AND p.is_current)
+                  AND NOT EXISTS(SELECT 1 FROM yard_slot_reservations r WHERE r.slot_id=s.id AND r.reserved_to IS NULL)
+                """,ct,request.ExportContainerId,request.OccurredAt);
+            await Exec("""
+                UPDATE container_visits visit SET visit_status='completed',completed_at=@p0,updated_at=now()
+                FROM export_gate_links l JOIN booking_containers bc ON bc.booking_id=l.gate_booking_id
+                WHERE l.export_container_id=@p1 AND visit.id=bc.container_visit_id
+                  AND visit.container_id=bc.container_id AND visit.visit_status='active'
+                """,ct,request.OccurredAt,request.ExportContainerId);
+            await Exec("""
+                UPDATE containers c SET status='loaded'::container_status,left_at=@p0,updated_at=now()
+                FROM export_gate_links l JOIN booking_containers bc ON bc.booking_id=l.gate_booking_id
+                WHERE l.export_container_id=@p1 AND c.id=bc.container_id
+                """,ct,request.OccurredAt,request.ExportContainerId);
         }
         else if(request.EventType=="GateInRejected")
         {

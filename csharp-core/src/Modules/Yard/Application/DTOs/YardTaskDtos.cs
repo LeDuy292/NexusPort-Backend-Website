@@ -157,3 +157,17 @@ public class YardOperatorDto
     public string? CurrentTaskCode { get; set; }
 }
 
+public class ActiveYardContainerDto
+{
+    public string ContainerNo { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string Type { get; set; } = "40FT HC";
+    public string Line { get; set; } = string.Empty;
+    public string Cargo { get; set; } = string.Empty;
+    public string Weight { get; set; } = string.Empty;
+    public string Category { get; set; } = "DRY";
+    public int DwellDays { get; set; } = 2;
+    public string? NextVessel { get; set; }
+}
+
+

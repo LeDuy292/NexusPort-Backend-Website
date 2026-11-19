@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using NexusPort.Modules.Container.Infrastructure.Configurations;
 
 namespace NexusPort.Modules.Yard.Infrastructure.Persistence;
 
@@ -25,7 +26,8 @@ public class YardDbContext : DbContext
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(YardDbContext).Assembly);
 
-        // Ánh xạ tường minh các Entity liên module để EF Core trỏ đúng bảng PostgreSQL
+        modelBuilder.ApplyConfiguration(new ContainerConfiguration());
+
         modelBuilder.Entity<NexusPort.Modules.Equipment.Domain.Entities.Equipment>(b =>
         {
             b.ToTable("Equipments");

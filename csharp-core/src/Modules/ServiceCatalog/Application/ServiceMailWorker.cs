@@ -32,7 +32,8 @@ public sealed class ServiceMailQueue(AppDbContext db,IServiceWorkflowEmail email
     public async Task<bool> SendNext(CancellationToken ct)
     {
         var connection=(NpgsqlConnection)db.Database.GetDbConnection();
-        await db.Database.OpenConnectionAsync(ct);
+        var wasClosed = connection.State != System.Data.ConnectionState.Open;
+        if (wasClosed) await db.Database.OpenConnectionAsync(ct);
         try
         {
             await using var ready=new NpgsqlCommand("SELECT to_regclass('eport_service_mail_queue') IS NOT NULL",connection);
@@ -86,7 +87,10 @@ public sealed class ServiceMailQueue(AppDbContext db,IServiceWorkflowEmail email
         }
         finally
         {
-            await db.Database.CloseConnectionAsync();
+            if (wasClosed && connection.State == System.Data.ConnectionState.Open)
+            {
+                await db.Database.CloseConnectionAsync();
+            }
         }
     }
 }

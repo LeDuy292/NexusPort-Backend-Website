@@ -9,6 +9,15 @@ public static class CarrierModuleExtensions
 {
     public static IServiceCollection AddCarrierModule(this IServiceCollection services, string connectionString)
     {
+        var options = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+        if (!string.Equals(options.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(options.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            options.MaxPoolSize = 1;
+            options.ConnectionIdleLifetime = 60;
+            options.ConnectionPruningInterval = 10;
+            connectionString = options.ConnectionString;
+        }
         var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
         dataSourceBuilder.MapEnum<NexusPort.Modules.Carrier.Domain.Enums.CompanyStatus>("company_status");
         var dataSource = dataSourceBuilder.Build();
