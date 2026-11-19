@@ -148,6 +148,9 @@ class HardwareGateService:
         self._last_capture_time_out: float = 0.0
         self._last_capture_time: float = 0.0
         self._capture_cooldown_sec: float = 8.0  # Tối thiểu 8s giữa 2 lần CAPTURE mỗi làn
+        # Trạng thái Barie thời gian thực từ phần cứng
+        self.barrier_state_in: str = "closed"
+        self.barrier_state_out: str = "closed"
 
     def start(self):
         """Khởi động toàn bộ dịch vụ phần cứng trong nền."""
@@ -167,10 +170,11 @@ class HardwareGateService:
 
         # 2. Khởi động kết nối ESP32
         self.esp32 = ESP32Controller(port=self.port, baud=self.baud)
-        # Gán 2 callback riêng biệt cho từng làn
+        # Gán callback riêng biệt cho từng làn và trạng thái barie
         self.esp32.start(
             on_capture_in=self._handle_esp32_capture_in,
             on_capture_out=self._handle_esp32_capture_out,
+            on_barrier_status=self._handle_barrier_status,
         )
 
         # Camera loop chỉ mở thiết bị khi có yêu cầu xem trực tiếp hoặc cảm biến báo xe.
@@ -590,6 +594,35 @@ class HardwareGateService:
         except Exception as e:
             logger.warning("[broadcast] Không gửi được event lên Backend: %s", e)
 
+    def _handle_barrier_status(self, lane: str, state: str):
+        """Xử lý tín hiệu trạng thái Barie từ ESP32 (STATUS:CLOSED_IN, STATUS:OPENED_IN, etc.)."""
+        logger.info("[ESP32 Barrier Status] Làn %s: %s", lane, state)
+        if lane == "IN":
+            self.barrier_state_in = state
+        elif lane == "OUT":
+            self.barrier_state_out = state
+
+        # Gửi sự kiện lên Express Backend trong background thread để không block reader
+        threading.Thread(
+            target=self._broadcast_barrier_status,
+            args=(lane, state),
+            daemon=True
+        ).start()
+
+    def _broadcast_barrier_status(self, lane: str, state: str):
+        try:
+            url = f"{EXPRESS_URL}/api/gate/barrier-status"
+            payload = {
+                "lane": lane,
+                "state": state,
+                "gateCode": GATE_CODE_OUT if lane == "OUT" else GATE_CODE_IN,
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            requests.post(url, json=payload, timeout=2.0)
+            logger.info("[broadcast] Đã gửi trạng thái Barie (%s: %s) lên Express Backend qua Socket.IO", lane, state)
+        except Exception as e:
+            logger.warning("[broadcast] Không gửi được trạng thái barie lên Backend: %s", e)
+
     def manual_open(self) -> Dict[str, Any]:
         """Cưỡng bức mở cổng Làn Vào từ giao diện Web (backward compat)."""
         return self.manual_open_in()
@@ -605,6 +638,7 @@ class HardwareGateService:
     # ── Làn Vào (IN) ──
     def manual_open_in(self) -> Dict[str, Any]:
         """Cưỡng bức mở cổng Làn Vào từ giao diện Web."""
+        self.barrier_state_in = "opened"
         if self.esp32:
             self.esp32.send_open_in()
             return {"success": True, "message": "Đã gửi lệnh OPEN_IN xuống ESP32"}
@@ -612,6 +646,7 @@ class HardwareGateService:
 
     def manual_close_in(self) -> Dict[str, Any]:
         """Cưỡng bức đóng cổng Làn Vào từ giao diện Web."""
+        self.barrier_state_in = "closed"
         if self.esp32:
             self.esp32.send_close_in()
             return {"success": True, "message": "Đã gửi lệnh CLOSE_IN xuống ESP32"}
@@ -627,6 +662,7 @@ class HardwareGateService:
     # ── Làn Ra (OUT) ──
     def manual_open_out(self) -> Dict[str, Any]:
         """Cưỡng bức mở cổng Làn Ra từ giao diện Web."""
+        self.barrier_state_out = "opened"
         if self.esp32:
             self.esp32.send_open_out()
             return {"success": True, "message": "Đã gửi lệnh OPEN_OUT xuống ESP32"}
@@ -634,6 +670,7 @@ class HardwareGateService:
 
     def manual_close_out(self) -> Dict[str, Any]:
         """Cưỡng bức đóng cổng Làn Ra từ giao diện Web."""
+        self.barrier_state_out = "closed"
         if self.esp32:
             self.esp32.send_close_out()
             return {"success": True, "message": "Đã gửi lệnh CLOSE_OUT xuống ESP32"}
@@ -675,5 +712,9 @@ class HardwareGateService:
                 "azure_vision": self.pipeline.ocr_service.azure_available if self.pipeline else False,
             },
             "scan_status": self.scan_status,
-            "last_event": self.last_event
+            "last_event": self.last_event,
+            "barrier": {
+                "in": self.barrier_state_in,
+                "out": self.barrier_state_out,
+            }
         }

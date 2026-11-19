@@ -102,4 +102,36 @@ router.post('/iot-event', (req, res) => {
   });
 });
 
+/**
+ * POST /api/gate/barrier-status
+ * Tiếp nhận cập nhật trạng thái Barie từ ESP32 / AI Service (ví dụ sau 30s tự hạ)
+ * và phát Realtime qua Socket.IO tới màn hình Cổng kiểm soát (Gate Control UI).
+ */
+router.post('/barrier-status', (req, res) => {
+  const io = getIO();
+  const { lane = 'IN', state = 'closed', gateCode } = req.body || {};
+
+  const normLane = String(lane).toUpperCase() === 'OUT' ? 'OUT' : 'IN';
+  const normState = String(state).toLowerCase() === 'opened' ? 'opened' : 'closed';
+  const mappedGateCode = gateCode || (normLane === 'OUT' ? 'GATE_OUT' : 'GATE_IN');
+
+  const payload = {
+    lane: normLane,
+    state: normState,
+    gateCode: mappedGateCode,
+    timestamp: req.body?.timestamp || new Date().toISOString(),
+  };
+
+  if (io) {
+    io.to('gate:all').emit('gate:barrier_state_changed', payload);
+    io.emit('gate:barrier_state_changed', payload);
+  }
+
+  return res.status(200).json({
+    success: true,
+    message: `Đã cập nhật trạng thái Barie làn ${payload.lane}: ${payload.state}`,
+    data: payload,
+  });
+});
+
 module.exports = router;
