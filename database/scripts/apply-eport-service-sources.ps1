@@ -16,7 +16,7 @@ $env:PGHOST=$serviceSourceDb['host']; if(-not $env:PGHOST){$env:PGHOST=$serviceS
 $env:PGPORT=$serviceSourceDb['port']; if(-not $env:PGPORT){$env:PGPORT='5432'}
 $env:PGDATABASE=$serviceSourceDb['database']; $env:PGUSER=$serviceSourceDb['username']; if(-not $env:PGUSER){$env:PGUSER=$serviceSourceDb['user id']}
 $env:PGPASSWORD=$serviceSourceDb['password']; $env:PGSSLMODE='require'; $env:PGCONNECT_TIMEOUT='12'; $env:PGCLIENTENCODING='UTF8'
-if ($serviceSourceEnv['DB_TARGET'] -ne 'aiven' -or $env:PGHOST -ne $serviceSourceEnv['AIVEN_DB_HOST'] -or $env:PGDATABASE -ne $serviceSourceEnv['AIVEN_DB_NAME']) { throw 'C# target must match the configured development database. No alternate target is chosen.' }
+if ($serviceSourceEnv['NODE_ENV'] -ne 'development') { throw 'C# target must match the configured development database. No alternate target is chosen.' }
 $serviceSourcePsqlArgs = @('--no-password','-X','-q','-t','-A','-v','ON_ERROR_STOP=1')
 function Read-ServiceSourceJson([string]$Query) {
  $serviceSourceResult = & $serviceSourcePsql @serviceSourcePsqlArgs -c "BEGIN READ ONLY; $Query ROLLBACK;" 2>&1

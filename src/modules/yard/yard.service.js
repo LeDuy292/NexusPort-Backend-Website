@@ -143,13 +143,13 @@ const YARD_SAMPLE_DRIVERS = [
 /**
  * Đảm bảo có dữ liệu ban đầu và đồng bộ 100% các container từ Bản Đồ Bãi Tiên Sa (Yard Layout Map).
  */
-async function ensureInitialData() {
+async function ensureInitialDataImpl() {
   const count = await YardGateOutRequest.count();
 
   // Tự động đối soát và map toàn bộ container đang lưu bãi từ Bản Đồ Bãi (Yard Layout Snapshot)
   try {
-    const { getLayoutSnapshot } = require('./yard-layout');
-    const snapshot = await getLayoutSnapshot();
+    const { getLayoutSnapshotCached } = require('./yard-layout');
+    const snapshot = await getLayoutSnapshotCached();
     const occSlots = snapshot.slots.filter(s => s.containerId);
 
     if (count === 0 && occSlots.length > 0) {
@@ -194,7 +194,7 @@ async function ensureInitialData() {
           yard_tier: tierNum,
           yard_slot: slotCode,
           slot_status: s.status === 'reserved' ? 'Reserved' : 'Occupied',
-          blocking_containers: (s.tier < 3 && i % 3 === 0) ? 1 : 0,
+          blocking_containers: 0, // số cont chắn thực tế được tính từ bản đồ bãi khi truy vấn
           rtg_crane: blockCode.startsWith('D') ? 'FL-01' : (blockCode.startsWith('A') ? 'RTG-01' : 'RS-01'),
           rtg_operator: 'Trần Văn Hùng',
           flow_step: flowStep,
@@ -206,11 +206,14 @@ async function ensureInitialData() {
       }
     } else if (count > 0 && occSlots.length > 0) {
       // Bổ sung các slot container có trên bản đồ bãi mà chưa có trong bảng yêu cầu
+      const existingRows = await YardGateOutRequest.findAll({ attributes: ['container_id'], raw: true });
+      const existingIds = new Set(existingRows.map(r => String(r.container_id).trim().toUpperCase()));
       for (let i = 0; i < occSlots.length; i++) {
         const s = occSlots[i];
         const contNo = s.containerNumber;
         if (!contNo) continue;
-        const exists = await YardGateOutRequest.findOne({ where: { container_id: contNo } });
+        const exists = existingIds.has(String(contNo).trim().toUpperCase());
+        existingIds.add(String(contNo).trim().toUpperCase());
         if (!exists) {
           const blockCode = s.block;
           const bayNum = String(s.bay).padStart(2, '0');
@@ -245,7 +248,7 @@ async function ensureInitialData() {
             yard_tier: tierNum,
             yard_slot: slotCode,
             slot_status: s.status === 'reserved' ? 'Reserved' : 'Occupied',
-            blocking_containers: (s.tier < 3 && i % 3 === 0) ? 1 : 0,
+            blocking_containers: 0, // số cont chắn thực tế được tính từ bản đồ bãi khi truy vấn
             rtg_crane: blockCode.startsWith('D') ? 'FL-01' : (blockCode.startsWith('A') ? 'RTG-01' : 'RS-01'),
             rtg_operator: 'Trần Văn Hùng',
             flow_step: 0,
@@ -262,6 +265,68 @@ async function ensureInitialData() {
       await YardGateOutRequest.bulkCreate(DEFAULT_SEED_REQUESTS);
     }
   }
+}
+
+// Seed chạy tuần tự qua mạng nên rất chậm; dùng chung 1 promise để các request song song
+// không seed trùng, và chỉ đồng bộ lại tối đa mỗi SEED_SYNC_TTL_MS.
+const SEED_SYNC_TTL_MS = 60 * 1000;
+let seedInFlight = null;
+let seedLastDoneAt = 0;
+
+function ensureInitialData() {
+  if (seedInFlight) return seedInFlight;
+  if (Date.now() - seedLastDoneAt < SEED_SYNC_TTL_MS) return Promise.resolve();
+  seedInFlight = ensureInitialDataImpl()
+    .then(() => { seedLastDoneAt = Date.now(); })
+    .finally(() => { seedInFlight = null; });
+  return seedInFlight;
+}
+
+/**
+ * Tạo danh sách key chuẩn hóa cho cột stack ô bãi để đối soát chính xác 100% giữa
+ * Sơ đồ Bản đồ Bãi 2D (A, B, C, D) và Lệnh xuất bãi (A01, B02, B04).
+ */
+function getNormalizedSlotKeys(block, bay, row) {
+  const b = String(block || 'B').trim().toUpperCase();
+  const bayNum = parseInt(bay, 10);
+  const rowNum = parseInt(row, 10);
+  const keys = new Set();
+  keys.add(`${b}:${bayNum}:${rowNum}`);
+  const letter = b.replace(/[^A-Z]/g, '');
+  if (letter) {
+    keys.add(`${letter}:${bayNum}:${rowNum}`);
+    const numPart = b.replace(/^[A-Z]+/, '');
+    if (numPart) {
+      keys.add(`${letter}${numPart.padStart(2, '0')}:${bayNum}:${rowNum}`);
+    }
+  }
+  return Array.from(keys);
+}
+
+function buildSlotMap(snapshot) {
+  const slotMap = new Map();
+  for (const s of (snapshot?.slots || [])) {
+    if (s.containerNumber || s.containerId) {
+      const keys = getNormalizedSlotKeys(s.block, s.bay, s.row);
+      for (const k of keys) {
+        if (!slotMap.has(k)) slotMap.set(k, new Map());
+        slotMap.get(k).set(Number(s.tier), s);
+      }
+    }
+  }
+  return slotMap;
+}
+
+function lookupSlotMap(slotMap, block, bay, row) {
+  if (!slotMap) return [];
+  const keys = getNormalizedSlotKeys(block, bay, row);
+  for (const k of keys) {
+    if (slotMap.has(k)) {
+      const tierMap = slotMap.get(k);
+      return tierMap instanceof Map ? Array.from(tierMap.values()) : tierMap;
+    }
+  }
+  return [];
 }
 
 /**
@@ -358,31 +423,51 @@ async function getGateOutRequests({ direction = 'inbound', status, search, urgen
   const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 20));
   const offset = (pageNum - 1) * limitNum;
 
-  const { count, rows } = await YardGateOutRequest.findAndCountAll({
-    where,
-    order: [
-      ['status', 'ASC'],
-      ['created_at', 'DESC'],
-    ],
-    limit: limitNum,
-    offset,
-  });
+  const snapshotPromise = require('./yard-layout').getLayoutSnapshotCached()
+    .catch((err) => {
+      console.warn('[getGateOutRequests] Failed to build slotMap:', err.message);
+      return null;
+    });
+
+  const [{ rows }, snapshot] = await Promise.all([
+    YardGateOutRequest.findAndCountAll({
+      where,
+      order: [
+        ['status', 'ASC'],
+        ['created_at', 'DESC'],
+      ],
+      limit: limitNum,
+      offset,
+    }),
+    snapshotPromise,
+  ]);
 
   let slotMap = null;
-  try {
-    const { getLayoutSnapshot } = require('./yard-layout');
-    const snapshot = await getLayoutSnapshot();
+  const contInBlocks = new Set();
+  if (snapshot) {
     slotMap = buildSlotMap(snapshot);
-  } catch (err) {
-    console.warn('[getGateOutRequests] Failed to build slotMap:', err.message);
+    for (const s of (snapshot.slots || [])) {
+      if (s.containerNumber) {
+        contInBlocks.add(String(s.containerNumber).trim().toUpperCase());
+      }
+    }
   }
 
+  // Nghiệp vụ bãi cảng: Chỉ những container thực tế ĐÃ NẰM TRONG BLOCK BÃI mới có lệnh xuất bãi đang làm
+  const validRows = rows.filter(r => {
+    const isDone = r.status === 'COMPLETED' || (r.flow_step || 0) >= 5;
+    if (isDone) return true;
+    if (contInBlocks.size === 0) return true;
+    const contNo = String(r.container_id || '').trim().toUpperCase();
+    return contInBlocks.has(contNo);
+  });
+
   return {
-    requests: rows.map(r => formatGateOutRequest(r, slotMap)),
-    total: count,
+    requests: validRows.map(r => formatGateOutRequest(r, slotMap)),
+    total: validRows.length,
     page: pageNum,
     limit: limitNum,
-    totalPages: Math.ceil(count / limitNum),
+    totalPages: Math.ceil(validRows.length / limitNum),
   };
 }
 
@@ -779,6 +864,27 @@ async function createGateOutRequest(data, userId) {
   emitYardOutboundRequested(formatted);
 
   return formatted;
+}
+
+/**
+ * Đếm số container thực sự đang đè phía trên container mục tiêu, theo dữ liệu bản đồ bãi hiện tại.
+ * Trả về null nếu không xác định được (không có snapshot / ô không có trên bản đồ) để caller tự fallback.
+ */
+async function countRealBlockingContainers(req) {
+  const bay = parseInt(req.yard_bay, 10);
+  const row = parseInt(req.yard_row, 10);
+  if (isNaN(bay) || isNaN(row)) return null;
+  try {
+    const { getLayoutSnapshot } = require('./yard-layout');
+    const slotMap = buildSlotMap(await getLayoutSnapshot());
+    const matched = lookupSlotMap(slotMap, req.yard_block || 'B', bay, row);
+    if (matched.length === 0) return null;
+    const targetTier = parseInt(req.yard_tier, 10) || 1;
+    return matched.filter(s => (s.containerNumber || s.containerId) && s.tier > targetTier).length;
+  } catch (err) {
+    console.warn('[countRealBlockingContainers] failed:', err.message);
+    return null;
+  }
 }
 
 /**
@@ -1652,6 +1758,8 @@ async function cancelPreparationOrShutOut(id, { reason = 'Cờ giữ từ hãng 
 }
 
 module.exports = {
+  ensureInitialData,
+  countRealBlockingContainers,
   getGateOutRequests,
   getOutboundPreparationRequests,
   getGateOutRequestById,

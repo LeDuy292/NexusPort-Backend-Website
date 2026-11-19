@@ -227,6 +227,7 @@ class CargoNotificationController {
         bookingNo,
         blNumber,
         userId: user.id,
+        actor: { id: user.id, username: user.username, role: user.role },
       });
       res.json({
         success: true,

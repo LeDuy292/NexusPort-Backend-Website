@@ -195,7 +195,7 @@ async function login(usernameOrEmail, password, rememberMe = false, expectedRole
 
   // Fetch CarrierId if user is Transport Company, Carrier, or Carrier Staff
   let carrierId = null;
-  if (user.role === 'Transport Company' || user.role === 'Carrier' || user.role === 'Carrier Staff') {
+  if (user.role === 'Transport Company'  || user.role === 'Carrier Staff') {
     const { sequelize } = require('../../config/database');
     const [results] = await sequelize.query('SELECT carrier_id FROM carrier_users WHERE user_id = :userId', {
       replacements: { userId: user.id },
@@ -532,7 +532,7 @@ async function loginWithGoogle({ credential, idToken, accessToken, email, expect
 
   // Fetch CarrierId if user is Transport Company, Carrier, or Carrier Staff
   let carrierId = null;
-  if (user.role === 'Transport Company' || user.role === 'Carrier' || user.role === 'Carrier Staff') {
+  if (user.role === 'Transport Company'  || user.role === 'Carrier Staff') {
     const { sequelize } = require('../../config/database');
     const [results] = await sequelize.query('SELECT carrier_id FROM carrier_users WHERE user_id = :userId', {
       replacements: { userId: user.id },

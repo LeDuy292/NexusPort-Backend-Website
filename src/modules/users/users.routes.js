@@ -33,7 +33,7 @@ const router = Router();
 const adminGuard = [authenticate, authorize(PERMISSIONS.ADMIN_ONLY)];
 
 // Cấp quyền cho Hãng vận tải
-const carrierGuard = [authenticate, authorize(['Transport Company', 'Carrier'])];
+const carrierGuard = [authenticate, authorize(['Transport Company'])];
 
 /**
  * @swagger
@@ -70,11 +70,11 @@ const carrierGuard = [authenticate, authorize(['Transport Company', 'Carrier'])]
  */
 
 // Cấp quyền tạo tài khoản tài xế
-const driverAccountGuard = [authenticate, authorize(['Administrator', 'admin', 'Transport Company', 'Carrier', 'Dispatcher', 'dispatcher', 'Carrier Staff'])];
+const driverAccountGuard = [authenticate, authorize(['Administrator', 'admin', 'Transport Company', 'Dispatcher', 'dispatcher', 'Carrier Staff'])];
 router.post('/driver-account', driverAccountGuard, createDriverAccountValidator, createDriverAccount);
 
 // Cấp quyền tạo/cập nhật tài khoản Đơn vị vận tải (Transport Company)
-const carrierAccountGuard = [authenticate, authorize(['Administrator', 'admin', 'Transport Company', 'Carrier'])];
+const carrierAccountGuard = [authenticate, authorize(['Administrator', 'admin', 'Transport Company'])];
 router.post('/carrier-account', carrierAccountGuard, createCarrierAccountValidator, createCarrierAccount);
 router.post('/carrier-staff', carrierGuard, createCarrierStaffValidator, createCarrierStaff);
 
@@ -405,7 +405,7 @@ router.patch('/:id/assign-role', adminGuard, assignRoleValidator, assignRole);
  *       404:
  *         description: Không tìm thấy người dùng
  */
-router.patch('/:id/activate', [authenticate, authorize(['Administrator', 'admin', 'Transport Company', 'Carrier'])], activateUser);
+router.patch('/:id/activate', [authenticate, authorize(['Administrator', 'admin', 'Transport Company'])], activateUser);
 
 /**
  * @swagger
@@ -434,6 +434,6 @@ router.patch('/:id/activate', [authenticate, authorize(['Administrator', 'admin'
  *       404:
  *         description: Không tìm thấy người dùng
  */
-router.patch('/:id/deactivate', [authenticate, authorize(['Administrator', 'admin', 'Transport Company', 'Carrier'])], deactivateUser);
+router.patch('/:id/deactivate', [authenticate, authorize(['Administrator', 'admin', 'Transport Company'])], deactivateUser);
 
 module.exports = router;
