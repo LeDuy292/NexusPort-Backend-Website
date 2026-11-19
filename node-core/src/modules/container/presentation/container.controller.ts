@@ -230,6 +230,9 @@ export const createContainerRouter = (): Router => {
     router.get('/journeys', allowRoles(...readers), async (req: AuthorizedRequest,res,next) => {
       try { sendSuccess(res,await journeys.search(req.query,req.containerUser!.role==='Carrier')); } catch(e){next(e);}
     });
+    router.get('/yard-overview', allowRoles('Administrator','Dispatcher','Yard Staff','Gate Officer'), async (_req, res, next) => {
+      try { sendSuccess(res, await journeys.getYardOverview()); } catch (e) { next(e); }
+    });
     router.get('/yard-visits', allowRoles(...identityReaders), async (req: AuthorizedRequest, res, next) => {
       try { sendSuccess(res, await journeys.searchYardVisits(req.query, req.containerUser!)); } catch (e) { next(e); }
     });

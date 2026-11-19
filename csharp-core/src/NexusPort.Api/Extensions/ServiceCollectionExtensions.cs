@@ -216,6 +216,9 @@ public static class ServiceCollectionExtensions
         FluentValidation.ServiceCollectionExtensions.AddValidatorsFromAssemblyContaining(services, typeof(NexusPort.Modules.Yard.Preparation.Application.Validators.CancelTaskRequestValidator));
         services.AddHostedService<NexusPort.Modules.Yard.Preparation.Infrastructure.BackgroundServices.PreparationMonitoringWorker>();
 
+        // Booking-based yard storage reminders (09:00 Vietnam time)
+        services.AddHostedService<NexusPort.Modules.Booking.Infrastructure.BackgroundServices.BookingStorageReminderWorker>();
+
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();
         services.AddScoped<IGateService, GateService>();

@@ -541,16 +541,55 @@ public partial class BookingService : IBookingService
 
         await _repository.UpdateAsync(entity, cancellationToken);
 
-        // Notify Carrier
-        await _notificationService.SendAsync(new SendNotificationDto
+        try
         {
-            RecipientId = entity.CarrierId,
-            Title = $"Gate Booking {entity.BookingCode} đã được duyệt",
-            Message = $"Booking {entity.BookingCode} của bạn đã được Dispatcher phê duyệt thành công.",
-            Type = NotificationType.BookingApproved,
-            Severity = NotificationSeverity.Success,
-            ReferenceId = entity.BookingCode
-        }, cancellationToken);
+            var carrierUsers = await _context.Database.SqlQueryRaw<Guid>("""
+                SELECT u.id AS "Value"
+                FROM carrier_users cu
+                JOIN users u ON u.id = cu.user_id
+                WHERE cu.carrier_id = {0} AND u.is_active = true
+                """, entity.CarrierId).ToListAsync(cancellationToken);
+
+            foreach (var recipient in carrierUsers.Distinct())
+            {
+                await _notificationService.SendAsync(new SendNotificationDto
+                {
+                    RecipientId = recipient,
+                    Title = $"Gate Booking {entity.BookingCode} đã được duyệt",
+                    Message = $"Booking {entity.BookingCode} của công ty bạn đã được Dispatcher phê duyệt thành công.",
+                    Type = NotificationType.BookingApproved,
+                    Severity = NotificationSeverity.Success,
+                    ReferenceId = entity.BookingCode
+                }, cancellationToken);
+            }
+
+            if (entity.BookingType == BookingType.Dropoff)
+            {
+                var portUsers = await _context.Database.SqlQueryRaw<Guid>("""
+                    SELECT id AS "Value"
+                    FROM users
+                    WHERE is_active = true
+                      AND role IN ('Administrator', 'Admin', 'Dispatcher', 'Yard Operator', 'Yard Staff', 'Gate Officer', 'Gate')
+                    """).ToListAsync(cancellationToken);
+
+                foreach (var recipient in portUsers.Distinct())
+                {
+                    await _notificationService.SendAsync(new SendNotificationDto
+                    {
+                        RecipientId = recipient,
+                        Title = $"Booking lưu bãi {entity.BookingCode} đã được duyệt",
+                        Message = $"Booking Dropoff {entity.BookingCode} đã được duyệt. Thời hạn lưu bãi được tính theo ngày booking: tối đa 5 ngày; ngày booking là ngày thứ nhất. Theo dõi container và lịch Pickup tại cảng.",
+                        Type = NotificationType.BookingApproved,
+                        Severity = NotificationSeverity.Info,
+                        ReferenceId = entity.BookingCode
+                    }, cancellationToken);
+                }
+            }
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Booking {BookingCode} was approved, but one or more approval notifications could not be sent.", entity.BookingCode);
+        }
 
         var dto = MapToDto(entity);
         await EnrichBookingDtosAsync(new List<BookingDto> { dto }, cancellationToken);
