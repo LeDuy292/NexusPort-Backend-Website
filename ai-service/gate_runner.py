@@ -25,6 +25,7 @@ Các biến môi trường (tùy chọn, đọc từ ai-service/.env):
 """
 
 import os
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"  # Tắt lớp giải mã MSMF của Windows, ép dùng DirectShow chống sọc/treo
 import sys
 import time
 import logging
@@ -155,15 +156,28 @@ class GateRunner:
     # ── Khởi tạo ─────────────────────────────────────────────────────────────
 
     def _open_camera(self, idx: int) -> Optional[cv2.VideoCapture]:
-        """Thử mở camera với các backend DirectShow, MSMF hoặc Auto."""
-        for backend in [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]:
-            try:
-                cap = cv2.VideoCapture(idx, backend)
-                if cap.isOpened():
-                    return cap
-                cap.release()
-            except Exception:
-                pass
+        """Mở camera bằng DirectShow + ép nén MJPG 640x480 chống nhiễu sọc/treo đen màn hình."""
+        try:
+            cap = cv2.VideoCapture(idx, cv2.CAP_DSHOW)
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                return cap
+            cap.release()
+        except Exception as e:
+            logger.debug("[gate_runner] Không mở được camera %d qua DirectShow: %s", idx, e)
+
+        # Fallback nhẹ nếu DirectShow không nhận
+        try:
+            cap = cv2.VideoCapture(idx)
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                return cap
+            cap.release()
+        except Exception:
+            pass
         return None
 
     def setup(self):

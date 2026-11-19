@@ -1,5 +1,6 @@
 import re
 import os
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0" 
 import cv2
 import numpy as np
 import requests as http_requests

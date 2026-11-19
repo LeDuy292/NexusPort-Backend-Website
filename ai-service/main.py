@@ -1,4 +1,5 @@
 import os
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"  # Tắt lớp giải mã MSMF của Windows, ép dùng DirectShow chống sọc/treo
 import base64
 import json
 import logging
@@ -21,7 +22,7 @@ from services.hardware_gate_service import HardwareGateService
 
 # Khởi tạo dịch vụ phần cứng quản lý ESP32 và Camera
 hw_service = HardwareGateService(
-    port=os.getenv("GATE_SERIAL_PORT", "COM8"),
+    port=os.getenv("GATE_SERIAL_PORT", "COM7"),
     baud=int(os.getenv("GATE_BAUD_RATE", "115200")),
     cam_in_idx=int(os.getenv("GATE_CAMERA_IN", "0")),
     cam_out_idx=int(os.getenv("GATE_CAMERA_OUT", "1"))
