@@ -27,7 +27,9 @@ export function createManifestRouter(repository = new ManifestRepository()): Rou
               req.userRole = user.role;
             }
           }
-        } catch {}
+        } catch {
+          // Leave the request unauthenticated if token verification or account lookup fails.
+        }
       }
 
       // Cho phép các endpoint /port/* truy cập tự do để đồng bộ real-time giữa các máy

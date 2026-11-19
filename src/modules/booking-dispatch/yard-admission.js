@@ -1,7 +1,7 @@
 'use strict';
 const { QueryTypes } = require('sequelize');
 const { sequelize } = require('../../config/database');
-const { fail } = require('./dispatch.policy');
+const { POLICY, fail } = require('./dispatch.policy');
 const read = (sql, replacements = {}, transaction) => sequelize.query(sql, {
   replacements, transaction, type: QueryTypes.SELECT, logging: false,
 });
@@ -105,8 +105,9 @@ async function runAutoAdmission() {
   if (!(await snapshot()).available) return;
   const candidates = await read(`SELECT b.id,s.version FROM bookings b JOIN booking_dispatch_state s ON s.booking_id=b.id
     WHERE b.status::text IN ('approved','ready') AND s.status='ready' AND (s.hold_until IS NULL OR s.hold_until<=now())
-    AND b.appointment_start<=now()+interval '12 hours' AND s.action NOT IN ('call_expired','entry_expired','released')
-    ORDER BY (s.arrived_at>b.appointment_start+interval '10 minutes'),b.appointment_start,b.created_at LIMIT 30`);
+    AND b.appointment_start<=now()+:early * interval '1 minute' AND s.action NOT IN ('call_expired','entry_expired','released')
+    ORDER BY (s.arrived_at>b.appointment_start+interval '10 minutes'),b.appointment_start,b.created_at LIMIT 30`,
+    { early: POLICY.earlyArrivalMinutes });
   // Reuse the version/ownership/fleet checks and durable notification transaction.
   const { act } = require('./dispatch.service');
   for (const item of candidates) {

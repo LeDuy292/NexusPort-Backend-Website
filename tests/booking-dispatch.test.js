@@ -24,10 +24,10 @@ const now = new Date('2026-10-17T03:00:00Z');
 const base = { id, driverId: 'driver-profile', status: 'approved', appointmentStart: '2026-10-17T03:00:00Z', appointmentEnd: '2026-10-17T04:00:00Z', dispatch: null };
 const token = role => generateToken({ id, role });
 beforeEach(() => { sequelize.query.mockReset(); User.findByPk.mockResolvedValue({is_active:true}); });
-test('arrival opens exactly 12 hours before appointment, including across dates', () => {
-  const beforeWindow = new Date('2026-10-16T14:59:59Z');
-  const opensAt = new Date('2026-10-16T15:00:00Z');
-  expect(() => checkArrival(base, beforeWindow)).toThrow('12 giờ');
+test('arrival opens exactly 72 hours before appointment, including across dates', () => {
+  const beforeWindow = new Date('2026-10-14T02:59:59.999Z');
+  const opensAt = new Date('2026-10-14T03:00:00Z');
+  expect(() => checkArrival(base, beforeWindow)).toThrow('3 ngày');
   expect(decorate(base, beforeWindow).coordination.canArrive).toBe(false);
   expect(() => checkArrival(base, opensAt)).not.toThrow();
   expect(decorate(base, opensAt).coordination.canArrive).toBe(true);
@@ -40,13 +40,13 @@ test('pending/canceled bookings cannot confirm arrival within the window', () =>
   expect(decorate({...base,status:'pending'},now).coordination.canArrive).toBe(false);
   expect(decorate({...base,status:'canceled'},now).coordination.canArrive).toBe(false);
 });
-test('ready and unheld vehicles can be called from exactly 12 hours before appointment', () => {
+test('ready and unheld vehicles can be called from exactly 72 hours before appointment', () => {
   expect(() => checkCall(base,now)).toThrow();
   const ready = {...base,dispatch:{status:'ready'}};
   expect(() => checkCall(ready,now)).not.toThrow();
-  const beforeWindow = new Date('2026-10-16T14:59:59Z');
-  const opensAt = new Date('2026-10-16T15:00:00Z');
-  expect(() => checkCall(ready,beforeWindow)).toThrow('12 giờ');
+  const beforeWindow = new Date('2026-10-14T02:59:59.999Z');
+  const opensAt = new Date('2026-10-14T03:00:00Z');
+  expect(() => checkCall(ready,beforeWindow)).toThrow('3 ngày');
   expect(decorate(ready,beforeWindow).coordination.canCall).toBe(false);
   expect(() => checkCall(ready,opensAt)).not.toThrow();
   expect(decorate(ready,opensAt).coordination.canCall).toBe(true);
@@ -109,8 +109,8 @@ test.each(['arrived','called','acknowledged','withdrawn'])('%s vehicles cannot b
   expect(() => checkCall(booking,early)).toThrow();
 });
 
-test('dispatcher can issue a call for a ready vehicle six hours before appointment', async () => {
-  const booking = {...base,appointmentStart:new Date(Date.now()+6*60*60000).toISOString(),dispatch:{status:'ready',version:1}};
+test('dispatcher can issue a call for a ready vehicle two days before appointment', async () => {
+  const booking = {...base,appointmentStart:new Date(Date.now()+2*24*60*60000).toISOString(),dispatch:{status:'ready',version:1}};
   sequelize.query.mockResolvedValueOnce([{id}]).mockResolvedValueOnce([booking])
     .mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([{booking_id:id}])
     .mockResolvedValueOnce([{...booking,dispatch:{status:'called',version:2},gateEntryOrder:{status:'pending_ack'}}]);
@@ -168,12 +168,14 @@ test('delay needs a reason and bounded duration', async () => {
   await expect(service.act(id,'Dispatcher',id,'delay',{expectedVersion:1,minutes:999,note:''})).rejects.toMatchObject({statusCode:422});
   expect(sequelize.query).toHaveBeenCalledTimes(2);
 });
-test('arrival persists separate dispatch state, without changing booking or gate status', async () => {
-  const booking={...base,appointmentStart:new Date(Date.now()-60000).toISOString()};
+test('driver can confirm arrival two days early through the API and only write dispatch state', async () => {
+  const booking={...base,appointmentStart:new Date(Date.now()+2*24*60*60000).toISOString()};
   sequelize.query.mockResolvedValueOnce([{id}]).mockResolvedValueOnce([booking])
     .mockResolvedValueOnce([{booking_id:id}]).mockResolvedValueOnce([{...booking,dispatch:{status:'ready',version:1}}]);
-  const updated=await service.act(id,'Driver',id,'arrive',{expectedVersion:0});
-  expect(updated.dispatch.status).toBe('ready');
+  const response = await request(app).post(`/dispatch/${id}/arrive`)
+    .set('Authorization', 'Bearer ' + token('Driver')).send({ expectedVersion: 0 });
+  expect(response.status).toBe(200);
+  expect(response.body.data.booking.dispatch.status).toBe('ready');
   expect(sequelize.query.mock.calls[2][0]).toContain('INSERT INTO booking_dispatch_state');
   for(const [sql,options] of sequelize.query.mock.calls){
     expect(sql).not.toMatch(/UPDATE bookings|INSERT INTO gate_transactions/i);

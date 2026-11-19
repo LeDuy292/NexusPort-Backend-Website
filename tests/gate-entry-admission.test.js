@@ -69,12 +69,13 @@ test('held and not-ready trips cannot be directly admitted', async () => {
   expect(yard.assignDestination).not.toHaveBeenCalled();
 });
 
-test('hardware proof must be unused and associated with a PASS record and an active entry order', async () => {
+test('hardware proof requires an unused manual command or a PASS record with an active entry order', async () => {
   sequelize.query.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: 'command' }]);
   await expect(claimInboundHardwareOpen('missing')).resolves.toBe(false);
   await expect(claimInboundHardwareOpen('command')).resolves.toBe(true);
   const claimSql = sequelize.query.mock.calls[1][0];
   expect(claimSql).toContain('hardware_requested_at IS NULL');
+  expect(claimSql).toContain("c.source='manual' AND c.verification_id IS NULL AND c.entry_order_id IS NULL");
   expect(claimSql).toContain("v.status='PASS'");
   expect(claimSql).toContain("e.status='active'");
 });

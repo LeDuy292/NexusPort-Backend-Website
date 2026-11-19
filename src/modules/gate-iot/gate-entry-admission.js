@@ -91,14 +91,20 @@ async function authorizeEntry(userId, { vehiclePlate, bookingCode, gateCode } = 
 
 async function claimInboundHardwareOpen(commandId) {
   const [command] = await read(`UPDATE gate_barrier_commands c SET hardware_requested_at=clock_timestamp()
-    FROM gate_entry_orders e JOIN bookings b ON b.id=e.booking_id,
-      gate_verification_records v, gates g
+    FROM gates g
     WHERE c.id=:commandId AND c.gate_code='GATE-01' AND c.action='open' AND c.status IN ('simulated','acknowledged')
       AND c.hardware_requested_at IS NULL AND c.requested_at>now()-interval '2 minutes'
-      AND c.entry_order_id=e.id AND e.status='active' AND now()>=e.valid_from AND now()<e.valid_until
-      AND e.driver_id=b.driver_id AND e.truck_id=b.truck_id AND b.status::text IN ('approved','ready')
-      AND v.id=c.verification_id AND v.booking_id=b.id AND v.status='PASS' AND v.gate_code=c.gate_code
-      AND c.gate_id=g.id AND g.is_active RETURNING c.id`, { commandId });
+      AND c.gate_id=g.id AND g.is_active
+      AND (
+        (c.source='manual' AND c.verification_id IS NULL AND c.entry_order_id IS NULL)
+        OR EXISTS(
+          SELECT 1 FROM gate_entry_orders e JOIN bookings b ON b.id=e.booking_id
+          JOIN gate_verification_records v ON v.booking_id=b.id
+          WHERE c.entry_order_id=e.id AND e.status='active' AND now()>=e.valid_from AND now()<e.valid_until
+            AND e.driver_id=b.driver_id AND e.truck_id=b.truck_id AND b.status::text IN ('approved','ready')
+            AND v.id=c.verification_id AND v.status='PASS' AND v.gate_code=c.gate_code
+        )
+      ) RETURNING c.id`, { commandId });
   return Boolean(command);
 }
 

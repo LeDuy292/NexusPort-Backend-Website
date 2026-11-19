@@ -22,7 +22,7 @@ router.post('/entry-admission', authenticate, gateOfficer, async (req, res, next
   }
 });
 
-// The random command ID is issued only after the Gate backend accepts the verification.
+// The Gate backend records authorized manual and verified automatic commands before hardware can claim them.
 router.post('/barrier-commands/:id/claim-hardware', async (req, res, next) => {
   if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(req.params.id)) return res.sendStatus(404);
   try {

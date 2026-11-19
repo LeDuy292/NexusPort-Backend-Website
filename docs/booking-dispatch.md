@@ -15,7 +15,7 @@ change booking status, create GateIn, decrement yard occupancy or bypass gate ch
   POST /api/booking-dispatch/:bookingId/:action for authorized role actions.
   Every command includes the last expectedVersion; stale commands return 409.
 
-Defaults in dispatch.policy.js: arrival and dispatch calls open 12 hours before
+Defaults in dispatch.policy.js: arrival and dispatch calls open 72 hours before
 appointment to support testing. Calls still require an approved/ready booking,
 a ready driver and no active hold. Late arrival is more than 10 minutes after
 appointment start; call response deadline is 10 minutes. A port delay does not

@@ -35,6 +35,7 @@ test('automatic calls stop after the last available place and use current dispat
   expect(act).toHaveBeenCalledTimes(1);
   expect(act).toHaveBeenCalledWith(null, 'Dispatcher', 'next', 'call', expect.objectContaining({ expectedVersion: 4 }));
   expect(sequelize.query.mock.calls[2][0]).toContain("'call_expired','entry_expired','released'");
+  expect(sequelize.query.mock.calls[2][1].replacements.early).toBe(4320);
 });
 test('automatic admission can be disabled without queries or calls', async () => {
   process.env.YARD_AUTO_ADMISSION = 'false';

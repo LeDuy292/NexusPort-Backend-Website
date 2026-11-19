@@ -17,7 +17,7 @@ describe('Large imported Manifest through the production Express app', () => {
     const owner = randomUUID();
     process.env.JWT_SECRET = 'large-manifest-test-only';
     token = jwt.sign({sub:owner}, process.env.JWT_SECRET);
-    (query as jest.Mock).mockResolvedValue({rows:[{id:owner}]});
+    (query as jest.Mock).mockResolvedValue({rows:[{id:owner, role:'Shipping Line'}]});
     save.mockResolvedValue({id:randomUUID(),status:'DRAFT'} as Awaited<ReturnType<ManifestRepository['save']>>);
     server = createServer(createApp());
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));

@@ -38,7 +38,7 @@ export class GateController {
 
       // Chuẩn hoá biển số: bỏ ký tự thừa, uppercase để so sánh linh hoạt
       // "47-AB 294.69" / "47AB29469" / "47AB-294.69" → đều tìm được
-      const normalized = rawPlate.toUpperCase().replace(/[\s\-\.]/g, '');
+      const normalized = rawPlate.toUpperCase().replace(/[\s.-]/g, '');
 
       const result = await query(
         `SELECT id, booking_code, vehicle_plate, status, appointment_start, appointment_end, driver_name, gate_type
