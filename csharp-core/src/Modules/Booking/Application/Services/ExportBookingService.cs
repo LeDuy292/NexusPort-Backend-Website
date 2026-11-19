@@ -30,7 +30,7 @@ public sealed partial class ExportBookingService
     public ExportBookingService(AppDbContext db, ICurrentUser user, IBookingService bookings, IBookingDocumentRequirementPolicy documents,
         IS3StorageService? storage = null, IConfiguration? configuration = null)
     { _db = db; _user = user; _bookings = bookings; _documents = documents; _storage = storage; _documentBucket = configuration?["AWS:BucketName"] ?? "nexusport"; _configuration = configuration; }
-    private bool Carrier => new[] { "Transport Company", "Carrier", "Carrier Staff" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
+    private bool Carrier => new[] { "Transport Company", "Carrier Staff" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
     private bool Line => string.Equals(_user.Role, "Shipping Line", StringComparison.OrdinalIgnoreCase);
     private bool Admin => new[] { "Administrator", "Admin" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
     private bool Port => Admin || new[] { "Dispatcher", "Gate Officer", "Gate", "Yard Operator" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);

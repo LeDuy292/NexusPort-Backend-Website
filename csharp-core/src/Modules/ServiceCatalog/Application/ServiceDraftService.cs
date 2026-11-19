@@ -33,7 +33,7 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active", ct, Actor);
         var role = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
         Require(role != null && string.Equals(role, user.Role, StringComparison.OrdinalIgnoreCase)
-            && role is "Transport Company" or "Carrier" or "Carrier Staff", "Tài khoản không có quyền tạo hồ sơ dịch vụ.", 403, "FORBIDDEN");
+            && role is "Transport Company" or "Carrier Staff", "Tài khoản không có quyền tạo hồ sơ dịch vụ.", 403, "FORBIDDEN");
         var companies = await Rows("SELECT carrier_id AS \"carrierId\" FROM carrier_users WHERE user_id=@p0", ct, Actor);
         Require(companies.Count == 1, "Tài khoản cần thuộc đúng một công ty vận tải.", 403, "SERVICE_DRAFT_MEMBERSHIP");
         return G(companies[0], "carrierId");

@@ -25,8 +25,9 @@ router.post('/seed/reset', ...manifestWriter, asyncHandler(async (_req, res) => 
 }));
 
 // 1. Dashboard
-router.get('/dashboard', asyncHandler(async (_req, res) => {
-  const data = await shippingLineService.getDashboardSummary();
+// Tổng quan tính từ DB theo hãng tàu đang đăng nhập
+router.get('/dashboard', authenticate, authorize(ROLES.SHIPPING_LINE, ROLES.ADMINISTRATOR), asyncHandler(async (req, res) => {
+  const data = await require('./shippingLine.dashboard').getDashboard(req.user);
   res.json({ success: true, data });
 }));
 

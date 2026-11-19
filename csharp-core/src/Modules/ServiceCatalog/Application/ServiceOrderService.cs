@@ -35,7 +35,7 @@ public sealed partial class ServiceOrderService(AppDbContext db, ICurrentUser us
         var role = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
         Require(role != null && string.Equals(role, user.Role, StringComparison.OrdinalIgnoreCase), "Tài khoản không còn quyền truy cập đơn dịch vụ.", 403, "FORBIDDEN");
         if (role is "Administrator" or "Admin" or "Dispatcher") return null;
-        Require(role is "Transport Company" or "Carrier" or "Carrier Staff", "Tài khoản không có quyền truy cập đơn dịch vụ.", 403, "FORBIDDEN");
+        Require(role is "Transport Company" or "Carrier Staff", "Tài khoản không có quyền truy cập đơn dịch vụ.", 403, "FORBIDDEN");
         var memberships = await Rows("SELECT carrier_id AS \"carrierId\" FROM carrier_users WHERE user_id=@p0" + (locked ? " FOR SHARE" : ""), ct, Actor);
         Require(memberships.Count == 1, "Tài khoản cần thuộc đúng một công ty vận tải.", 403, "SERVICE_DRAFT_MEMBERSHIP");
         return G(memberships[0], "carrierId");

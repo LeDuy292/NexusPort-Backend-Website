@@ -23,7 +23,7 @@ public sealed class CatalogService(AppDbContext db, ICurrentUser user)
         var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active", ct, Actor);
         var role = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
         CatalogRules.Require(role != null && string.Equals(role, user.Role, StringComparison.OrdinalIgnoreCase), "Tài khoản không còn quyền sử dụng danh mục dịch vụ.", 403, "FORBIDDEN");
-        CatalogRules.Require(admin ? role is "Administrator" or "Admin" : role is "Administrator" or "Admin" or "Transport Company" or "Carrier" or "Carrier Staff", "Bạn không có quyền thực hiện thao tác này.", 403, "FORBIDDEN");
+        CatalogRules.Require(admin ? role is "Administrator" or "Admin" : role is "Administrator" or "Admin" or "Transport Company" or "Carrier Staff", "Bạn không có quyền thực hiện thao tác này.", 403, "FORBIDDEN");
     }
     private async Task<JsonObject> Find(Guid id, CancellationToken ct, bool locked = false)
     {
