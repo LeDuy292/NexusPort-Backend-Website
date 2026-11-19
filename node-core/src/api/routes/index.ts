@@ -6,7 +6,6 @@ import { createAuthRouter } from '../../modules/identity/presentation/auth.contr
 import { createUserRouter } from '../../modules/identity/presentation/user.controller';
 import { createBookingRouter } from '../../modules/booking/presentation/booking.controller';
 import { createVesselRouter } from '../../modules/vessel/presentation/vessel.controller';
-import { createBerthRouter } from '../../modules/berth/presentation/berth.controller';
 import { createContainerRouter } from '../../modules/container/presentation/container.controller';
 import { createYardRouter } from '../../modules/yard/presentation/yard.controller';
 import { createGateRouter } from '../../modules/gate/presentation/gate.controller';
@@ -33,7 +32,6 @@ export const nodeCoreRouteModules: NodeCoreRouteModule[] = [
   { prefix: '/identity', tag: 'Identity', secured: false, router: createIdentityRouter() },
   { prefix: '/bookings', tag: 'Bookings', secured: false, router: createBookingRouter() },
   { prefix: '/vessels', tag: 'Vessels', secured: false, router: createVesselRouter() },
-  { prefix: '/berths', tag: 'Berths', secured: false, router: createBerthRouter() },
   { prefix: '/containers', tag: 'Containers', secured: true, router: createContainerRouter() },
   { prefix: '/yard', tag: 'Yard', secured: false, router: createYardRouter() },
   { prefix: '/gate', tag: 'Gate', secured: false, router: createGateRouter() },
