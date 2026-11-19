@@ -11,7 +11,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -315,10 +315,12 @@ def stop_gate_camera(lane: str = "IN"):
 
 
 @app.post("/api/v1/gate/barrier/open")
-def manual_barrier_open():
+def manual_barrier_open(lane: Optional[str] = Query("IN")):
     """
-    Cưỡng bức mở Barrier từ Web UI (nút 'Mở Cổng') — Làn Vào (backward compat).
+    Cưỡng bức mở Barrier từ Web UI (nút 'Mở Cổng') theo làn chỉ định (IN hoặc OUT).
     """
+    if (lane or "").upper() == "OUT":
+        return hw_service.manual_open_out()
     return hw_service.manual_open_in()
 
 
@@ -335,10 +337,12 @@ def manual_barrier_open_out():
 
 
 @app.post("/api/v1/gate/barrier/close")
-def manual_barrier_close():
+def manual_barrier_close(lane: Optional[str] = Query("IN")):
     """
-    Cưỡng bức đóng Barrier từ Web UI (nút 'Hạ barie') — Làn Vào (backward compat).
+    Cưỡng bức đóng Barrier từ Web UI (nút 'Hạ barie') theo làn chỉ định (IN hoặc OUT).
     """
+    if (lane or "").upper() == "OUT":
+        return hw_service.manual_close_out()
     return hw_service.manual_close_in()
 
 
@@ -355,10 +359,12 @@ def manual_barrier_close_out():
 
 
 @app.post("/api/v1/gate/barrier/fail")
-def manual_barrier_fail():
+def manual_barrier_fail(lane: Optional[str] = Query("IN")):
     """
-    Báo lỗi / từ chối xe từ Web UI — Làn Vào (backward compat).
+    Báo lỗi / từ chối xe từ Web UI theo làn chỉ định (IN hoặc OUT).
     """
+    if (lane or "").upper() == "OUT":
+        return hw_service.manual_fail_out()
     return hw_service.manual_fail_in()
 
 
