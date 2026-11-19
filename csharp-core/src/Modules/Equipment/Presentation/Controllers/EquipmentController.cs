@@ -5,6 +5,7 @@ using NexusPort.Modules.Equipment.Application.Interfaces;
 namespace NexusPort.Modules.Equipment.Presentation.Controllers;
 
 [ApiController]
+[Route("api/equipment")]
 [Route("api/v1/[controller]")]
 public class EquipmentController : ControllerBase
 {

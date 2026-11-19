@@ -3,7 +3,7 @@
 const { DataTypes, Model } = require('sequelize');
 const { sequelize } = require('../config/database');
 
-const GATE_OUT_STATUSES = ['PENDING', 'IN_PROGRESS', 'READY_FOR_GATE_OUT', 'COMPLETED', 'CANCELLED'];
+const GATE_OUT_STATUSES = ['PENDING', 'IN_PROGRESS', 'READY_FOR_GATE_OUT', 'COMPLETED', 'CANCELLED', 'GATED_OUT', 'CANCELLED_EDO_HELD'];
 const URGENCY_LEVELS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 const SLOT_STATUSES = ['Occupied', 'Available', 'Reserved'];
 

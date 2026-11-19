@@ -79,7 +79,6 @@ void beep(int times, int durationMs, int pauseMs) {
 void openGateIN() {
   if (gateOpenIN) {
     // Đã mở rồi → gia hạn thêm 30s, không xoay thêm
-    gateOpenedAt = millis();  // alias không dùng, dùng openedAtIN
     openedAtIN = millis();
     return;
   }
@@ -194,12 +193,23 @@ void setup() {
   digitalWrite(ledGrnOUT, LOW);
   digitalWrite(buzzerPin, LOW);
 
+  // Cho phép ESP32PWM sử dụng đầy đủ các bộ hẹn giờ phần cứng (0, 1, 2, 3)
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+
+  // Tần số 50Hz chuẩn cho Servo SG90
+  servoIN.setPeriodHertz(50);
+  servoOUT.setPeriodHertz(50);
+
   // Servo: Gán chân với dải xung SG90 chuẩn (500–2400µs)
   servoIN.attach(servoPinIN,   500, 2400);
   servoOUT.attach(servoPinOUT, 500, 2400);
 
   // Vị trí ban đầu: 0° (đóng)
   servoIN.write(0);
+  delay(100);
   servoOUT.write(0);
 
   Serial.println("BOOT:OK — NexusPort Dual-Lane Gate Ready");
@@ -209,8 +219,6 @@ void setup() {
 //  LOOP
 // ══════════════════════════════════════════════════════════
 
-// Biến alias cho openGateIN (để tránh lỗi khai báo bên trên)
-unsigned long gateOpenedAt = 0; // unused — xem openedAtIN/OUT
 
 void loop() {
   unsigned long now = millis();

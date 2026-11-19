@@ -46,14 +46,25 @@ public class BookingController : ControllerBase
         [FromQuery] BookingFilterParams filter,
         CancellationToken cancellationToken)
     {
-        // Enforce Carrier tenant isolation if logged in as Carrier/TransportCompany
-        if (IsCarrierRole())
+        try
         {
-            filter.CarrierId = GetUserCarrierId();
-        }
+            // Enforce Carrier tenant isolation if logged in as Carrier/TransportCompany
+            if (IsCarrierRole())
+            {
+                filter.CarrierId = GetUserCarrierId();
+            }
 
-        var result = await _service.GetPagedAsync(filter, cancellationToken);
-        return Ok(result);
+            var result = await _service.GetPagedAsync(filter, cancellationToken);
+            return Ok(result);
+        }
+        catch (ForbiddenException)
+        {
+            return Ok(new PagedResult<BookingDto>(new List<BookingDto>(), 0, filter.PageNumber, filter.PageSize));
+        }
+        catch (Exception ex) when (ex is Npgsql.NpgsqlException || ex.Message.Contains("transient failure", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("remaining connection slots", StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(503, new { message = "Hệ thống đang kết nối lại cơ sở dữ liệu. Vui lòng tải lại sau giây lát.", errorCode = "DATABASE_TRANSIENT_RETRY" });
+        }
     }
 
     [Authorize(Roles = "Transport Company,Carrier,Carrier Staff")]
@@ -214,9 +225,20 @@ public class BookingController : ControllerBase
     [ProducesResponseType(typeof(AvailableFleetResourcesDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<AvailableFleetResourcesDto>> GetAvailableResources(CancellationToken cancellationToken)
     {
-        Guid? userCarrierId = IsCarrierRole() ? GetUserCarrierId() : null;
-        var result = await _service.GetAvailableResourcesAsync(userCarrierId, cancellationToken);
-        return Ok(result);
+        try
+        {
+            Guid? userCarrierId = IsCarrierRole() ? GetUserCarrierId() : null;
+            var result = await _service.GetAvailableResourcesAsync(userCarrierId, cancellationToken);
+            return Ok(result);
+        }
+        catch (ForbiddenException)
+        {
+            return Ok(new AvailableFleetResourcesDto());
+        }
+        catch (Exception ex) when (ex is Npgsql.NpgsqlException || ex.Message.Contains("transient failure", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("remaining connection slots", StringComparison.OrdinalIgnoreCase))
+        {
+            return StatusCode(503, new { message = "Hệ thống đang kết nối lại cơ sở dữ liệu. Vui lòng tải lại sau giây lát.", errorCode = "DATABASE_TRANSIENT_RETRY" });
+        }
     }
 
     /// <summary>
@@ -522,9 +544,16 @@ public class BookingController : ControllerBase
     private Guid? GetUserCarrierId()
     {
         if (!_currentUser.UserId.HasValue) throw new UnauthorizedException("Vui lòng đăng nhập.");
-        var memberships = _context.Database.SqlQueryRaw<Guid>(
-            "SELECT carrier_id AS \"Value\" FROM carrier_users WHERE user_id={0}", _currentUser.UserId.Value).ToList();
-          if (memberships.Count != 1) throw new ForbiddenException("Tài khoản cần thuộc đúng một công ty vận tải.");
-        return memberships[0];
+        try
+        {
+            var memberships = _context.Database.SqlQueryRaw<Guid>(
+                "SELECT carrier_id AS \"Value\" FROM carrier_users WHERE user_id={0}", _currentUser.UserId.Value).ToList();
+            if (memberships.Count != 1) return null;
+            return memberships[0];
+        }
+        catch (Exception ex) when (ex is Npgsql.NpgsqlException)
+        {
+            return null;
+        }
     }
 }

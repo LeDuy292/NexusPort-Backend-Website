@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 using NexusPort.Modules.ServiceCatalog.Application;
@@ -13,12 +14,25 @@ namespace NexusPort.Modules.ServiceCatalog.Presentation;
 public sealed class ServiceCatalogController(CatalogService service) : ControllerBase
 {
     private const string Admin = "Administrator,Admin";
+    private static bool IsTransientDatabaseError(Exception error)
+        => error is NpgsqlException pg && pg.IsTransient
+            || error is InvalidOperationException { InnerException: NpgsqlException inner } && inner.IsTransient;
     private async Task<IActionResult> Run(Func<Task<object>> action)
     {
-        try { return Ok(await action()); }
+        try
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                try { return Ok(await action()); }
+                catch (Exception error) when (HttpMethods.IsGet(Request.Method) && attempt < 2 && IsTransientDatabaseError(error))
+                { await Task.Delay(400 * (attempt + 1), HttpContext.RequestAborted); }
+            }
+        }
         catch (AppException error) { return StatusCode(error.StatusCode, new { message = error.Message, errorCode = error.ErrorCode }); }
         catch (PostgresException error) when (error.SqlState == "42P01") { return StatusCode(503, new { message = "Danh mục dịch vụ chưa được khởi tạo. Cần triển khai migration 20261108_035.", errorCode = "CATALOG_SCHEMA_REQUIRED" }); }
         catch (PostgresException error) when (error.SqlState == "23505") { return Conflict(new { message = "Mã dịch vụ đã tồn tại. Vui lòng chọn mã khác.", errorCode = "CATALOG_CONFLICT" }); }
+        catch (Exception error) when (IsTransientDatabaseError(error))
+        { return StatusCode(503, new { message = "Hệ thống đang kết nối lại cơ sở dữ liệu. Vui lòng tải lại sau vài giây.", errorCode = "DATABASE_TRANSIENT_RETRY" }); }
     }
     [HttpGet] public Task<IActionResult> List(CancellationToken ct) => Run(() => service.List(ct));
     [HttpPost] [Authorize(Roles = Admin)] public Task<IActionResult> Create(ServiceInput input, CancellationToken ct) => Run(async () => await service.Save(null, input, ct));

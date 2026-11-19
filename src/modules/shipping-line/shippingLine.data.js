@@ -163,7 +163,75 @@ let shippingInstructions = [];
 let manifests = [];
 
 // 5. Danh sách Lệnh Giao Hàng Điện Tử (eDO)
-let deliveryOrders = [];
+let deliveryOrders = [
+  {
+    id: 'edo-01',
+    edoNumber: 'EDO-2026-ONE-33819',
+    blNumber: 'ONE-BL-889120',
+    voyageNumber: 'EG-2605W',
+    vesselName: 'EVER GLORY',
+    consignee: 'CÔNG TY CP TIÊN SA LOGISTICS',
+    issueDate: '2026-11-01 08:30',
+    validUntil: '2026-12-31 23:59:59',
+    emptyReturnDepot: 'Bãi Depot Cảng Tiên Sa (Khu C)',
+    freeTimeDays: 7,
+    pinCode: 'PIN-8819',
+    status: 'ISSUED',
+    issuedBy: 'shipping_agent_one',
+    releaseOfficer: 'Đại diện Hãng tàu ONE',
+    containers: [
+      { containerNumber: 'CMAU3381923', isoType: '40HC', sealNumber: 'UL6824219', pickupDepot: 'Bãi B Cảng Tiên Sa', gateOutStatus: 'NOT_GATE_OUT' },
+      { containerNumber: 'TLLU7728057', isoType: '40HC', sealNumber: 'UL6824220', pickupDepot: 'Bãi B Cảng Tiên Sa', gateOutStatus: 'NOT_GATE_OUT' },
+    ],
+    notes: 'Lệnh giao hàng e-D/O hợp lệ, đã thông quan hải quan điện tử và thanh toán đủ cước.',
+  },
+  {
+    id: 'edo-02',
+    edoNumber: 'EDO-2026-HAG-12345',
+    blNumber: 'HLCUMTR251047484',
+    voyageNumber: 'OC-2612E',
+    vesselName: 'ONE CONTINUITY',
+    consignee: 'CHI NHÁNH CÔNG TY CỔ PHẦN ITL LOGISTICS TẠI MIỀN TRUNG',
+    issueDate: '2026-11-02 09:00',
+    validUntil: '2026-12-31 23:59:59',
+    emptyReturnDepot: 'Depot ITL Hòa Cầm (Đà Nẵng)',
+    freeTimeDays: 7,
+    pinCode: 'PIN-1234',
+    status: 'ISSUED',
+    issuedBy: 'shipping_agent_hag',
+    releaseOfficer: 'Đại diện Hãng tàu Hapag-Lloyd',
+    containers: [
+      { containerNumber: 'CAIU1234567', isoType: '40HC', sealNumber: 'UL6824221', pickupDepot: 'Bãi A Cảng Tiên Sa', gateOutStatus: 'NOT_GATE_OUT' },
+      { containerNumber: 'WHSU8103824', isoType: '20GP', sealNumber: 'UL6824222', pickupDepot: 'Bãi B Cảng Tiên Sa', gateOutStatus: 'NOT_GATE_OUT' },
+      { containerNumber: 'HLCU7719205', isoType: '40HC', sealNumber: 'UL6824223', pickupDepot: 'Bãi A Cảng Tiên Sa', gateOutStatus: 'NOT_GATE_OUT' },
+    ],
+    notes: 'Lệnh giao hàng e-D/O hợp lệ, đã thông quan hải quan điện tử và thanh toán đủ cước.',
+  },
+  {
+    id: 'edo-03',
+    edoNumber: 'EDO-2026-GEN-99102',
+    blNumber: 'BL-NXP-GENERAL-01',
+    voyageNumber: 'CM-2644W',
+    vesselName: 'CMA CGM CHENNAI',
+    consignee: 'CÔNG TY TNHH XNK ĐÀ NẴNG',
+    issueDate: '2026-11-03 10:15',
+    validUntil: '2026-12-31 23:59:59',
+    emptyReturnDepot: 'Bãi Depot Cảng Tiên Sa',
+    freeTimeDays: 7,
+    pinCode: 'PIN-9910',
+    status: 'ISSUED',
+    issuedBy: 'shipping_agent_general',
+    releaseOfficer: 'Đại diện Đại lý Hãng tàu',
+    containers: [
+      { containerNumber: 'ONEU7524599', isoType: '40HC', sealNumber: 'UL6824224', pickupDepot: 'Bãi B Cảng Tiên Sa', gateOutStatus: 'NOT_GATE_OUT' },
+      { containerNumber: 'YMLU5270390', isoType: '40HC', sealNumber: 'UL6824225', pickupDepot: 'Bãi B Cảng Tiên Sa', gateOutStatus: 'NOT_GATE_OUT' },
+      { containerNumber: 'GCXU5261606', isoType: '40HC', sealNumber: 'UL6824226', pickupDepot: 'Bãi B Cảng Tiên Sa', gateOutStatus: 'NOT_GATE_OUT' },
+      { containerNumber: 'ONEY3399102', isoType: '20GP', sealNumber: 'UL6824227', pickupDepot: 'Bãi B Cảng Tiên Sa', gateOutStatus: 'NOT_GATE_OUT' },
+      { containerNumber: 'HLBU7781920', isoType: '40HC', sealNumber: 'UL6824228', pickupDepot: 'Bãi A Cảng Tiên Sa', gateOutStatus: 'NOT_GATE_OUT' },
+    ],
+    notes: 'Lệnh giao hàng e-D/O hợp lệ, đã thông quan hải quan điện tử và thanh toán đủ cước.',
+  },
+];
 
 // 6. Dữ liệu tiếp nhận từ Cảng phục vụ đối soát Manifest (Reconciliation Dataset)
 // Container đã qua cổng (GATE_IN_COMPLETED) có số seal và trạm cân ghi nhận.

@@ -49,7 +49,11 @@ pool.on('connect', (client) => {
   });
 });
 
-pool.on('error', (err) => {
+pool.on('error', (err: any) => {
+  if (err?.code === '57P05' || err?.message?.includes('idle-session timeout')) {
+    logger.debug('[DB] Idle PostgreSQL connection closed by server timeout; pool will reconnect on demand.');
+    return;
+  }
   logger.error('Unexpected error on idle PostgreSQL client', err);
 });
 
