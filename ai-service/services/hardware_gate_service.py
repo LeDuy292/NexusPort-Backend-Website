@@ -497,6 +497,7 @@ class HardwareGateService:
                     lane_code=lane_code,
                     gate_code=gate_code,
                 )
+                result["lane"] = lane
             except Exception as e:
                 logger.error("[process_passage] Lỗi AI Pipeline: %s", e)
                 if self.esp32:
@@ -568,6 +569,7 @@ class HardwareGateService:
             crop_img = plate_obj.get("plate_image_base64")
 
             payload = {
+                "lane": result.get("lane", "IN"),
                 "gateCode": result.get("gate_code", GATE_CODE_IN),
                 "laneCode": result.get("lane_code", LANE_CODE_IN),
                 "cameraId": result.get("camera_id", CAMERA_ID_IN),
