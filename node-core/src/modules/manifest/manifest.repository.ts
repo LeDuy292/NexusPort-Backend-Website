@@ -146,7 +146,9 @@ export class ManifestRepository {
          OR payload->>'vesselName' = $1 
          OR payload->'voyageInfo'->>'vesselName' = $1
       RETURNING payload || jsonb_build_object('id', id, 'createdAt', created_at) AS document`, [id, now, approvedBy]);
-    if (!result.rows[0]) throw new NotFoundError('Bản khai');
+    if (!result.rows[0]) {
+      return { success: true, notFound: true, message: `Bản khai ${id} không tồn tại trên PostgreSQL server.` };
+    }
     return result.rows[0].document;
   }
   async resetPortPending(id: string): Promise<any> {
@@ -164,7 +166,9 @@ export class ManifestRepository {
          OR payload->>'vesselName' = $1 
          OR payload->'voyageInfo'->>'vesselName' = $1
       RETURNING payload || jsonb_build_object('id', id, 'createdAt', created_at) AS document`, [id]);
-    if (!result.rows[0]) throw new NotFoundError('Bản khai');
+    if (!result.rows[0]) {
+      return { success: true, notFound: true, message: `Bản khai ${id} không tồn tại trên PostgreSQL server.` };
+    }
     return result.rows[0].document;
   }
   async resetAll(): Promise<any> {
@@ -203,9 +207,17 @@ export class ManifestRepository {
     const result = await query(`UPDATE shipping_manifests SET
       payload = jsonb_set(payload, '{generatedBookings}', $2::jsonb),
       revision = revision + 1
-      WHERE id::text = $1 OR payload->>'manifestNumber' = $1
+      WHERE id::text = $1 
+         OR payload->>'manifestNumber' = $1
+         OR payload->>'id' = $1
+         OR payload->>'voyageNumber' = $1 
+         OR payload->'voyageInfo'->>'voyageNumber' = $1 
+         OR payload->>'vesselName' = $1 
+         OR payload->'voyageInfo'->>'vesselName' = $1
       RETURNING id`, [id, JSON.stringify(bookings)]);
-    if (!result.rows[0]) throw new NotFoundError('Bản khai');
+    if (!result.rows[0]) {
+      return { success: true, notFound: true, message: `Bản khai ${id} không tồn tại trên PostgreSQL server.` };
+    }
     return { id: result.rows[0].id, count: bookings.length };
   }
 }

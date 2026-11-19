@@ -676,14 +676,18 @@ public partial class BookingService : IBookingService
         var completedOperations = await _context.Set<NexusPort.Modules.Yard.Domain.Entities.YardOperationEvent>()
             .AsNoTracking().Where(x => x.DriverId == driverId && x.OperationStatus == "Completed")
             .Select(x => new { x.ContainerId, x.OccurredAt }).ToListAsync(cancellationToken);
-        var entryTimes = await _context.Database.SqlQueryRaw<BookingGateEntryTime>(
+        var entryTimes = (await _context.Database.SqlQueryRaw<BookingGateEntryTime>(
             "SELECT booking_id AS \"BookingId\",max(checked_at) AS \"CheckedAt\" FROM gate_transactions WHERE booking_id=ANY({0}) AND gate_type='gate_in' AND status='completed' GROUP BY booking_id",
-            bookings.Select(x => x.Id).ToArray()).ToDictionaryAsync(x=>x.BookingId,x=>x.CheckedAt,cancellationToken);
+            bookings.Select(x => x.Id).ToArray()).ToListAsync(cancellationToken))
+            .DistinctBy(x => x.BookingId)
+            .ToDictionary(x => x.BookingId, x => x.CheckedAt);
         var containerIds = bookings.SelectMany(x => x.BookingContainers.Select(bc => bc.ContainerId)).Distinct().ToList();
-        var containers = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+        var containers = (await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
             .AsNoTracking()
             .Where(x => containerIds.Contains(x.Id))
-            .ToDictionaryAsync(x => x.Id, cancellationToken);
+            .ToListAsync(cancellationToken))
+            .DistinctBy(x => x.Id)
+            .ToDictionary(x => x.Id);
 
         return bookings.SelectMany(booking => booking.BookingContainers
             .Where(link => containers.ContainsKey(link.ContainerId) && entryTimes.TryGetValue(booking.Id,out var enteredAt) && completedOperations.Any(op=>op.ContainerId==link.ContainerId && op.OccurredAt>=enteredAt))
@@ -1033,24 +1037,30 @@ public partial class BookingService : IBookingService
         var containerIds = dtos.SelectMany(d => d.ContainerIds).Where(c => c != Guid.Empty).Distinct().ToList();
 
         var driversDict = driverIds.Any()
-            ? await _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
+            ? (await _context.Set<NexusPort.Modules.Driver.Domain.Entities.Driver>()
                 .AsNoTracking()
                 .Where(d => driverIds.Contains(d.Id))
-                .ToDictionaryAsync(d => d.Id, d => d.FullName, cancellationToken)
+                .ToListAsync(cancellationToken))
+                .DistinctBy(d => d.Id)
+                .ToDictionary(d => d.Id, d => d.FullName)
             : new Dictionary<Guid, string>();
 
         var trucksDict = truckIds.Any()
-            ? await _context.Set<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>()
+            ? (await _context.Set<NexusPort.Modules.Vehicle.Domain.Entities.Vehicle>()
                 .AsNoTracking()
                 .Where(v => truckIds.Contains(v.Id))
-                .ToDictionaryAsync(v => v.Id, v => v.PlateNumber, cancellationToken)
+                .ToListAsync(cancellationToken))
+                .DistinctBy(v => v.Id)
+                .ToDictionary(v => v.Id, v => v.PlateNumber)
             : new Dictionary<Guid, string>();
 
         var containersDict = containerIds.Any()
-            ? await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+            ? (await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
                 .AsNoTracking()
                 .Where(c => containerIds.Contains(c.Id))
-                .ToDictionaryAsync(c => c.Id, c => c.ContainerNumber, cancellationToken)
+                .ToListAsync(cancellationToken))
+                .DistinctBy(c => c.Id)
+                .ToDictionary(c => c.Id, c => c.ContainerNumber)
             : new Dictionary<Guid, string>();
 
         var visitIds = dtos.SelectMany(d => d.ContainerSelections).Where(s => s.ContainerVisitId.HasValue)
