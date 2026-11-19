@@ -54,6 +54,18 @@ public static class ServiceCollectionExtensions
         var connectionString = configuration.GetConnectionString("DefaultConnection") 
             ?? "Host=localhost;Port=5432;Database=NexusPort;Username=postgres;Password=pgadmin4";
 
+        // The hosted database is shared by several apps and frequently exhausts
+        // its connection slots. Reuse one reserved connection and queue requests.
+        var connectionOptions = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+        if (!string.Equals(connectionOptions.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(connectionOptions.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            connectionOptions.MaxPoolSize = 1;
+            connectionOptions.MinPoolSize = 1;
+            connectionOptions.Timeout = Math.Max(connectionOptions.Timeout, 30);
+            connectionString = connectionOptions.ConnectionString;
+        }
+
         var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
         dataSourceBuilder.MapEnum<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>("driver_status");
         dataSourceBuilder.MapEnum<NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus>("truck_status");
@@ -209,6 +221,15 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IYardDischargeService, YardDischargeService>();
         services.AddScoped<NexusPort.Modules.Yard.Application.Interfaces.IReeferMonitoringService, NexusPort.Modules.Yard.Application.Services.ReeferMonitoringService>();
         services.AddHostedService<NexusPort.Modules.Yard.Infrastructure.BackgroundServices.ReeferMonitoringSimulatorWorker>();
+
+        // Yard - Container Preparation Module
+        services.AddScoped<NexusPort.Modules.Yard.Preparation.Application.Services.IPreparationPlanner, NexusPort.Modules.Yard.Preparation.Application.Services.PreparationPlanner>();
+        services.AddScoped<NexusPort.Modules.Yard.Preparation.Application.Services.IPreparationService, NexusPort.Modules.Yard.Preparation.Application.Services.PreparationService>();
+        FluentValidation.ServiceCollectionExtensions.AddValidatorsFromAssemblyContaining(services, typeof(NexusPort.Modules.Yard.Preparation.Application.Validators.CancelTaskRequestValidator));
+        services.AddHostedService<NexusPort.Modules.Yard.Preparation.Infrastructure.BackgroundServices.PreparationMonitoringWorker>();
+
+        // Booking-based yard storage reminders (09:00 Vietnam time)
+        services.AddHostedService<NexusPort.Modules.Booking.Infrastructure.BackgroundServices.BookingStorageReminderWorker>();
 
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();

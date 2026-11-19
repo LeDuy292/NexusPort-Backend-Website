@@ -49,6 +49,33 @@ async function startServer() {
       console.log('╚══════════════════════════════════════════════════════════════════╝');
       console.log('');
     });
+
+    // Graceful shutdown để giải phóng port 3001 và connection pool PostgreSQL khi nodemon reload hoặc server tắt
+    let isShuttingDown = false;
+    const gracefulShutdown = (signal) => {
+      if (isShuttingDown) return;
+      isShuttingDown = true;
+      server.close(() => {
+        try {
+          const { sequelize } = require('./src/config/database');
+          sequelize.close().catch(() => {}).finally(() => {
+            if (signal === 'SIGUSR2') {
+              process.kill(process.pid, 'SIGUSR2');
+            } else {
+              process.exit(0);
+            }
+          });
+        } catch {
+          process.exit(0);
+        }
+      });
+      // Dự phòng force exit sau 3 giây nếu server.close bị treo
+      setTimeout(() => process.exit(0), 3000).unref();
+    };
+
+    process.once('SIGUSR2', () => gracefulShutdown('SIGUSR2'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   } catch (error) {
     console.error('[Server] Khởi động thất bại:', error.message);
     process.exit(1);
