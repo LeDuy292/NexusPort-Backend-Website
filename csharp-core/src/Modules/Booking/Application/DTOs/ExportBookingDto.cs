@@ -1,5 +1,31 @@
 namespace NexusPort.Modules.Booking.Application.DTOs;
 
+public sealed class ExportAmendmentChange
+{
+    public string Field { get; set; } = "";
+    public string? NewValue { get; set; }
+}
+public sealed class ExportAmendmentRequest : ExportVersionRequest
+{
+    public List<ExportAmendmentChange> Changes { get; set; } = new();
+}
+public sealed class ExportResolveAmendmentRequest : ExportVersionRequest
+{
+    public bool Accept { get; set; }
+    public bool WaiveFee { get; set; }
+}
+/// <summary>Hãng tàu tự nhập thông tin B/L khi phát hành (không qua SI/draft của shipper).</summary>
+public sealed class ExportIssueBlRequest : ExportVersionRequest
+{
+    public string? Shipper { get; set; }
+    public string Consignee { get; set; } = "";
+    public string? NotifyParty { get; set; }
+    public string CargoDescription { get; set; } = "";
+    public int PackagesCount { get; set; }
+    public decimal GrossWeightKg { get; set; }
+    public string FreightTerms { get; set; } = "Prepaid";
+    public string BlType { get; set; } = "Original";
+}
 public class ExportVersionRequest
 {
     public int ExpectedVersion { get; set; }

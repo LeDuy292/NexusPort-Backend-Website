@@ -15,9 +15,6 @@ using NexusPort.Modules.Identity.Infrastructure.Repositories;
 using NexusPort.Modules.Vessel.Application.Interfaces;
 using NexusPort.Modules.Vessel.Application.Services;
 using NexusPort.Modules.Vessel.Infrastructure.Repositories;
-using NexusPort.Modules.Berth.Application.Interfaces;
-using NexusPort.Modules.Berth.Application.Services;
-using NexusPort.Modules.Berth.Infrastructure.Repositories;
 using NexusPort.Modules.Container.Application.Interfaces;
 using NexusPort.Modules.Container.Application.Services;
 using NexusPort.Modules.Container.Infrastructure.Repositories;
@@ -90,6 +87,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<ExportBookingService>();
+        services.AddHostedService<NexusPort.Modules.Booking.Infrastructure.BackgroundServices.ExportDraftDeadlineWorker>();
 
         var jwtSecret = configuration["Jwt:Secret"] ?? "NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!";
         services.AddSingleton<IJwtService>(new JwtService(jwtSecret));
@@ -179,7 +177,6 @@ public static class ServiceCollectionExtensions
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Identity.Infrastructure.Configurations.UserConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Booking.Infrastructure.Configurations.BookingConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Vessel.Infrastructure.Configurations.VesselConfiguration).Assembly);
-        AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Berth.Infrastructure.Configurations.BerthConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Container.Infrastructure.Configurations.ContainerConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Yard.Infrastructure.Configurations.YardBlockConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Gate.Infrastructure.Configurations.GateTransactionConfiguration).Assembly);
@@ -203,10 +200,6 @@ public static class ServiceCollectionExtensions
         // Vessel
         services.AddScoped<IVesselRepository, VesselRepository>();
         services.AddScoped<IVesselService, VesselService>();
-
-        // Berth
-        services.AddScoped<IBerthRepository, BerthRepository>();
-        services.AddScoped<IBerthService, BerthService>();
 
         // Container
         services.AddScoped<IContainerRepository, ContainerRepository>();

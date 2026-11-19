@@ -163,6 +163,37 @@ public class BookingValidationService : IBookingValidationService
             }
         }
 
+        // 5b. Chiều nhập: container chỉ được đặt lịch lấy hàng khi đã có e-D/O còn hiệu lực do Hãng tàu phát hành
+        var importNumbers = new List<string>();
+        if (dto.Operations != null && dto.Operations.Count > 0)
+        {
+            importNumbers.AddRange(dto.Operations.Where(op => string.Equals(op.OperationType, "Import", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(op.ContainerNumber))
+                .Select(op => op.ContainerNumber.Trim().ToUpperInvariant()));
+        }
+        else if (dto.BookingType == BookingType.Pickup)
+        {
+            var pickupIds = dto.ContainerSelections.Select(s => s.ContainerId).Concat(dto.ContainerIds ?? new()).Distinct().ToList();
+            if (pickupIds.Count > 0)
+            {
+                importNumbers.AddRange((await _context.Set<Container.Domain.Entities.Container>().AsNoTracking()
+                    .Where(c => pickupIds.Contains(c.Id)).Select(c => c.ContainerNumber).ToListAsync(cancellationToken))
+                    .Select(n => n.Trim().ToUpperInvariant()));
+            }
+        }
+        foreach (var number in importNumbers.Distinct())
+        {
+            var hasEdo = await _context.Database.SqlQueryRaw<int>(
+                @"SELECT 1 AS ""Value"" WHERE EXISTS (
+                    SELECT 1 FROM delivery_orders d, jsonb_array_elements(COALESCE(d.containers, '[]'::jsonb)) c
+                     WHERE upper(COALESCE(c->>'containerNumber', c->>'containerNo')) = {0}
+                       AND d.status NOT IN ('CANCELLED', 'HELD')
+                       AND (d.valid_until IS NULL OR d.valid_until > now()))", number).ToListAsync(cancellationToken);
+            if (hasEdo.Count == 0)
+            {
+                AddError("ContainerNumber", $"Container {number} chưa có e-D/O còn hiệu lực do Hãng tàu phát hành nên chưa thể đặt lịch lấy hàng.");
+            }
+        }
+
         // 6. Duplicate / Overlapping Booking Validation
         var requestedContainerIds=(dto.ContainerIds ?? new()).Concat(dto.ContainerSelections.Select(selection=>selection.ContainerId)).Distinct().ToList();
         var requestedContainerNumbers=(dto.Operations ?? new()).Where(operation=>!string.IsNullOrWhiteSpace(operation.ContainerNumber))

@@ -6,6 +6,13 @@ using NexusPort.Modules.Carrier;
 
 var builder = WebApplication.CreateBuilder(args);
 if (builder.Environment.IsDevelopment())
+{
+    // Local development does not require permission to write Windows Event Log.
+    builder.Logging.ClearProviders();
+    builder.Logging.AddConsole();
+    builder.Logging.AddDebug();
+}
+if (builder.Environment.IsDevelopment())
     builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true).AddEnvironmentVariables();
 ApplyDeploymentConfigFallbacks(builder.Configuration);
 
@@ -22,7 +29,6 @@ builder.Services.AddControllers()
     .AddApplicationPart(typeof(NexusPort.Modules.Identity.Presentation.Controllers.IdentityController).Assembly)
     .AddApplicationPart(typeof(NexusPort.Modules.Booking.Presentation.Controllers.BookingController).Assembly)
     .AddApplicationPart(typeof(NexusPort.Modules.Vessel.Presentation.Controllers.VesselController).Assembly)
-    .AddApplicationPart(typeof(NexusPort.Modules.Berth.Presentation.Controllers.BerthController).Assembly)
     .AddApplicationPart(typeof(NexusPort.Modules.Container.Presentation.Controllers.ContainerController).Assembly)
     .AddApplicationPart(typeof(NexusPort.Modules.Yard.Presentation.Controllers.YardController).Assembly)
     .AddApplicationPart(typeof(NexusPort.Modules.Gate.Presentation.Controllers.GateController).Assembly)
@@ -124,33 +130,32 @@ static void ApplyDeploymentConfigFallbacks(ConfigurationManager config)
 
 static string? ResolvePostgresConnectionString()
 {
-    var aivenHost = Environment.GetEnvironmentVariable("AIVEN_DB_HOST");
-    var aivenUser = Environment.GetEnvironmentVariable("AIVEN_DB_USER");
-    var aivenPass = Environment.GetEnvironmentVariable("AIVEN_DB_PASSWORD");
-    if (!string.IsNullOrWhiteSpace(aivenHost) &&
-        !string.IsNullOrWhiteSpace(aivenUser) &&
-        !string.IsNullOrWhiteSpace(aivenPass))
-    {
-        var aivenPort = Environment.GetEnvironmentVariable("AIVEN_DB_PORT") ?? "20134";
-        var aivenDb = Environment.GetEnvironmentVariable("AIVEN_DB_NAME") ?? "defaultdb";
-        var poolMax = Environment.GetEnvironmentVariable("DB_POOL_MAX") ?? "5";
-        return $"Host={aivenHost};Port={aivenPort};Database={aivenDb};Username={aivenUser};Password={aivenPass};SSL Mode=Require;Trust Server Certificate=true;Maximum Pool Size={poolMax}";
-    }
-
     var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
-    if (string.IsNullOrWhiteSpace(databaseUrl) || !Uri.TryCreate(databaseUrl.Trim(), UriKind.Absolute, out var uri))
+    if (!string.IsNullOrWhiteSpace(databaseUrl) && Uri.TryCreate(databaseUrl.Trim(), UriKind.Absolute, out var uri))
     {
-        return null;
+        var userInfo = uri.UserInfo.Split(':', 2);
+        var username = userInfo.Length > 0 ? Uri.UnescapeDataString(userInfo[0]) : string.Empty;
+        var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty;
+        var port = uri.Port > 0 ? uri.Port : 5432;
+        var database = uri.AbsolutePath.TrimStart('/');
+        var disableSsl = uri.Query.Contains("sslmode=disable", StringComparison.OrdinalIgnoreCase);
+        var sslPart = disableSsl ? "SSL Mode=Disable" : "SSL Mode=Require;Trust Server Certificate=true";
+        var pool = Environment.GetEnvironmentVariable("DB_POOL_MAX") ?? "5";
+
+        return $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};{sslPart};Maximum Pool Size={pool};Connection Idle Lifetime=15;Connection Pruning Interval=5";
     }
 
-    var userInfo = uri.UserInfo.Split(':', 2);
-    var username = userInfo.Length > 0 ? Uri.UnescapeDataString(userInfo[0]) : string.Empty;
-    var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : string.Empty;
-    var port = uri.Port > 0 ? uri.Port : 5432;
-    var database = uri.AbsolutePath.TrimStart('/');
-    var disableSsl = uri.Query.Contains("sslmode=disable", StringComparison.OrdinalIgnoreCase);
-    var sslPart = disableSsl ? "SSL Mode=Disable" : "SSL Mode=Require;Trust Server Certificate=true";
-    var pool = Environment.GetEnvironmentVariable("DB_POOL_MAX") ?? "5";
+    var dbHost = Environment.GetEnvironmentVariable("DB_HOST");
+    var dbUser = Environment.GetEnvironmentVariable("DB_USER");
+    if (!string.IsNullOrWhiteSpace(dbHost) && !string.IsNullOrWhiteSpace(dbUser))
+    {
+        var dbPort = Environment.GetEnvironmentVariable("DB_PORT") ?? "5432";
+        var dbName = Environment.GetEnvironmentVariable("DB_NAME") ?? "nexusport";
+        var dbPass = Environment.GetEnvironmentVariable("DB_PASSWORD") ?? string.Empty;
+        var poolMax = Environment.GetEnvironmentVariable("DB_POOL_MAX") ?? "5";
+        var sslMode = Environment.GetEnvironmentVariable("DB_SSL_MODE") ?? "Disable";
+        return $"Host={dbHost};Port={dbPort};Database={dbName};Username={dbUser};Password={dbPass};SSL Mode={sslMode};Maximum Pool Size={poolMax};Connection Idle Lifetime=15;Connection Pruning Interval=5";
+    }
 
-    return $"Host={uri.Host};Port={port};Database={database};Username={username};Password={password};{sslPart};Maximum Pool Size={pool}";
+    return null;
 }

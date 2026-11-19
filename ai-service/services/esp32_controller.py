@@ -357,7 +357,6 @@ class ESP32Controller:
                             self._on_capture_out()
                         except Exception as cb_err:
                             logger.error("[ESP32] on_capture_out callback error: %s", cb_err)
-
                 elif line.startswith("STATUS:"):
                     status_val = line.split(":", 1)[1].strip()
                     # status_val: OPENED_IN, CLOSED_IN, OPENED_OUT, CLOSED_OUT

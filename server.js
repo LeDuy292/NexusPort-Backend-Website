@@ -36,6 +36,39 @@ async function startServer() {
     const stopDispatchRealtime = startDispatchRealtime();
     server.on('close', stopDispatchRealtime);
 
+    // Hạn xác nhận Arrival Notice: quá hạn thì giữ nguyên thông tin và ghi lại trong hồ sơ
+    const importDeadlineTimer = setInterval(() => {
+      require('./src/modules/import-documents/importDocuments.service').autoAcceptOverdue()
+        .catch((err) => console.warn('[ImportDocuments] Xử lý quá hạn lỗi:', err.message));
+      require('./src/modules/import-documents/postIssuance.service').processLoiDeadlines()
+        .catch((err) => console.warn('[ImportDocuments] Xử lý hạn nộp B/L gốc lỗi:', err.message));
+    }, 5 * 60 * 1000);
+    importDeadlineTimer.unref();
+
+    // Nhiệt độ container lạnh tăng ~48 nghìn dòng/ngày: chỉ giữ 7 ngày gần nhất (xóa theo lô nhỏ để không giữ khóa bảng lâu)
+    const purgeReeferTelemetry = async () => {
+      const { sequelize } = require('./src/config/database');
+      for (let i = 0; i < 50; i += 1) {
+        const [, meta] = await sequelize.query(
+          `DELETE FROM reefer_temperature_records WHERE id IN (
+             SELECT id FROM reefer_temperature_records WHERE recorded_at < now() - interval '7 days' LIMIT 10000)`,
+        );
+        if (!meta?.rowCount) break;
+      }
+      // Cảnh báo đã xử lý xong thì giữ 90 ngày; cảnh báo còn mở không bao giờ bị xóa
+      await sequelize.query(
+        `DELETE FROM reefer_alerts WHERE resolved_at IS NOT NULL AND resolved_at < now() - interval '90 days'`,
+      );
+    };
+    const reeferPurgeTimer = setInterval(() => {
+      purgeReeferTelemetry().catch((err) => console.warn('[Reefer] Dọn nhiệt độ cũ lỗi:', err.message));
+    }, 6 * 60 * 60 * 1000);
+    reeferPurgeTimer.unref();
+
+    // Seed lệnh xuất bãi nền, tránh request đầu tiên của người dùng phải chờ và timeout
+    require('./src/modules/yard/yard.service').ensureInitialData()
+      .catch((err) => console.warn('[Yard] Seed gate-out requests failed:', err.message));
+
     server.listen(port, () => {
       console.log('');
       console.log('╔══════════════════════════════════════════════════════════════════╗');

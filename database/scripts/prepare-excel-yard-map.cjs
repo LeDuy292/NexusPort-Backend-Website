@@ -10,7 +10,7 @@ async function main(){
  const expected=process.argv.find(a=>a.startsWith('--expected-version='))?.split('=').slice(1).join('=');
  if(apply&&!expected)throw new Error('--apply requires --expected-version from a reviewed dry run.');
  const connectionString=process.env.DATABASE_URL;if(!connectionString)throw new Error('DATABASE_URL is required.');
- const ssl=process.env.DB_SSL==='true'||process.env.DB_TARGET==='aiven'||connectionString.includes('sslmode=require');
+ const ssl=process.env.DB_SSL==='true'||connectionString.includes('sslmode=require');
  const client=new Client({connectionString,connectionTimeoutMillis:15000,...(ssl?{ssl:{rejectUnauthorized:false}}:{})});
  await client.connect();
  try{

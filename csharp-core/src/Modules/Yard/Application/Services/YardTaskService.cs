@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Data;
 using NexusPort.Infrastructure.Database;
 using NexusPort.Infrastructure.ExternalServices;
 using NexusPort.Infrastructure.Notifications.DTOs;
@@ -219,9 +220,43 @@ public class YardTaskService : IYardTaskService
             throw new NotFoundException($"Không tìm thấy nhiệm vụ tác nghiệp bãi với mã ID: {taskId}");
         }
 
+        if (await _context.Set<YardRestackPlanStep>().AnyAsync(s => s.YardTaskId == taskId, cancellationToken))
+            throw new ValidationException("TaskId", "Lệnh thuộc kế hoạch đảo chuyển; xác nhận theo bước của kế hoạch để đồng bộ vị trí và mở bước kế tiếp.");
+
         if (task.Status.ToLower() != "in_progress")
         {
             throw new ValidationException("Status", $"Nhiệm vụ {task.TaskCode} không ở trạng thái Đang cẩu (Hiện tại: {task.Status})!");
+        }
+
+        await using var completionTransaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        var isRelocation = string.Equals(task.OperationType, "Relocate", StringComparison.OrdinalIgnoreCase);
+        if (isRelocation)
+        {
+            var currentContainer = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+                .FirstOrDefaultAsync(c => c.ContainerNumber.ToUpper() == task.ContainerNo.ToUpper(), cancellationToken);
+            var currentPosition = currentContainer == null ? null : await _context.Set<ContainerPosition>()
+                .Include(p => p.Slot).ThenInclude(s => s.Block)
+                .SingleOrDefaultAsync(p => p.ContainerId == currentContainer.Id && p.IsCurrent, cancellationToken);
+            if (currentPosition == null || !string.Equals(LiveRestackAnalyzer.Location(currentPosition.Slot),
+                    task.FromLocation, StringComparison.OrdinalIgnoreCase))
+                throw new ValidationException("FromLocation", "Container không còn ở ô nguồn của lệnh di chuyển.");
+            if (await _context.Set<ContainerPosition>().AnyAsync(p => p.IsCurrent &&
+                p.Slot.YardBlockId == currentPosition.Slot.YardBlockId &&
+                p.Slot.Bay == currentPosition.Slot.Bay && p.Slot.Row == currentPosition.Slot.Row &&
+                p.Slot.Tier > currentPosition.Slot.Tier, cancellationToken))
+                throw new ValidationException("Stack", "Container còn bị đè; cần xử lý các container phía trên trước.");
+            if (string.IsNullOrWhiteSpace(task.ToLocation) ||
+                !string.IsNullOrWhiteSpace(dto.CompletedLocation) &&
+                !string.Equals(dto.CompletedLocation, task.ToLocation, StringComparison.OrdinalIgnoreCase))
+                throw new ValidationException("CompletedLocation", "Vị trí hoàn tất phải khớp ô đích đã được duyệt.");
+            var (toBlockCode, toBay, toRow, toTier) = ParseSlotLocation(task.ToLocation);
+            var destination = await _context.Set<YardSlot>().Include(s => s.Block)
+                .AsNoTracking().FirstOrDefaultAsync(s =>
+                    s.Block.Code == toBlockCode && s.Bay == toBay &&
+                    s.Row == toRow && s.Tier == toTier, cancellationToken);
+            if (destination == null || destination.Status != "empty" ||
+                await _context.Set<ContainerPosition>().AnyAsync(p => p.IsCurrent && p.SlotId == destination.Id, cancellationToken))
+                throw new ValidationException("ToLocation", "Ô đích không còn trống; cần lập lại lệnh.");
         }
 
         // Task Status: In_Progress -> Completed
@@ -305,6 +340,7 @@ public class YardTaskService : IYardTaskService
             }
             catch (Exception ex)
             {
+                if (isRelocation) throw;
                 _logger.LogWarning(ex, "Could not sync yard_slots/container_positions for task {TaskId}", task.Id);
             }
         }
@@ -324,6 +360,7 @@ public class YardTaskService : IYardTaskService
         await _context.Set<YardOperationEvent>().AddAsync(opEvent, cancellationToken);
 
         await _context.SaveChangesAsync(cancellationToken);
+        await completionTransaction.CommitAsync(cancellationToken);
 
         int durationMinutes = task.StartTime.HasValue 
             ? (int)Math.Max(1, (task.EndTime.Value - task.StartTime.Value).TotalMinutes) 
@@ -778,10 +815,56 @@ public class YardTaskService : IYardTaskService
                 var lowerSlot = await _context.Set<YardSlot>()
                     .FirstOrDefaultAsync(s => s.YardBlockId == block.Id && s.Bay == bay && s.Row == row && s.Tier == tier - 1, cancellationToken);
 
-                if (lowerSlot != null && lowerSlot.Status.ToLower() != "occupied")
+                if (lowerSlot != null && lowerSlot.Status.ToLower() != "occupied" && lowerSlot.Status.ToLower() != "reserved")
                 {
+                    response.IsValid = false;
                     response.GravitySatisfied = false;
-                    response.Warnings.Add($"Cảnh báo trọng lực: Tầng dưới (Tier {tier - 1}) hiện đang trống ({lowerSlot.Status}). Container nên được xếp từ tầng dưới lên.");
+                    response.Message = $"❌ Vi phạm an toàn xếp tầng: Tầng dưới (Tier {tier - 1}) hiện đang trống ({lowerSlot.Status}). Container không thể lơ lửng trên không, bắt buộc phải xếp từ nền bãi (Tier 1) lên.";
+                    return response;
+                }
+            }
+
+            // Kiểm tra Quy tắc Kích thước & Góc chịu lực (Corner Castings):
+            var is40Ft = dto.ContainerType != null && (dto.ContainerType.Contains("40") || dto.ContainerType.Contains("45"));
+            if (tier > 1 && is40Ft)
+            {
+                var bay1 = bay % 2 == 0 ? bay - 1 : bay;
+                var bay2 = bay % 2 == 0 ? bay + 1 : bay + 2;
+
+                var lower1 = await _context.Set<YardSlot>()
+                    .FirstOrDefaultAsync(s => s.YardBlockId == block.Id && s.Bay == bay1 && s.Row == row && s.Tier == tier - 1, cancellationToken);
+                var lower2 = await _context.Set<YardSlot>()
+                    .FirstOrDefaultAsync(s => s.YardBlockId == block.Id && s.Bay == bay2 && s.Row == row && s.Tier == tier - 1, cancellationToken);
+
+                var occ1 = lower1 != null && (lower1.Status.ToLower() == "occupied" || lower1.Status.ToLower() == "reserved");
+                var occ2 = lower2 != null && (lower2.Status.ToLower() == "occupied" || lower2.Status.ToLower() == "reserved");
+
+                if (!occ1 && !occ2)
+                {
+                    response.IsValid = false;
+                    response.Message = $"❌ Vi phạm quy tắc đỡ tầng: Tầng dưới (Tier {tier - 1}) tại Bay {bay1} và Bay {bay2} đều đang trống. Container không thể lơ lửng.";
+                    return response;
+                }
+
+                if ((occ1 && !occ2) || (!occ1 && occ2))
+                {
+                    response.IsValid = false;
+                    response.Message = "❌ Vi phạm góc chịu lực kết cấu: Không thể đặt container 40ft lên trên chỉ 1 container 20ft đơn lẻ (4 trụ góc sẽ bị hẫng lơ lửng gây sập đổ). Tầng dưới bắt buộc phải là container 40ft hoặc đủ 2 container 20ft đỡ 4 góc!";
+                    return response;
+                }
+            }
+
+            var is20Ft = dto.ContainerType != null && dto.ContainerType.Contains("20");
+            if (tier > 1 && is20Ft)
+            {
+                var lowerSlot = await _context.Set<YardSlot>()
+                    .FirstOrDefaultAsync(s => s.YardBlockId == block.Id && s.Bay == bay && s.Row == row && s.Tier == tier - 1, cancellationToken);
+
+                if (lowerSlot != null && lowerSlot.ContainerLengthFt == 40)
+                {
+                    response.IsValid = false;
+                    response.Message = "❌ Vi phạm kỹ thuật chất xếp bãi: Không được xếp container 20ft lên trên container 40ft, vì gù chịu lực giữa của cont 20ft sẽ ấn vào giữa nóc cont 40ft gây bẹp thủng nóc!";
+                    return response;
                 }
             }
         }
@@ -851,6 +934,164 @@ public class YardTaskService : IYardTaskService
     public async Task EnsureSeedTasksAsync(CancellationToken cancellationToken = default)
     {
         await EnsureTableAndSeedAsync(cancellationToken);
+    }
+
+    /// <summary>NXP-119: Lấy danh sách container thực tế đang nằm trong bãi từ database</summary>
+    public async Task<IReadOnlyList<ActiveYardContainerDto>> GetActiveYardContainersAsync(CancellationToken cancellationToken = default)
+    {
+        await EnsureTableAndSeedAsync(cancellationToken);
+
+        var result = new List<ActiveYardContainerDto>();
+        var seenContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 1. Quét vị trí thực tế hiện tại từ ContainerPosition (IsCurrent = true)
+        try
+        {
+            var positions = await _context.Set<ContainerPosition>()
+                .Include(p => p.Slot).ThenInclude(s => s.Block)
+                .Where(p => p.IsCurrent && p.Slot != null && p.Slot.Block != null)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken);
+
+            if (positions.Count > 0)
+            {
+                var containerIds = positions.Select(p => p.ContainerId).Distinct().ToList();
+                var containers = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+                    .Where(c => containerIds.Contains(c.Id))
+                    .AsNoTracking()
+                    .ToDictionaryAsync(c => c.Id, cancellationToken);
+
+                foreach (var pos in positions)
+                {
+                    if (pos.Slot?.Block == null) continue;
+                    if (!containers.TryGetValue(pos.ContainerId, out var container)) continue;
+                    var cNo = container.ContainerNumber?.Trim().ToUpperInvariant();
+                    if (string.IsNullOrWhiteSpace(cNo) || !seenContainers.Add(cNo)) continue;
+
+                    var loc = LiveRestackAnalyzer.Location(pos.Slot);
+                    var rawType = pos.Slot.ContainerLengthFt.HasValue ? $"{pos.Slot.ContainerLengthFt}FT" : "40FT HC";
+                    var normType = NormalizeContainerType(rawType, container.CargoType);
+                    var line = DetectShippingLine(cNo);
+                    var isReefer = normType.Contains("RF") || normType.Contains("RH") || pos.Slot.HasReeferPlug;
+
+                    result.Add(new ActiveYardContainerDto
+                    {
+                        ContainerNo = cNo,
+                        Location = loc,
+                        Type = normType,
+                        Line = line,
+                        Cargo = string.IsNullOrWhiteSpace(container.CargoType) ? (isReefer ? "Hàng Lạnh (Reefer)" : "Hàng Khô Đang Lưu Bãi") : container.CargoType,
+                        Weight = "28.5 Tấn",
+                        Category = isReefer ? "REEFER" : (normType.Contains("TANK") ? "TANK" : "DRY"),
+                        DwellDays = 2,
+                        NextVessel = $"{line} EXPRESS"
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Lỗi khi truy vấn ContainerPositions");
+        }
+
+        // 2. Bổ sung từ các tác nghiệp bãi thực tế (YardTask) đã tiếp nhận hoặc đã hoàn thành
+        if (result.Count < 12)
+        {
+            try
+            {
+                var tasks = await _context.Set<YardTask>()
+                    .Where(t => !string.IsNullOrEmpty(t.ContainerNo) &&
+                               (!string.IsNullOrEmpty(t.CompletedLocation) || !string.IsNullOrEmpty(t.ToLocation) || !string.IsNullOrEmpty(t.FromLocation)))
+                    .OrderByDescending(t => t.CreatedAt)
+                    .Take(50)
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken);
+
+                foreach (var t in tasks)
+                {
+                    var cNo = t.ContainerNo?.Trim().ToUpperInvariant();
+                    if (string.IsNullOrWhiteSpace(cNo) || !seenContainers.Add(cNo)) continue;
+
+                    var rawLoc = !string.IsNullOrEmpty(t.CompletedLocation)
+                        ? t.CompletedLocation
+                        : (!string.IsNullOrEmpty(t.ToLocation) ? t.ToLocation : t.FromLocation);
+
+                    var (bCode, bBay, bRow, bTier) = ParseSlotLocation(rawLoc ?? "");
+                    if (!string.IsNullOrEmpty(bCode) && bCode.Length == 1)
+                    {
+                        bCode = $"{bCode}01";
+                    }
+                    var formattedLoc = !string.IsNullOrEmpty(bCode) && bBay > 0 && bRow > 0 && bTier > 0
+                        ? $"{bCode}-{bBay:D2}-{bRow:D2}-{bTier}"
+                        : (rawLoc ?? "A01-01-01-1");
+
+                    // Nếu địa chỉ còn chứa ký tự không chuẩn (ví dụ "Cầu Tàu"), chuyển về block bãi hợp lệ
+                    if (formattedLoc.Contains("Cầu") || formattedLoc.Contains("Tàu") || formattedLoc.Length < 7)
+                    {
+                        var block = !string.IsNullOrEmpty(t.BlockCode) && !t.BlockCode.Contains("Cầu") ? t.BlockCode : "A01";
+                        formattedLoc = $"{block}-01-01-1";
+                    }
+
+                    var normType = NormalizeContainerType(t.ContainerType, t.CargoType);
+                    var line = DetectShippingLine(cNo);
+                    var isReefer = normType.Contains("RF") || normType.Contains("RH") || (t.CargoType?.ToLower().Contains("lạnh") == true);
+
+                    result.Add(new ActiveYardContainerDto
+                    {
+                        ContainerNo = cNo,
+                        Location = formattedLoc,
+                        Type = normType,
+                        Line = line,
+                        Cargo = string.IsNullOrWhiteSpace(t.CargoType) ? (isReefer ? "Hàng Lạnh (Reefer)" : "Hàng Khô Đang Lưu Bãi") : t.CargoType,
+                        Weight = "29.2 Tấn",
+                        Category = isReefer ? "REEFER" : (normType.Contains("TANK") ? "TANK" : "DRY"),
+                        DwellDays = Math.Max(1, (int)(DateTime.UtcNow - t.CreatedAt).TotalDays),
+                        NextVessel = $"{line} FEEDER"
+                    });
+
+                    if (result.Count >= 12) break;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Lỗi khi bổ sung container từ YardTasks");
+            }
+        }
+
+        return result;
+    }
+
+    private static string DetectShippingLine(string containerNo)
+    {
+        if (string.IsNullOrWhiteSpace(containerNo)) return "COSCO";
+        var prefix = containerNo.Trim().ToUpperInvariant();
+        if (prefix.StartsWith("MSC")) return "MSC";
+        if (prefix.StartsWith("TEMU") || prefix.StartsWith("MAEU") || prefix.StartsWith("MSK")) return "MAERSK";
+        if (prefix.StartsWith("CMA")) return "CMA CGM";
+        if (prefix.StartsWith("COS")) return "COSCO";
+        if (prefix.StartsWith("HAM") || prefix.StartsWith("HLX") || prefix.StartsWith("HLC")) return "HAPAG-LLOYD";
+        if (prefix.StartsWith("ONE")) return "ONE";
+        if (prefix.StartsWith("EMC") || prefix.StartsWith("EVE")) return "EVERGREEN";
+        if (prefix.StartsWith("NXP")) return "NEXUSPORT";
+        return "MAERSK";
+    }
+
+    private static string NormalizeContainerType(string? rawType, string? cargoType)
+    {
+        var type = rawType?.ToUpperInvariant() ?? "";
+        var isReefer = (cargoType?.ToLower().Contains("lạnh") == true) || (cargoType?.ToLower().Contains("reefer") == true) || type.Contains("RF") || type.Contains("RH");
+        var isTank = type.Contains("TK") || type.Contains("TANK");
+
+        if (type.Contains("20"))
+        {
+            if (isReefer) return "20FT RF";
+            if (isTank) return "20FT TANK";
+            return "20FT ST";
+        }
+
+        if (isReefer) return "40FT RF";
+        if (isTank) return "40FT TANK";
+        return "40FT HC";
     }
 
     private static (string BlockCode, int Bay, int Row, int Tier) ParseSlotLocation(string location)
