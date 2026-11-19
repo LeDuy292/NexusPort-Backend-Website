@@ -1,5 +1,13 @@
 namespace NexusPort.Modules.Yard.Application.DTOs;
 
+public class RestackRiskDto
+{
+    public string ContainerNo { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public DateTime AppointmentAt { get; set; }
+    public int BlockingCount { get; set; }
+}
+
 public class AnalyzeBlockedContainerRequestDto
 {
     public string? ContainerNo { get; set; }
@@ -45,6 +53,8 @@ public class TargetContainerInfoDto
     public string ShippingLine { get; set; } = "MSC";
     public string DwellDays { get; set; } = "4 ngày";
     public string TargetDestination { get; set; } = "Xe Đầu Kéo Cổng C";
+    public DateTime? AppointmentAt { get; set; }
+    public string? BookingNo { get; set; }
 }
 
 public class RestackAiMetricsDto

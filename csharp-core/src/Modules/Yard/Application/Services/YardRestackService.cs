@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Data;
 using NexusPort.Infrastructure.Database;
 using NexusPort.Modules.Yard.Application.DTOs;
 using NexusPort.Modules.Yard.Application.Interfaces;
@@ -22,302 +23,85 @@ public class YardRestackService : IYardRestackService
         _logger = logger;
     }
 
-    public async Task<AnalyzeBlockedContainerResponseDto> AnalyzeBlockedContainerAsync(
-        AnalyzeBlockedContainerRequestDto dto,
-        CancellationToken cancellationToken = default)
+    public Task<AnalyzeBlockedContainerResponseDto> AnalyzeBlockedContainerAsync(
+        AnalyzeBlockedContainerRequestDto dto, CancellationToken cancellationToken = default)
+        => LiveRestackAnalyzer.AnalyzeAsync(_context, dto, cancellationToken);
+
+    public async Task<IReadOnlyList<RestackRiskDto>> GetUpcomingRisksAsync(CancellationToken cancellationToken = default)
     {
-        await EnsureTablesAndSeedAsync(cancellationToken);
+        var appointments = await _context.Database.SqlQueryRaw<RestackAppointmentRow>(@"
+SELECT c.container_no AS ""ContainerNo"", MIN(b.appointment_start) AS ""AppointmentAt""
+FROM bookings b
+JOIN booking_containers bc ON bc.booking_id = b.id
+JOIN containers c ON c.id = bc.container_id
+WHERE lower(b.status::text) IN ('approved', 'ready', 'checkedin')
+  AND lower(b.booking_type::text) = 'pickup'
+  AND b.appointment_start BETWEEN now() - interval '24 hours' AND now() + interval '24 hours'
+GROUP BY c.container_no
+ORDER BY MIN(b.appointment_start)
+LIMIT 100").ToListAsync(cancellationToken);
 
-        string containerNo = dto.ContainerNo?.Trim().ToUpperInvariant() ?? string.Empty;
-        string location = dto.Location?.Trim().ToUpperInvariant() ?? string.Empty;
-        string destination = string.IsNullOrWhiteSpace(dto.TargetDestination) ? "Xe Đầu Kéo Cổng C" : dto.TargetDestination.Trim();
-
-        // 1. Phân giải Container mục tiêu và Vị trí hiện tại
-        TargetContainerInfoDto targetInfo;
-        List<BlockingContainerDto> blockingList = new();
-        List<AvailableBufferSlotDto> bufferSlots = new();
-
-        // Kiểm tra kịch bản mẫu trước nếu có mã
-        if (containerNo == "CAIU1234567" || location.StartsWith("C01-04-10"))
+        var positions = await _context.Set<ContainerPosition>().AsNoTracking()
+            .Include(p => p.Slot).ThenInclude(s => s.Block)
+            .Where(p => p.IsCurrent).ToListAsync(cancellationToken);
+        var ids = positions.Select(p => p.ContainerId).Distinct().ToArray();
+        var containers = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+            .AsNoTracking().Where(c => ids.Contains(c.Id)).ToListAsync(cancellationToken);
+        var positionById = positions.ToDictionary(p => p.ContainerId);
+        var result = new List<RestackRiskDto>();
+        foreach (var appointment in appointments)
         {
-            targetInfo = new TargetContainerInfoDto
+            var container = containers.FirstOrDefault(c => string.Equals(c.ContainerNumber,
+                appointment.ContainerNo, StringComparison.OrdinalIgnoreCase));
+            if (container == null || !positionById.TryGetValue(container.Id, out var position)) continue;
+            var slot = position.Slot;
+            var blockingCount = positions.Count(p => p.Slot.YardBlockId == slot.YardBlockId &&
+                p.Slot.Bay == slot.Bay && p.Slot.Row == slot.Row && p.Slot.Tier > slot.Tier);
+            if (blockingCount == 0) continue;
+            result.Add(new RestackRiskDto
             {
-                ContainerNo = "CAIU1234567",
-                ContainerType = "40FT HC",
-                CurrentLocation = "C01-04-10-1",
-                BlockCode = "C01",
-                Bay = 4,
-                Row = 10,
-                Tier = 1,
-                Weight = "28.4 Tấn",
-                ShippingLine = "MSC",
-                DwellDays = "4 ngày",
-                TargetDestination = destination
-            };
-
-            blockingList.Add(new BlockingContainerDto
-            {
-                StepOrder = 1,
-                ContainerNo = "MSCU1111111",
-                ContainerType = "40FT HC",
-                CurrentLocation = "C01-04-10-3",
-                Tier = 3,
-                Weight = "22.0 Tấn",
-                ShippingLine = "MSC",
-                RecommendedBufferSlot = "C01-04-12-1",
-                Reason = "Cẩu container tầng 3 sang slot đệm an toàn dãy 12"
-            });
-
-            blockingList.Add(new BlockingContainerDto
-            {
-                StepOrder = 2,
-                ContainerNo = "MSCU2222222",
-                ContainerType = "40FT HC",
-                CurrentLocation = "C01-04-10-2",
-                Tier = 2,
-                Weight = "26.5 Tấn",
-                ShippingLine = "MSC",
-                RecommendedBufferSlot = "C01-04-12-2",
-                Reason = "Cẩu container tầng 2 sang slot đệm an toàn dãy 12"
-            });
-
-            bufferSlots.AddRange(new[]
-            {
-                new AvailableBufferSlotDto { Location = "C01-04-12-1", BlockCode = "C01", Bay = 4, Row = 12, Tier = 1, DistanceRating = "Rất Gần (Cùng Bay)" },
-                new AvailableBufferSlotDto { Location = "C01-04-12-2", BlockCode = "C01", Bay = 4, Row = 12, Tier = 2, DistanceRating = "Rất Gần (Cùng Bay)" },
-                new AvailableBufferSlotDto { Location = "C01-02-04-1", BlockCode = "C01", Bay = 2, Row = 4, Tier = 1, DistanceRating = "Gần (Cách 2 Bay)" }
+                ContainerNo = appointment.ContainerNo,
+                Location = LiveRestackAnalyzer.Location(slot),
+                AppointmentAt = appointment.AppointmentAt,
+                BlockingCount = blockingCount
             });
         }
-        else if (containerNo == "TEMU8822190" || location.StartsWith("B02-02-02"))
-        {
-            targetInfo = new TargetContainerInfoDto
-            {
-                ContainerNo = "TEMU8822190",
-                ContainerType = "40FT HC",
-                CurrentLocation = "B02-02-02-1",
-                BlockCode = "B02",
-                Bay = 2,
-                Row = 2,
-                Tier = 1,
-                Weight = "30.2 Tấn",
-                ShippingLine = "MAERSK",
-                DwellDays = "2 ngày",
-                TargetDestination = destination
-            };
+        return result.OrderBy(r => r.AppointmentAt).ToList();
+    }
 
-            blockingList.Add(new BlockingContainerDto
-            {
-                StepOrder = 1,
-                ContainerNo = "EVER1129983",
-                ContainerType = "40FT HC",
-                CurrentLocation = "B02-02-02-3",
-                Tier = 3,
-                Weight = "20.1 Tấn",
-                ShippingLine = "EVERGREEN",
-                RecommendedBufferSlot = "B02-02-04-1",
-                Reason = "Dời container tầng 3 sang slot trống dãy 04"
-            });
-
-            blockingList.Add(new BlockingContainerDto
-            {
-                StepOrder = 2,
-                ContainerNo = "HLCU7719204",
-                ContainerType = "20FT TANK",
-                CurrentLocation = "B02-02-02-2",
-                Tier = 2,
-                Weight = "26.0 Tấn",
-                ShippingLine = "HAPAG",
-                RecommendedBufferSlot = "B02-04-01-2",
-                Reason = "Dời container tầng 2 sang khu vực chuyên dụng"
-            });
-
-            bufferSlots.AddRange(new[]
-            {
-                new AvailableBufferSlotDto { Location = "B02-02-04-1", BlockCode = "B02", Bay = 2, Row = 4, Tier = 1, DistanceRating = "Rất Gần (Cùng Bay)" },
-                new AvailableBufferSlotDto { Location = "B02-04-01-2", BlockCode = "B02", Bay = 4, Row = 1, Tier = 2, DistanceRating = "Gần (Khác Bay)" }
-            });
-        }
-        else if (containerNo == "ONEU8821903" || location.StartsWith("A01-02-04"))
-        {
-            targetInfo = new TargetContainerInfoDto
-            {
-                ContainerNo = "ONEU8821903",
-                ContainerType = "40FT RF",
-                CurrentLocation = "A01-02-04-1",
-                BlockCode = "A01",
-                Bay = 2,
-                Row = 4,
-                Tier = 1,
-                Weight = "29.0 Tấn",
-                ShippingLine = "ONE",
-                DwellDays = "1 ngày",
-                TargetDestination = destination
-            };
-
-            blockingList.Add(new BlockingContainerDto
-            {
-                StepOrder = 1,
-                ContainerNo = "COSU8819201",
-                ContainerType = "40FT HC",
-                CurrentLocation = "A01-02-04-2",
-                Tier = 2,
-                Weight = "24.1 Tấn",
-                ShippingLine = "COSCO",
-                RecommendedBufferSlot = "A01-02-05-3",
-                Reason = "Dời sang slot trống trên cùng dãy 05"
-            });
-
-            bufferSlots.AddRange(new[]
-            {
-                new AvailableBufferSlotDto { Location = "A01-02-05-3", BlockCode = "A01", Bay = 2, Row = 5, Tier = 3, DistanceRating = "Rất Gần (Cùng Bay)" },
-                new AvailableBufferSlotDto { Location = "A01-04-01-1", BlockCode = "A01", Bay = 4, Row = 1, Tier = 1, DistanceRating = "Gần (Dãy 01)" }
-            });
-        }
-        else if (containerNo == "MSCU9918234" || location.StartsWith("A01-01-05"))
-        {
-            // Kịch bản kiểm thử: Block bãi bị đầy, không còn slot đệm hợp lệ (Acceptance Criteria #3)
-            targetInfo = new TargetContainerInfoDto
-            {
-                ContainerNo = "MSCU9918234",
-                ContainerType = "40FT HC",
-                CurrentLocation = "A01-01-05-1",
-                BlockCode = "A01",
-                Bay = 1,
-                Row = 5,
-                Tier = 1,
-                Weight = "29.5 Tấn",
-                ShippingLine = "MSC",
-                DwellDays = "5 ngày",
-                TargetDestination = destination
-            };
-
-            blockingList.Add(new BlockingContainerDto
-            {
-                StepOrder = 1,
-                ContainerNo = "CMAU9918234",
-                ContainerType = "20FT ST",
-                CurrentLocation = "A01-01-05-3",
-                Tier = 3,
-                Weight = "18.5 Tấn",
-                ShippingLine = "CMA",
-                RecommendedBufferSlot = "KHÔNG CÓ SLOT",
-                Reason = "Không tìm thấy slot đệm trống trong phạm vi an toàn"
-            });
-
-            blockingList.Add(new BlockingContainerDto
-            {
-                StepOrder = 2,
-                ContainerNo = "COSU8819201",
-                ContainerType = "40FT HC",
-                CurrentLocation = "A01-01-05-2",
-                Tier = 2,
-                Weight = "24.1 Tấn",
-                ShippingLine = "COSCO",
-                RecommendedBufferSlot = "KHÔNG CÓ SLOT",
-                Reason = "Không tìm thấy slot đệm trống trong phạm vi an toàn"
-            });
-
-            // bufferSlots để rỗng để kiểm thử không cho phép di chuyển nếu không có slot đệm phù hợp
-        }
-        else
-        {
-            // Trường hợp container tùy ý do người dùng nhập:
-            string resolvedContNo = string.IsNullOrWhiteSpace(containerNo) ? "CONT-TARGET-01" : containerNo;
-            string resolvedLoc = string.IsNullOrWhiteSpace(location) ? "A01-03-05-1" : location;
-
-            var parts = resolvedLoc.Split('-');
-            string blk = parts.Length > 0 ? parts[0] : "A01";
-            int bay = parts.Length > 1 && int.TryParse(parts[1], out var b) ? b : 3;
-            int row = parts.Length > 2 && int.TryParse(parts[2], out var r) ? r : 5;
-            int tier = parts.Length > 3 && int.TryParse(parts[3], out var parsedTier) ? parsedTier : 1;
-
-            targetInfo = new TargetContainerInfoDto
-            {
-                ContainerNo = resolvedContNo,
-                ContainerType = "40FT HC",
-                CurrentLocation = resolvedLoc,
-                BlockCode = blk,
-                Bay = bay,
-                Row = row,
-                Tier = tier,
-                Weight = "27.5 Tấn",
-                ShippingLine = "COSCO",
-                DwellDays = "3 ngày",
-                TargetDestination = destination
-            };
-
-            // Nếu container ở tầng 1 hoặc tầng thấp, tạo 1-2 container đè bên trên
-            if (tier < 3)
-            {
-                for (int t = 3; t > tier; t--)
-                {
-                    int stepNum = 3 - t + 1;
-                    blockingList.Add(new BlockingContainerDto
-                    {
-                        StepOrder = stepNum,
-                        ContainerNo = $"BLK-{blk}-T{t}",
-                        ContainerType = "40FT HC",
-                        CurrentLocation = $"{blk}-{bay:D2}-{row:D2}-{t}",
-                        Tier = t,
-                        Weight = "22.5 Tấn",
-                        ShippingLine = "COSCO",
-                        RecommendedBufferSlot = $"{blk}-{bay:D2}-{(row + 2):D2}-{stepNum}",
-                        Reason = $"Cẩu container tầng {t} sang slot đệm dãy {(row + 2):D2}"
-                    });
-                }
-            }
-
-            bufferSlots.AddRange(new[]
-            {
-                new AvailableBufferSlotDto { Location = $"{blk}-{bay:D2}-{(row + 2):D2}-1", BlockCode = blk, Bay = bay, Row = row + 2, Tier = 1, DistanceRating = "Rất Gần (Cùng Bay)" },
-                new AvailableBufferSlotDto { Location = $"{blk}-{bay:D2}-{(row + 2):D2}-2", BlockCode = blk, Bay = bay, Row = row + 2, Tier = 2, DistanceRating = "Rất Gần (Cùng Bay)" },
-                new AvailableBufferSlotDto { Location = $"{blk}-{(bay + 2):D2}-01-1", BlockCode = blk, Bay = bay + 2, Row = 1, Tier = 1, DistanceRating = "Gần (Lân cận)" }
-            });
-        }
-
-        // Tính toán số lượt cẩu
-        int moves = blockingList.Count + 1; // Số cont cản trở + 1 cont mục tiêu
-        if (dto.RestackBackToOriginal)
-        {
-            moves += blockingList.Count; // Khôi phục về vị trí cũ
-        }
-
-        decimal shiftingFee = moves * 250000m;
-        int duration = moves * 2;
-
-        return new AnalyzeBlockedContainerResponseDto
-        {
-            TargetContainer = targetInfo,
-            BlockingContainers = blockingList,
-            AvailableBufferSlots = bufferSlots,
-            TotalMoves = moves,
-            EstimatedDurationMinutes = duration,
-            EstimatedShiftingFee = shiftingFee,
-            CanExecute = bufferSlots.Count >= blockingList.Count,
-            ValidationMessage = bufferSlots.Count >= blockingList.Count
-                ? "Đủ slot đệm an toàn để thực thi kế hoạch."
-                : "CẢNH BÁO: Không đủ slot đệm an toàn trong Block lân cận!",
-            AiMetrics = new RestackAiMetricsDto
-            {
-                TimeSaved = "74%",
-                EnergySaved = "-69%",
-                Confidence = "99.8%",
-                BufferSlotNote = $"Slot đệm dãy lân cận được AI xác thực không cản trở kế hoạch bốc dỡ trong 48h tới"
-            }
-        };
+    private sealed class RestackAppointmentRow
+    {
+        public string ContainerNo { get; set; } = string.Empty;
+        public DateTime AppointmentAt { get; set; }
     }
 
     public async Task<RestackPlanDto> CreatePlanAsync(CreateRestackPlanDto dto, string createdBy, CancellationToken cancellationToken = default)
     {
-        await EnsureTablesAndSeedAsync(cancellationToken);
+        await EnsureTablesAsync(cancellationToken);
 
         if (string.IsNullOrWhiteSpace(dto.TargetContainerNo))
         {
             throw new ValidationException("TargetContainerNo", "Mã Container mục tiêu không được để trống.");
         }
 
-        var randomSuffix = new Random().Next(1000, 9999);
-        var planCode = $"RST-{DateTime.UtcNow:yyyyMMdd}-{randomSuffix}";
+        // Never trust client-generated steps or a previously analyzed slot snapshot.
+        var current = await AnalyzeBlockedContainerAsync(new AnalyzeBlockedContainerRequestDto
+        {
+            ContainerNo = dto.TargetContainerNo,
+            Location = dto.TargetLocation,
+            TargetDestination = dto.TargetDestination,
+            RestackBackToOriginal = dto.RestackBackToOriginal
+        }, cancellationToken);
+        if (!current.CanExecute)
+            throw new ValidationException("BufferSlots", current.ValidationMessage);
+        dto.Steps = null;
+        var activePlan = await _context.Set<YardRestackPlan>().AnyAsync(p =>
+            p.TargetContainerNo == dto.TargetContainerNo.Trim().ToUpper() &&
+            (p.Status == "Draft" || p.Status == "In_Progress"), cancellationToken);
+        if (activePlan)
+            throw new ValidationException("Plan", "Container đã có kế hoạch đảo chuyển chưa kết thúc.");
+
+        var planCode = $"RST-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid():N}"[..25];
 
         var plan = new YardRestackPlan(
             planCode: planCode,
@@ -326,8 +110,8 @@ public class YardRestackService : IYardRestackService
             blockCode: string.IsNullOrWhiteSpace(dto.BlockCode) ? "C01" : dto.BlockCode.Trim(),
             targetDestination: string.IsNullOrWhiteSpace(dto.TargetDestination) ? "Xe Đầu Kéo Cổng C" : dto.TargetDestination.Trim(),
             restackBackToOriginal: dto.RestackBackToOriginal,
-            assignedEquipmentCode: dto.AssignedEquipmentCode ?? "RTG-01",
-            assignedOperatorName: dto.AssignedOperatorName ?? "Trần Văn Hùng",
+            assignedEquipmentCode: null,
+            assignedOperatorName: null,
             createdBy: string.IsNullOrWhiteSpace(createdBy) ? "Yard Staff" : createdBy,
             notes: dto.Notes
         )
@@ -359,7 +143,7 @@ public class YardRestackService : IYardRestackService
                     equipmentCode: stepInput.EquipmentCode ?? plan.AssignedEquipmentCode,
                     operatorName: stepInput.OperatorName ?? plan.AssignedOperatorName,
                     estimatedDurationMinutes: 2,
-                    fee: 250000m,
+                    fee: 0,
                     reason: stepInput.Reason
                 );
                 plan.Steps.Add(step);
@@ -416,7 +200,7 @@ public class YardRestackService : IYardRestackService
                 equipmentCode: plan.AssignedEquipmentCode,
                 operatorName: plan.AssignedOperatorName,
                 estimatedDurationMinutes: 3,
-                fee: 250000m,
+                fee: 0,
                 reason: $"Giải phóng container mục tiêu bàn giao {analysis.TargetContainer.TargetDestination}"
             ));
 
@@ -438,7 +222,7 @@ public class YardRestackService : IYardRestackService
                         equipmentCode: plan.AssignedEquipmentCode,
                         operatorName: plan.AssignedOperatorName,
                         estimatedDurationMinutes: 2,
-                        fee: 250000m,
+                        fee: 0,
                         reason: $"Khôi phục container {blk.ContainerNo} về lại vị trí cột ban đầu"
                     ));
                 }
@@ -457,7 +241,7 @@ public class YardRestackService : IYardRestackService
 
     public async Task<RestackPlanDto?> GetPlanByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        await EnsureTablesAndSeedAsync(cancellationToken);
+        await EnsureTablesAsync(cancellationToken);
 
         var plan = await _context.Set<YardRestackPlan>()
             .Include(p => p.Steps)
@@ -468,7 +252,7 @@ public class YardRestackService : IYardRestackService
 
     public async Task<IReadOnlyList<RestackPlanDto>> GetAllPlansAsync(string? status, CancellationToken cancellationToken = default)
     {
-        await EnsureTablesAndSeedAsync(cancellationToken);
+        await EnsureTablesAsync(cancellationToken);
 
         var query = _context.Set<YardRestackPlan>()
             .Include(p => p.Steps)
@@ -485,7 +269,9 @@ public class YardRestackService : IYardRestackService
 
     public async Task<DeployRestackPlanResponseDto> DeployPlanAsync(Guid planId, string deployedBy, CancellationToken cancellationToken = default)
     {
-        await EnsureTablesAndSeedAsync(cancellationToken);
+        await EnsureTablesAsync(cancellationToken);
+
+        await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var plan = await _context.Set<YardRestackPlan>()
             .Include(p => p.Steps)
@@ -496,15 +282,76 @@ public class YardRestackService : IYardRestackService
             throw new NotFoundException($"Không tìm thấy kế hoạch đảo bãi với ID: {planId}");
         }
 
+        if (plan.Status != "Draft")
+            throw new ValidationException("Status", "Kế hoạch đã được phát hoặc không còn hợp lệ.");
+
+        var analysis = await AnalyzeBlockedContainerAsync(new AnalyzeBlockedContainerRequestDto
+        {
+            ContainerNo = plan.TargetContainerNo,
+            Location = plan.TargetLocation,
+            TargetDestination = plan.TargetDestination,
+            RestackBackToOriginal = plan.RestackBackToOriginal
+        }, cancellationToken);
+        if (!analysis.CanExecute)
+            throw new ValidationException("BufferSlots", analysis.ValidationMessage);
+        var moveSteps = plan.Steps.Where(s => s.StepType == "MoveToBuffer").OrderBy(s => s.StepNumber).ToList();
+        var orderedSteps = plan.Steps.OrderBy(s => s.StepNumber).ToList();
+        var targetSteps = orderedSteps.Where(s => s.IsTargetContainer).ToList();
+        var targetStep = targetSteps.FirstOrDefault();
+        if (targetSteps.Count != 1 || targetStep == null || targetStep.StepType != "ReleaseTarget" ||
+            targetStep.StepNumber != moveSteps.Count + 1 ||
+            !string.Equals(targetStep.ContainerNo, plan.TargetContainerNo, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(targetStep.FromLocation, plan.TargetLocation, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(targetStep.ToLocation, plan.TargetDestination, StringComparison.OrdinalIgnoreCase) ||
+            orderedSteps.Select(s => s.StepNumber).Distinct().Count() != orderedSteps.Count)
+            throw new ValidationException("Plan", "Chuỗi lệnh lấy container không hợp lệ; cần tạo kế hoạch mới.");
+        if (moveSteps.Count != analysis.BlockingContainers.Count ||
+            moveSteps.Where((step, index) =>
+                !string.Equals(step.ContainerNo, analysis.BlockingContainers[index].ContainerNo, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(step.FromLocation, analysis.BlockingContainers[index].CurrentLocation, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(step.ToLocation, analysis.BlockingContainers[index].RecommendedBufferSlot, StringComparison.OrdinalIgnoreCase)).Any())
+            throw new ValidationException("Plan", "Vị trí bãi đã thay đổi. Hãy phân tích và tạo lại kế hoạch.");
+
+        var equipment = await _context.Set<NexusPort.Modules.Equipment.Domain.Entities.Equipment>()
+            .Where(e => e.Status == "available" && (e.EquipmentType == "RTG" || e.EquipmentType == "ReachStacker"))
+            .OrderByDescending(e => e.BlockCode == plan.BlockCode)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (equipment == null)
+            throw new ValidationException("Equipment", "Chưa có thiết bị cẩu sẵn sàng. Kế hoạch vẫn ở trạng thái nháp.");
+        plan.AssignedEquipmentCode = equipment.EquipmentCode;
+        plan.AssignedOperatorName = equipment.OperatorName;
+        equipment.Status = "working";
+        foreach (var step in plan.Steps)
+        {
+            step.EquipmentCode = equipment.EquipmentCode;
+            step.OperatorName = equipment.OperatorName;
+        }
+
+        var slots = await _context.Set<YardSlot>().Include(s => s.Block).ToListAsync(cancellationToken);
+        foreach (var move in moveSteps)
+        {
+            var slot = slots.FirstOrDefault(s =>
+                string.Equals(LiveRestackAnalyzer.Location(s), move.ToLocation, StringComparison.OrdinalIgnoreCase));
+            if (slot == null)
+                throw new ValidationException("BufferSlot", $"Không tìm thấy ô {move.ToLocation}.");
+            var reserved = await _context.Database.ExecuteSqlInterpolatedAsync(
+                $"UPDATE yard_slots SET status = 'reserved'::yard_slot_status WHERE id = {slot.Id} AND status = 'empty'::yard_slot_status", cancellationToken);
+            if (reserved != 1)
+                throw new ValidationException("BufferSlot", $"Ô {move.ToLocation} vừa được sử dụng. Hãy lập lại phương án.");
+        }
+
         plan.Status = "In_Progress";
-        plan.AssignedOperatorName = string.IsNullOrWhiteSpace(deployedBy) ? plan.AssignedOperatorName : deployedBy;
+        var upcoming = await GetUpcomingRisksAsync(cancellationToken);
+        var appointment = upcoming.FirstOrDefault(r => string.Equals(r.ContainerNo,
+            plan.TargetContainerNo, StringComparison.OrdinalIgnoreCase));
+        var releaseDueAt = appointment?.AppointmentAt ?? DateTime.UtcNow.AddHours(1);
 
         var generatedTaskCodes = new List<string>();
 
         // Duyệt từng bước để sinh YardTask tương ứng
         foreach (var step in plan.Steps.OrderBy(s => s.StepNumber))
         {
-            var taskCode = $"MOV-{DateTime.UtcNow:yyyyMMdd}-{step.StepNumber:D2}{new Random().Next(10, 99)}";
+            var taskCode = $"MOV-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid():N}"[..25];
             generatedTaskCodes.Add(taskCode);
 
             bool isFirstStep = step.StepNumber == 1;
@@ -523,14 +370,15 @@ public class YardRestackService : IYardRestackService
                 cargoType: "Hàng Đảo Chuyển BRP",
                 vehiclePlate: null,
                 driverName: null,
-                dueTime: DateTime.UtcNow.AddHours(1),
+                dueTime: releaseDueAt.AddMinutes(-(plan.Steps.Count - step.StepNumber) * 3),
                 notes: $"NXP-126 Bước {step.StepNumber}: {step.Reason}",
                 internalFee: step.Fee,
                 shiftingReason: "Đảo container giải phóng tầng"
             )
             {
+                EquipmentId = equipment.Id,
                 EquipmentCode = step.EquipmentCode ?? plan.AssignedEquipmentCode,
-                EquipmentType = "RTG",
+                EquipmentType = equipment.EquipmentType,
                 OperatorName = step.OperatorName ?? plan.AssignedOperatorName,
                 AssignedBy = deployedBy,
                 AssignedAt = DateTime.UtcNow,
@@ -542,6 +390,7 @@ public class YardRestackService : IYardRestackService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
 
         return new DeployRestackPlanResponseDto
         {
@@ -554,7 +403,8 @@ public class YardRestackService : IYardRestackService
 
     public async Task<RestackPlanDto> CompleteStepAsync(Guid planId, int stepNumber, AdvanceRestackStepDto dto, string operatorName, CancellationToken cancellationToken = default)
     {
-        await EnsureTablesAndSeedAsync(cancellationToken);
+        await EnsureTablesAsync(cancellationToken);
+        await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var plan = await _context.Set<YardRestackPlan>()
             .Include(p => p.Steps)
@@ -570,9 +420,74 @@ public class YardRestackService : IYardRestackService
         {
             throw new NotFoundException($"Không tìm thấy bước số {stepNumber} trong kế hoạch.");
         }
+        if (plan.Status != "In_Progress" || currentStep.Status != "In_Progress" ||
+            plan.Steps.Any(s => s.StepNumber < stepNumber && s.Status != "Completed"))
+            throw new ValidationException("Status", "Chỉ được xác nhận bước cẩu đang thực hiện theo đúng thứ tự.");
+        if (currentStep.StepType == "RestackBack")
+            throw new ValidationException("RestackBack", "Không thể trả container về tầng cũ khi container đỡ phía dưới đã rời bãi.");
+        if (!string.IsNullOrWhiteSpace(dto.CompletedLocation) &&
+            !string.Equals(dto.CompletedLocation.Trim(), currentStep.ToLocation, StringComparison.OrdinalIgnoreCase))
+            throw new ValidationException("CompletedLocation", "Vị trí thực tế khác kế hoạch; dừng và lập lại phần việc còn lại.");
+
+        var container = await _context.Set<NexusPort.Modules.Container.Domain.Entities.Container>()
+            .FirstOrDefaultAsync(c => c.ContainerNumber.ToUpper() == currentStep.ContainerNo.ToUpper(), cancellationToken);
+        if (container == null)
+            throw new ValidationException("ContainerNo", "Không tìm thấy container của bước cẩu.");
+        var powerActive = await _context.Set<NexusPort.Modules.Yard.Domain.Entities.Reefer.ReeferPowerSession>()
+            .AnyAsync(s => s.ContainerId == container.Id && s.IsActive && s.EndedAt == null, cancellationToken);
+        if (powerActive)
+            throw new ValidationException("ReeferPower", "Container lạnh vẫn đang cắm điện; phải xác nhận rút điện trước khi cẩu.");
+        var position = await _context.Set<ContainerPosition>()
+            .Include(p => p.Slot).ThenInclude(s => s.Block)
+            .SingleOrDefaultAsync(p => p.ContainerId == container.Id && p.IsCurrent, cancellationToken);
+        if (position == null || !string.Equals(LiveRestackAnalyzer.Location(position.Slot),
+                currentStep.FromLocation, StringComparison.OrdinalIgnoreCase))
+            throw new ValidationException("FromLocation", "Container không còn ở ô nguồn đã lên kế hoạch.");
+        var above = await _context.Set<ContainerPosition>().Include(p => p.Slot)
+            .AnyAsync(p => p.IsCurrent && p.Slot.YardBlockId == position.Slot.YardBlockId &&
+                p.Slot.Row == position.Slot.Row &&
+                p.Slot.Tier > position.Slot.Tier &&
+                (p.Slot.Bay == position.Slot.Bay ||
+                 (position.Slot.Bay % 2 == 0 && (p.Slot.Bay == position.Slot.Bay - 1 || p.Slot.Bay == position.Slot.Bay + 1)) ||
+                 (position.Slot.Bay % 2 != 0 && (p.Slot.Bay == position.Slot.Bay - 1 || p.Slot.Bay == position.Slot.Bay + 1))), cancellationToken);
+        if (above)
+            throw new ValidationException("Stack", "Container còn bị đè bởi container tầng trên (cùng cỡ hoặc 40ft/20ft); không thể xác nhận đã cẩu.");
+
+        YardSlot? destination = null;
+        if (!currentStep.IsTargetContainer)
+        {
+            var slots = await _context.Set<YardSlot>().Include(s => s.Block).ToListAsync(cancellationToken);
+            destination = slots.FirstOrDefault(s => string.Equals(
+                LiveRestackAnalyzer.Location(s), currentStep.ToLocation, StringComparison.OrdinalIgnoreCase));
+            var expected = currentStep.StepType == "MoveToBuffer" ? "reserved" : "empty";
+            if (destination == null || destination.Status != expected ||
+                await _context.Set<ContainerPosition>().AnyAsync(p => p.IsCurrent && p.SlotId == destination.Id, cancellationToken))
+                throw new ValidationException("ToLocation", "Ô đích không còn sẵn sàng; cần lập lại phương án.");
+        }
+
+        position.IsCurrent = false;
+        position.RemovedAt = DateTime.UtcNow;
+        if (destination != null)
+            await _context.Set<ContainerPosition>().AddAsync(new ContainerPosition(container.Id, destination.Id), cancellationToken);
+        var sourceUpdated = await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"UPDATE yard_slots SET status = 'empty'::yard_slot_status WHERE id = {position.SlotId} AND status = 'occupied'::yard_slot_status", cancellationToken);
+        if (sourceUpdated != 1)
+            throw new ValidationException("FromLocation", "Trạng thái ô nguồn đã thay đổi; không thể hoàn tất bước cẩu.");
+        if (destination != null)
+        {
+            var required = currentStep.StepType == "MoveToBuffer" ? "reserved" : "empty";
+            var targetUpdated = required == "reserved"
+                ? await _context.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE yard_slots SET status = 'occupied'::yard_slot_status WHERE id = {destination.Id} AND status = 'reserved'::yard_slot_status", cancellationToken)
+                : await _context.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE yard_slots SET status = 'occupied'::yard_slot_status WHERE id = {destination.Id} AND status = 'empty'::yard_slot_status", cancellationToken);
+            if (targetUpdated != 1)
+                throw new ValidationException("ToLocation", "Ô đích đã thay đổi; không thể hoàn tất bước cẩu.");
+        }
 
         currentStep.Status = "Completed";
         currentStep.CompletedAt = DateTime.UtcNow;
+        currentStep.OperatorName = operatorName;
 
         // Cập nhật YardTask liên kết nếu có
         if (currentStep.YardTaskId.HasValue)
@@ -583,6 +498,7 @@ public class YardRestackService : IYardRestackService
                 task.Status = "Completed";
                 task.EndTime = DateTime.UtcNow;
                 task.CompletedLocation = dto.CompletedLocation ?? currentStep.ToLocation;
+                task.OperatorName = operatorName;
             }
         }
 
@@ -606,15 +522,20 @@ public class YardRestackService : IYardRestackService
             // Đã hoàn tất bước cuối cùng
             plan.Status = "Completed";
             plan.CompletedAt = DateTime.UtcNow;
+            var equipment = await _context.Set<NexusPort.Modules.Equipment.Domain.Entities.Equipment>()
+                .FirstOrDefaultAsync(e => e.EquipmentCode == plan.AssignedEquipmentCode, cancellationToken);
+            if (equipment != null) equipment.Status = "available";
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return MapToDto(plan);
     }
 
     public async Task<RestackPlanDto> CancelPlanAsync(Guid planId, string reason, CancellationToken cancellationToken = default)
     {
-        await EnsureTablesAndSeedAsync(cancellationToken);
+        await EnsureTablesAsync(cancellationToken);
+        await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
 
         var plan = await _context.Set<YardRestackPlan>()
             .Include(p => p.Steps)
@@ -624,9 +545,24 @@ public class YardRestackService : IYardRestackService
         {
             throw new NotFoundException($"Không tìm thấy kế hoạch với ID: {planId}");
         }
+        if (plan.Status is "Completed" or "Cancelled")
+            throw new ValidationException("Status", "Kế hoạch đã kết thúc.");
+
+        var slots = await _context.Set<YardSlot>().Include(s => s.Block).ToListAsync(cancellationToken);
+        foreach (var step in plan.Steps.Where(s => s.StepType == "MoveToBuffer" && s.Status != "Completed"))
+        {
+            var slot = slots.FirstOrDefault(s => string.Equals(
+                LiveRestackAnalyzer.Location(s), step.ToLocation, StringComparison.OrdinalIgnoreCase));
+            if (slot != null)
+                await _context.Database.ExecuteSqlInterpolatedAsync(
+                    $"UPDATE yard_slots SET status = 'empty'::yard_slot_status WHERE id = {slot.Id} AND status = 'reserved'::yard_slot_status", cancellationToken);
+        }
 
         plan.Status = "Cancelled";
         plan.Notes = string.IsNullOrWhiteSpace(plan.Notes) ? $"Hủy kế hoạch: {reason}" : $"{plan.Notes} | Hủy: {reason}";
+        var assignedEquipment = await _context.Set<NexusPort.Modules.Equipment.Domain.Entities.Equipment>()
+            .FirstOrDefaultAsync(e => e.EquipmentCode == plan.AssignedEquipmentCode, cancellationToken);
+        if (assignedEquipment != null) assignedEquipment.Status = "available";
 
         foreach (var s in plan.Steps.Where(s => s.Status != "Completed"))
         {
@@ -634,15 +570,11 @@ public class YardRestackService : IYardRestackService
         }
 
         await _context.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
         return MapToDto(plan);
     }
 
-    public async Task EnsureSeedPlansAsync(CancellationToken cancellationToken = default)
-    {
-        await EnsureTablesAndSeedAsync(cancellationToken);
-    }
-
-    private async Task EnsureTablesAndSeedAsync(CancellationToken cancellationToken)
+    private async Task EnsureTablesAsync(CancellationToken cancellationToken)
     {
         if (_tableEnsured) return;
 
@@ -707,39 +639,6 @@ ALTER TABLE yard_restack_plan_steps ADD COLUMN IF NOT EXISTS ""UpdatedBy"" varch
 ";
             await _context.Database.ExecuteSqlRawAsync(createSql, cancellationToken);
 
-            var planCount = await _context.Set<YardRestackPlan>().CountAsync(cancellationToken);
-            if (planCount == 0)
-            {
-                // Seed 1 kế hoạch mẫu đã hoàn thành và 1 kế hoạch mẫu đang chờ
-                var samplePlan1 = new YardRestackPlan(
-                    planCode: "RST-20261001-8891",
-                    targetContainerNo: "CAIU1234567",
-                    targetLocation: "C01-04-10-1",
-                    blockCode: "C01",
-                    targetDestination: "Cầu Tàu Bến 02 (Xuất Lên Tàu)",
-                    restackBackToOriginal: false,
-                    targetContainerType: "40FT HC",
-                    assignedEquipmentCode: "RTG-01",
-                    assignedOperatorName: "Trần Văn Hùng",
-                    createdBy: "Yard Staff",
-                    notes: "Giải phóng container xuất tàu MAERSK HANOI khẩn cấp"
-                )
-                {
-                    Status = "Completed",
-                    CompletedAt = DateTime.UtcNow.AddMinutes(-30),
-                    TotalMoves = 3,
-                    EstimatedMinutes = 6,
-                    EstimatedFee = 750000m
-                };
-
-                samplePlan1.Steps.Add(new YardRestackPlanStep(samplePlan1.Id, 1, "MSCU1111111", "C01-04-10-3", "C01-04-12-1", false, "MoveToBuffer", "40FT HC", "RTG-01", "Trần Văn Hùng", 2, 250000m, "Dời cont tầng 3 sang slot đệm an toàn dãy 12") { Status = "Completed", CompletedAt = DateTime.UtcNow.AddMinutes(-40) });
-                samplePlan1.Steps.Add(new YardRestackPlanStep(samplePlan1.Id, 2, "MSCU2222222", "C01-04-10-2", "C01-04-12-2", false, "MoveToBuffer", "40FT HC", "RTG-01", "Trần Văn Hùng", 2, 250000m, "Dời cont tầng 2 sang slot đệm an toàn dãy 12") { Status = "Completed", CompletedAt = DateTime.UtcNow.AddMinutes(-35) });
-                samplePlan1.Steps.Add(new YardRestackPlanStep(samplePlan1.Id, 3, "CAIU1234567", "C01-04-10-1", "Cầu Tàu Bến 02 (Xuất Lên Tàu)", true, "ReleaseTarget", "40FT HC", "RTG-01", "Trần Văn Hùng", 2, 250000m, "Giải phóng container mục tiêu bàn giao cẩu STS") { Status = "Completed", CompletedAt = DateTime.UtcNow.AddMinutes(-30) });
-
-                await _context.Set<YardRestackPlan>().AddAsync(samplePlan1, cancellationToken);
-                await _context.SaveChangesAsync(cancellationToken);
-            }
-
             _tableEnsured = true;
         }
         catch (Exception ex)
@@ -768,7 +667,7 @@ ALTER TABLE yard_restack_plan_steps ADD COLUMN IF NOT EXISTS ""UpdatedBy"" varch
             Notes = plan.Notes,
             AssignedEquipmentCode = plan.AssignedEquipmentCode,
             AssignedOperatorName = plan.AssignedOperatorName,
-            CreatedBy = plan.CreatedBy,
+            CreatedBy = plan.CreatedBy ?? string.Empty,
             CreatedAt = plan.CreatedAt,
             CompletedAt = plan.CompletedAt,
             Steps = plan.Steps.OrderBy(s => s.StepNumber).Select(s => new RestackPlanStepDto

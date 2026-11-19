@@ -16,6 +16,7 @@ public class YardSlot : BaseEntity
 
     public decimal? MaxWeightKg { get; set; }
     public bool HasReeferPlug { get; set; }
+    public short? ContainerLengthFt { get; set; }
 
     // Navigation property
     public YardBlock Block { get; set; } = null!;

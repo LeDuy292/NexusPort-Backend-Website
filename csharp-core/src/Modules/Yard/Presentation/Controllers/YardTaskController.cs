@@ -162,6 +162,14 @@ public class YardTaskController : ControllerBase
         return Ok(tasks);
     }
 
+    /// <summary>NXP-119: Lấy danh sách container thực tế đang nằm trong bãi từ database</summary>
+    [HttpGet("active-containers")]
+    public async Task<ActionResult<IReadOnlyList<ActiveYardContainerDto>>> GetActiveContainers(CancellationToken cancellationToken)
+    {
+        var containers = await _taskService.GetActiveYardContainersAsync(cancellationToken);
+        return Ok(containers);
+    }
+
     [HttpPost("seed")]
     public async Task<ActionResult> SeedTasks(CancellationToken cancellationToken)
     {

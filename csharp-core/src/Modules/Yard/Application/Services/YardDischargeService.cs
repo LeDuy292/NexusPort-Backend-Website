@@ -44,7 +44,7 @@ public class YardDischargeService : IYardDischargeService
         var manifestDirection = isExport ? "EXPORT" : "IMPORT";
 
         var billsElement = payload.TryGetProperty("bills", out var bills) ? bills : default;
-        var containersToAllocate = ExtractContainers(billsElement);
+        var containersToAllocate = ExtractContainers(billsElement, payload);
 
         if (containersToAllocate.Count == 0)
         {
@@ -62,35 +62,75 @@ public class YardDischargeService : IYardDischargeService
             .ThenBy(s => s.Tier)
             .ToListAsync(cancellationToken);
 
-        // Sắp xếp thứ tự phân bổ: Cont lạnh & hàng nguy hiểm trước, cont nặng trước
-        containersToAllocate.sortContainers();
+        // Sắp xếp thứ tự phân bổ theo chuẩn Quy hoạch bãi 4.5.1:
+        // Hàng xuất: POD -> Hãng tàu -> Cỡ loại -> Nhóm trọng lượng (Nặng trước)
+        // Hàng nhập FCL: Hãng tàu -> Cỡ loại -> Vận đơn B/L -> Trọng lượng
+        // Hàng nhập LCL: Hãng tàu -> Cỡ loại -> Chủ khai thác (Consolidator)
+        containersToAllocate.sortContainers(manifestDirection);
 
         var allocatedSlotIds = new HashSet<Guid>();
-        var billAllocations = new Dictionary<string, List<(string Block, int Bay)>>();
+        var billAllocations = new Dictionary<string, List<(string Block, int Bay, int Row, int Tier, decimal Weight)>>();
+        var carrierAllocations = new Dictionary<string, List<(string Block, int Bay, int Row, int Tier, decimal Weight)>>();
+        var podAllocations = new Dictionary<string, List<(string Block, int Bay, int Row, int Tier, decimal Weight)>>();
+        var consolidatorAllocations = new Dictionary<string, List<(string Block, int Bay, int Row, int Tier, decimal Weight)>>();
+        var stackWeights = new Dictionary<string, decimal>(); // Lưu trọng lượng cont đã hạ theo tọa độ
         var allocatedItems = new List<DischargeContainerItemDto>();
 
         foreach (var cont in containersToAllocate)
         {
-            var bestCandidate = FindBestSlot(cont, emptySlots, allocatedSlotIds, billAllocations, manifestDirection: manifestDirection);
+            var bestCandidate = FindBestSlot(
+                cont,
+                emptySlots,
+                allocatedSlotIds,
+                billAllocations,
+                carrierAllocations,
+                podAllocations,
+                consolidatorAllocations,
+                stackWeights,
+                manifestDirection: manifestDirection);
+
             if (bestCandidate != null)
             {
                 var slot = bestCandidate.Value.Slot;
                 allocatedSlotIds.Add(slot.Id);
 
-                var bl = cont.BlNumber ?? string.Empty;
-                if (!billAllocations.ContainsKey(bl))
-                {
-                    billAllocations[bl] = new List<(string Block, int Bay)>();
-                }
-                billAllocations[bl].Add((slot.Block.Code, slot.Bay));
-
                 var slotCoordinate = $"{slot.Block.Code}-{slot.Bay:D2}-{slot.Row:D2}-{slot.Tier}";
+                stackWeights[slotCoordinate] = cont.GrossWeightKg;
+
+                // Ghi nhận phân bổ gom nhóm theo 4.5.1
+                var bl = cont.BlNumber ?? string.Empty;
+                if (!string.IsNullOrEmpty(bl))
+                {
+                    if (!billAllocations.ContainsKey(bl)) billAllocations[bl] = new();
+                    billAllocations[bl].Add((slot.Block.Code, slot.Bay, slot.Row, slot.Tier, cont.GrossWeightKg));
+                }
+
+                var carrier = cont.ShippingLine ?? string.Empty;
+                if (!string.IsNullOrEmpty(carrier))
+                {
+                    if (!carrierAllocations.ContainsKey(carrier)) carrierAllocations[carrier] = new();
+                    carrierAllocations[carrier].Add((slot.Block.Code, slot.Bay, slot.Row, slot.Tier, cont.GrossWeightKg));
+                }
+
+                var pod = cont.Pod ?? string.Empty;
+                if (!string.IsNullOrEmpty(pod))
+                {
+                    if (!podAllocations.ContainsKey(pod)) podAllocations[pod] = new();
+                    podAllocations[pod].Add((slot.Block.Code, slot.Bay, slot.Row, slot.Tier, cont.GrossWeightKg));
+                }
+
+                var cons = cont.Consolidator ?? string.Empty;
+                if (!string.IsNullOrEmpty(cons))
+                {
+                    if (!consolidatorAllocations.ContainsKey(cons)) consolidatorAllocations[cons] = new();
+                    consolidatorAllocations[cons].Add((slot.Block.Code, slot.Bay, slot.Row, slot.Tier, cont.GrossWeightKg));
+                }
 
                 cont.ReservedSlot = slotCoordinate;
                 cont.ReservedSlotId = slot.Id;
                 cont.IsPreAllocated = true;
                 cont.AllocationScore = bestCandidate.Value.Score;
-                cont.AllocationReason = $"Đã kiểm tra tại Khu A ➔ Phân bổ tự động về vị trí tối ưu Block {slot.Block.Code}: {bestCandidate.Value.Reason}";
+                cont.AllocationReason = $"Quy hoạch bãi (Mục 4.5.1) Block {slot.Block.Code}: {bestCandidate.Value.Reason}";
                 cont.DischargeStatus = "PLANNED";
 
                 allocatedItems.Add(cont);
@@ -98,7 +138,7 @@ public class YardDischargeService : IYardDischargeService
             else
             {
                 _logger.LogWarning("[PreAllocate] Không tìm thấy ô phù hợp cho container {ContNo}", cont.ContainerNumber);
-                cont.AllocationReason = "Chưa tìm được ô bãi thỏa mãn; chuyển sang hàng đợi phân bổ ngoại lệ.";
+                cont.AllocationReason = "Chưa tìm được ô bãi thỏa mãn tiêu chuẩn 4.5.1; chuyển sang hàng đợi phân bổ ngoại lệ.";
             }
         }
 
@@ -157,7 +197,7 @@ public class YardDischargeService : IYardDischargeService
                 using var doc = JsonDocument.Parse(rawJson);
                 var payload = doc.RootElement.Clone();
                 var billsElement = payload.TryGetProperty("bills", out var bills) ? bills : default;
-                var containers = ExtractContainers(billsElement);
+                var containers = ExtractContainers(billsElement, payload);
                 plans.Add(BuildPlanDto(id, payload, containers));
             }
 
@@ -176,7 +216,7 @@ public class YardDischargeService : IYardDischargeService
 
         var payload = manifestRow.Value.Payload;
         var billsElement = payload.TryGetProperty("bills", out var bills) ? bills : default;
-        var containers = ExtractContainers(billsElement);
+        var containers = ExtractContainers(billsElement, payload);
         return BuildPlanDto(manifestId, payload, containers);
     }
 
@@ -213,7 +253,7 @@ public class YardDischargeService : IYardDischargeService
                 using var doc = JsonDocument.Parse(rawJson);
                 var payload = doc.RootElement.Clone();
                 var billsElement = payload.TryGetProperty("bills", out var bills) ? bills : default;
-                var containers = ExtractContainers(billsElement);
+                var containers = ExtractContainers(billsElement, payload);
 
                 var match = containers.FirstOrDefault(c => string.Equals(c.ContainerNumber, cleanNo, StringComparison.OrdinalIgnoreCase));
                 if (match != null)
@@ -284,6 +324,11 @@ public class YardDischargeService : IYardDischargeService
                 DischargedAt = matchedContainer.DischargedAt,
                 Condition = matchedContainer.Condition,
                 IsReefer = matchedContainer.IsReefer,
+                WeightCategory = matchedContainer.WeightCategory,
+                CargoType = matchedContainer.CargoType,
+                ShippingLine = matchedContainer.ShippingLine,
+                Pod = matchedContainer.Pod,
+                Consolidator = matchedContainer.Consolidator,
                 DamagePhotos = matchedContainer.DamagePhotos,
                 Message = dto.ConfirmPutdown
                     ? $"Xác nhận hoàn tất: Container {cleanNo} đã hạ bãi an toàn tại ô {finalSlot} (Trạng thái: IN YARD)."
@@ -314,7 +359,7 @@ public class YardDischargeService : IYardDischargeService
 
         var payload = manifestRow.Value.Payload;
         var billsElement = payload.TryGetProperty("bills", out var bills) ? bills : default;
-        var containers = ExtractContainers(billsElement);
+        var containers = ExtractContainers(billsElement, payload);
 
         var match = containers.FirstOrDefault(c => string.Equals(c.ContainerNumber, dto.ContainerNumber, StringComparison.OrdinalIgnoreCase));
         if (match != null)
@@ -338,11 +383,16 @@ public class YardDischargeService : IYardDischargeService
         DischargeContainerItemDto cont,
         List<YardSlot> emptySlots,
         HashSet<Guid> reservedIds,
-        Dictionary<string, List<(string Block, int Bay)>> billAllocations,
+        Dictionary<string, List<(string Block, int Bay, int Row, int Tier, decimal Weight)>> billAllocations,
+        Dictionary<string, List<(string Block, int Bay, int Row, int Tier, decimal Weight)>> carrierAllocations,
+        Dictionary<string, List<(string Block, int Bay, int Row, int Tier, decimal Weight)>> podAllocations,
+        Dictionary<string, List<(string Block, int Bay, int Row, int Tier, decimal Weight)>> consolidatorAllocations,
+        Dictionary<string, decimal> stackWeights,
         string manifestDirection = "IMPORT")
     {
         var is20ft = (cont.IsoType ?? "").StartsWith("20");
-        var isHeavy = cont.GrossWeightKg > 22000;
+        var isHeavy = cont.WeightCategory == "HEAVY" || cont.GrossWeightKg > 20000m;
+        var isLight = cont.WeightCategory == "LIGHT" || cont.GrossWeightKg < 12000m;
 
         YardSlot? bestSlot = null;
         var maxScore = -1;
@@ -352,193 +402,260 @@ public class YardDischargeService : IYardDischargeService
         {
             if (reservedIds.Contains(slot.Id)) continue;
 
-            // 1. HARD CONSTRAINTS
-            // Quy tắc phân vùng bãi chuẩn cảng biển:
-            // - Cont lạnh (Reefer): BẮT BUỘC vào khu lạnh (Block D01, D02 hoặc block có cắm điện Reefer).
-            // - Cont thường (Dry): KHÔNG ĐƯỢC chiếm chỗ khu cont lạnh, nhường chỗ có ổ điện cho cont lạnh đặt gần nhau.
-            // - Phân tách luồng Hàng Nhập vs Hàng Xuất:
-            //   + Hàng NHẬP: Container hạ từ tàu cập cảng -> xếp GẦN BIỂN / CẦU TÀU (Block A sát Cầu 4-5, B01 sát Cầu 1, C01-C03 sát Cầu 2-3) để cẩu dỡ thẳng xuống bãi gần nhất.
-            //   + Hàng XUẤT: Container do xe tải ngoài chở vào tập kết -> xếp GẦN CỔNG GATE (Block E, F, G, B03, B04) để xe tải ngoài dễ vào hạ hàng, lấy hàng, giảm ùn tắc cảng.
-            var blockCode = slot.Block.Code ?? "";
-            var isReeferBlock = slot.HasReeferPlug || slot.Block.IsReeferArea || blockCode.StartsWith("D") || blockCode == "R";
+            var blockCode = slot.Block?.Code ?? "";
+            var isReeferBlock = slot.HasReeferPlug || (slot.Block != null && slot.Block.IsReeferArea) || blockCode.StartsWith("D") || blockCode == "R";
 
+            // ===== 1. CỠ VÀ CHỦNG LOẠI CONTAINER (Mục 4.5.1) =====
+            // Cont lạnh (Reefer): Bắt buộc vào khu lạnh/có ổ cắm điện
             if (cont.IsReefer)
             {
-                if (!isReeferBlock)
-                {
-                    continue; // Cont lạnh bắt buộc phải có ổ cắm điện / khu lạnh
-                }
+                if (!isReeferBlock) continue;
             }
             else
             {
-                if (isReeferBlock)
-                {
-                    continue; // Cont thường KHÔNG để ở bãi lạnh, nhường chỗ có ổ cắm cho cont lạnh
-                }
+                if (isReeferBlock) continue; // Cont thường KHÔNG chiếm ô bãi lạnh
             }
 
-            // Bay lẻ: 20ft; Bay chẵn: 40ft/45ft
+            // Kích thước: Bay lẻ = 20ft; Bay chẵn = 40ft/45ft
             if (is20ft && slot.Bay % 2 == 0) continue;
             if (!is20ft && slot.Bay % 2 != 0) continue;
 
-            // Max weight
+            // Max weight giới hạn tải của slot
             if (slot.MaxWeightKg.HasValue && cont.GrossWeightKg > slot.MaxWeightKg.Value) continue;
 
-            // Cont nặng tránh tầng 4
-            if (isHeavy && slot.Tier >= 4) continue;
+            // ===== 2. NGUYÊN TẮC CHẤT XẾP & NHÓM TRỌNG LƯỢNG (Mục 4.5.1) =====
+            // Nhóm Heavy (> 20T): Chỉ được xếp ở Tầng 1 hoặc tối đa Tầng 2. Tránh xếp từ Tầng 3 trở lên.
+            if (isHeavy && slot.Tier >= 3) continue;
 
-            // ===== STACKING RULE: Container KHÔNG được đặt ở tầng N nếu tầng N-1 chưa có container =====
-            // Tầng 1 luôn hợp lệ. Tầng 2 phải có tầng 1, tầng 3 phải có tầng 2, v.v.
+            // Kiểm tra tầng đỡ vật lý: Tầng N > 1 phải có tầng N-1 bên dưới
             if (slot.Tier > 1)
             {
-                var lowerTierOccupied = emptySlots.All(es =>
-                    !(es.Block.Code == slot.Block.Code && es.Bay == slot.Bay && es.Row == slot.Row && es.Tier == slot.Tier - 1))
-                    || reservedIds.Any(rid =>
-                    {
-                        var reservedSlot = emptySlots.FirstOrDefault(s => s.Id == rid);
-                        return reservedSlot != null && reservedSlot.Block.Code == slot.Block.Code
-                            && reservedSlot.Bay == slot.Bay && reservedSlot.Row == slot.Row
-                            && reservedSlot.Tier == slot.Tier - 1;
-                    });
-                // Nếu tầng dưới vẫn còn trống (empty) VÀ chưa được reserved → bỏ qua slot này
+                var lowerSlotKey = $"{blockCode}-{slot.Bay:D2}-{slot.Row:D2}-{slot.Tier - 1}";
+                
+                // Kiểm tra xem tầng dưới đã có container trong stackWeights hoặc trong DB chưa
                 var lowerTierSlot = emptySlots.FirstOrDefault(es =>
-                    es.Block.Code == slot.Block.Code && es.Bay == slot.Bay && es.Row == slot.Row && es.Tier == slot.Tier - 1);
+                    es.Block?.Code == blockCode && es.Bay == slot.Bay && es.Row == slot.Row && es.Tier == slot.Tier - 1);
+                
                 if (lowerTierSlot != null && !reservedIds.Contains(lowerTierSlot.Id))
                 {
-                    // Tầng dưới vẫn trống → không được xếp lên tầng này
+                    // Tầng dưới vẫn đang empty và chưa ai reserve -> không thể đặt lên tầng này
                     continue;
+                }
+
+                // Nguyên tắc "Nặng dưới, Nhẹ trên": Container tầng trên không được nặng hơn tầng dưới quá 1000kg
+                if (stackWeights.TryGetValue(lowerSlotKey, out var lowerWeight))
+                {
+                    if (cont.GrossWeightKg > lowerWeight + 1000m)
+                    {
+                        // Vi phạm nguyên tắc xếp nặng dưới - nhẹ trên
+                        continue;
+                    }
                 }
             }
 
-            // 2. SOFT SCORING
+            // ===== 3. CHẤM ĐIỂM THEO NGUYÊN TẮC CHUNG 4.5.1 =====
             var score = 50;
             var reasons = new List<string>();
 
-            // Phân bổ tối ưu cự ly vận tải (Cổng Gate vs Cầu Tàu Biển):
-            // - Hàng Xuất (EXPORT): Xe tải từ ngoài vào hạ hàng hoặc giao nhận -> Đặt GẦN CỔNG GATE (Block F, E, C09-C10, B04)
-            //   để xe tải ngoài dễ lấy / dễ hạ hàng, quay đầu ra cổng nhanh chóng, không chạy sâu vào khu vực cầu tàu gây ùn tắc.
-            //   TUYỆT ĐỐI CẤM hàng xuất khẩu nằm ở các block sát biển / cầu tàu (C01-C04, B01-B02, A01-A04)!
-            // - Hàng Nhập (IMPORT): Dỡ từ tàu cập cảng -> Đặt GẦN BIỂN / CẦU TÀU (Block A sát Cầu 4-5, B01 sát Cầu 1, C01-C03 sát Cầu 2-3)
-            //   để cẩu giàn / cẩu bờ bốc dỡ thẳng xuống bãi sát mép nước thuận tiện, quãng đường xe nội bộ ngắn nhất.
-            var isNearGateBlock = blockCode.StartsWith("F") || blockCode.StartsWith("E") || blockCode == "B04" || blockCode == "B03" || blockCode == "C09" || blockCode == "C10" || slot.Block.IsNearGate;
+            var isNearGateBlock = blockCode.StartsWith("F") || blockCode.StartsWith("E") || blockCode == "B04" || blockCode == "B03" || blockCode == "C09" || blockCode == "C10" || (slot.Block?.IsNearGate == true);
             var isNearSeaBlock = blockCode.StartsWith("A") || blockCode == "B01" || blockCode == "B02" || blockCode == "C01" || blockCode == "C02" || blockCode == "C03" || blockCode == "C04";
 
             if (manifestDirection == "EXPORT")
             {
-                if (isNearSeaBlock)
-                {
-                    // Cont xuất khẩu TUYỆT ĐỐI KHÔNG xếp ở các block gần biển (C01, C02, C03, B01, B02, A) tránh ùn tắc luồng cầu cảng
-                    continue;
-                }
+                // ----- A. CONTAINER HÀNG XUẤT (EXPORT) (Mục 4.5.1) -----
+                // Vị trí bãi: Xe ngoài chở vào tập kết -> Ưu tiên khu gần cổng Gate
+                if (isNearSeaBlock) continue; // Cấm xếp gần biển gây nghẽn cầu tàu
 
-                if (blockCode.StartsWith("F"))
-                {
-                    score += 65;
-                    reasons.Add($"Hàng xuất đặt tại Block {blockCode} sát Cổng Gate 1 cho xe tải ngoài giao nhận nhanh chóng (+65đ)");
-                }
-                else if (blockCode.StartsWith("E"))
-                {
-                    score += 55;
-                    reasons.Add($"Hàng xuất đặt tại Block {blockCode} gần Cổng Gate thuận tiện hạ bãi (+55đ)");
-                }
-                else if (isNearGateBlock)
-                {
-                    score += 45;
-                    reasons.Add($"Hàng xuất đặt tại Block {blockCode} gần Cổng Gate (+45đ)");
-                }
-            }
-            else // IMPORT
-            {
-                if (isNearSeaBlock)
+                if (isNearGateBlock)
                 {
                     score += 40;
-                    reasons.Add($"Hàng nhập dỡ từ tàu đặt gần biển / cầu tàu Block {blockCode} thuận tiện bốc dỡ (+40đ)");
+                    reasons.Add($"Bãi tập kết hàng xuất gần cổng Block {blockCode} (+40đ)");
                 }
-                else if (isNearGateBlock)
-                {
-                    score -= 30; // Hàng nhập dỡ tàu không nên để xa ngoài cổng
-                }
-            }
 
-            // Gom nhóm cùng B/L (để các container cùng lô/chủ hàng hoặc cùng loại nằm cạnh nhau dễ bốc dỡ)
-            var bl = cont.BlNumber ?? "";
-            if (!string.IsNullOrEmpty(bl) && billAllocations.TryGetValue(bl, out var existing))
-            {
-                var sameBay = existing.Any(e => e.Block == slot.Block.Code && Math.Abs(e.Bay - slot.Bay) <= 2);
-                var sameBlock = existing.Any(e => e.Block == slot.Block.Code);
-                if (sameBay)
+                // 1. Phân tách theo Cảng dỡ hàng (POD) & Chuyến tàu
+                var pod = cont.Pod ?? "";
+                if (!string.IsNullOrEmpty(pod) && podAllocations.TryGetValue(pod, out var podList))
+                {
+                    if (podList.Any(p => p.Block == blockCode && Math.Abs(p.Bay - slot.Bay) <= 2))
+                    {
+                        score += 60;
+                        reasons.Add($"Cùng cụm Bay cảng dỡ {pod} (+60đ)");
+                    }
+                    else if (podList.Any(p => p.Block == blockCode))
+                    {
+                        score += 30;
+                        reasons.Add($"Cùng Block cảng dỡ {pod} (+30đ)");
+                    }
+                }
+
+                // 2. Sắp xếp theo Hãng tàu hoặc tuyến đường
+                var carrier = cont.ShippingLine ?? "";
+                if (!string.IsNullOrEmpty(carrier) && carrierAllocations.TryGetValue(carrier, out var carList))
+                {
+                    if (carList.Any(c => c.Block == blockCode))
+                    {
+                        score += 35;
+                        reasons.Add($"Quy hoạch theo hãng tàu {carrier} (+35đ)");
+                    }
+                }
+
+                // 3. Phân nhóm theo trọng lượng
+                if (isHeavy && slot.Tier == 1)
                 {
                     score += 30;
-                    reasons.Add("Gần container cùng B/L (+30đ)");
+                    reasons.Add("Nhóm Heavy (Nặng) xếp Tầng 1 theo chuẩn chất xếp (+30đ)");
                 }
-                else if (sameBlock)
-                {
-                    score += 15;
-                    reasons.Add("Cùng Block với B/L (+15đ)");
-                }
-            }
-
-            // Container lạnh
-            if (cont.IsReefer)
-            {
-                if (slot.HasReeferPlug)
+                else if (isLight && slot.Tier >= 3)
                 {
                     score += 25;
-                    reasons.Add("Có ổ cắm điện Reefer (+25đ)");
+                    reasons.Add("Nhóm Light (Nhẹ) xếp Tầng cao theo chuẩn chất xếp (+25đ)");
                 }
-                if (slot.Block.Code == "R")
+                else if (!isHeavy && !isLight && (slot.Tier == 2 || slot.Tier == 3))
+                {
+                    score += 20;
+                    reasons.Add("Nhóm Medium (Vừa) xếp Tầng 2-3 chuẩn ổn định (+20đ)");
+                }
+            }
+            else
+            {
+                // ----- B. CONTAINER HÀNG NHẬP (IMPORT) (Mục 4.5.1) -----
+                // Vị trí bãi: Dỡ từ tàu cập bến -> Ưu tiên gần biển / cầu cảng
+                if (isNearSeaBlock)
+                {
+                    score += 45;
+                    reasons.Add($"Gần cầu cảng/cẩu bờ bốc dỡ Block {blockCode} (+45đ)");
+                }
+                else if (isNearGateBlock && cont.CargoType != "LCL")
+                {
+                    score -= 25; // Hàng nhập nguyên cont FCL không nên để ngoài cổng
+                }
+
+                // 1. Phân tách theo Hãng tàu
+                var carrier = cont.ShippingLine ?? "";
+                if (!string.IsNullOrEmpty(carrier) && carrierAllocations.TryGetValue(carrier, out var carList))
+                {
+                    if (carList.Any(c => c.Block == blockCode))
+                    {
+                        score += 35;
+                        reasons.Add($"Nhóm theo hãng tàu {carrier} (+35đ)");
+                    }
+                }
+
+                if (cont.CargoType == "LCL")
+                {
+                    // 2. Hàng LCL: Phân tách theo Hãng tàu, cỡ/loại, CHỦ KHAI THÁC (Consolidator)
+                    var cons = cont.Consolidator ?? "";
+                    var isNearCfsBlock = blockCode.StartsWith("E") || blockCode.StartsWith("F") || blockCode.StartsWith("G");
+                    if (isNearCfsBlock)
+                    {
+                        score += 50;
+                        reasons.Add($"Khu bãi gần kho CFS phục vụ rút ruột LCL (+50đ)");
+                    }
+                    if (!string.IsNullOrEmpty(cons) && consolidatorAllocations.TryGetValue(cons, out var consList))
+                    {
+                        if (consList.Any(c => c.Block == blockCode))
+                        {
+                            score += 40;
+                            reasons.Add($"Khu vực riêng cho chủ khai thác LCL {cons} (+40đ)");
+                        }
+                    }
+                }
+                else
+                {
+                    // 3. Hàng FCL: Gom theo Vận đơn (B/L) cho lô hàng lớn
+                    var bl = cont.BlNumber ?? "";
+                    if (!string.IsNullOrEmpty(bl) && billAllocations.TryGetValue(bl, out var existing))
+                    {
+                        var sameBay = existing.Any(e => e.Block == blockCode && Math.Abs(e.Bay - slot.Bay) <= 2);
+                        var sameBlock = existing.Any(e => e.Block == blockCode);
+                        if (sameBay)
+                        {
+                            score += 65;
+                            reasons.Add($"Gom cùng lô B/L {bl} để lấy nguyên lô thuận tiện (+65đ)");
+                        }
+                        else if (sameBlock)
+                        {
+                            score += 30;
+                            reasons.Add($"Cùng Block với lô B/L {bl} (+30đ)");
+                        }
+                    }
+                }
+
+                // Nhóm trọng lượng hàng nhập
+                if (isHeavy && slot.Tier == 1)
+                {
+                    score += 25;
+                    reasons.Add("Cont nặng hạ Tầng 1 an toàn bãi (+25đ)");
+                }
+                else if (isLight && slot.Tier >= 2)
                 {
                     score += 15;
-                    reasons.Add("Khu chuyên dụng cont lạnh Block R (+15đ)");
+                    reasons.Add("Cont nhẹ xếp Tầng trên (+15đ)");
                 }
             }
 
-            // Tải trọng
-            if (isHeavy && slot.Tier == 1)
+            // Cont lạnh
+            if (cont.IsReefer && slot.HasReeferPlug)
             {
-                score += 20;
-                reasons.Add("Cont nặng hạ tầng 1 vững chắc (+20đ)");
-            }
-            else if (!isHeavy && slot.Tier >= 2)
-            {
-                score += 15;
-                reasons.Add("Cont nhẹ tầng trên tối ưu luân chuyển (+15đ)");
+                score += 30;
+                reasons.Add("Cắm điện Reefer duy trì nhiệt độ (+30đ)");
             }
 
-            // Cân bằng tải
-            var occupancy = slot.Block.MaxCapacity > 0 ? (double)slot.Block.CurrentOccupancy / slot.Block.MaxCapacity : 0;
-            if (occupancy < 0.5)
+            // Cân bằng tải Block
+            var maxCap = slot.Block?.MaxCapacity ?? 0;
+            var currOcc = slot.Block?.CurrentOccupancy ?? 0;
+            var occupancy = maxCap > 0 ? (double)currOcc / maxCap : 0;
+            if (occupancy < 0.6)
             {
                 score += 15;
-                reasons.Add($"Cân bằng tải: Block {slot.Block.Code} thông thoáng (+15đ)");
-            }
-
-            if (slot.Block.IsNearGate)
-            {
-                score += 10;
-                reasons.Add("Gần cổng giao nhận (+10đ)");
+                reasons.Add($"Cân bằng tải Block {blockCode} (+15đ)");
             }
 
             if (score > maxScore)
             {
                 maxScore = score;
                 bestSlot = slot;
-                bestReason = reasons.Count > 0 ? string.Join("; ", reasons) : "Thỏa mãn đầy đủ tiêu chuẩn bãi";
+                bestReason = reasons.Count > 0 ? string.Join("; ", reasons) : "Đạt chuẩn quy hoạch bãi 4.5.1";
             }
         }
 
         return bestSlot != null ? (bestSlot, maxScore, bestReason) : null;
     }
 
-    private List<DischargeContainerItemDto> ExtractContainers(JsonElement billsElement)
+    private List<DischargeContainerItemDto> ExtractContainers(JsonElement billsElement, JsonElement? rootPayload = null)
     {
         var list = new List<DischargeContainerItemDto>();
         if (billsElement.ValueKind != JsonValueKind.Array) return list;
+
+        var defaultShippingLine = "EVERGREEN";
+        if (rootPayload.HasValue)
+        {
+            if (rootPayload.Value.TryGetProperty("carrierCode", out var cc) && !string.IsNullOrWhiteSpace(cc.GetString()))
+                defaultShippingLine = cc.GetString()!;
+            else if (rootPayload.Value.TryGetProperty("shippingLine", out var slr) && !string.IsNullOrWhiteSpace(slr.GetString()))
+                defaultShippingLine = slr.GetString()!;
+            else if (rootPayload.Value.TryGetProperty("vesselName", out var vn) && vn.GetString()?.Contains("MAERSK", StringComparison.OrdinalIgnoreCase) == true)
+                defaultShippingLine = "MAERSK";
+            else if (rootPayload.Value.TryGetProperty("vesselName", out var vn2) && vn2.GetString()?.Contains("ONE", StringComparison.OrdinalIgnoreCase) == true)
+                defaultShippingLine = "ONE";
+        }
 
         foreach (var bill in billsElement.EnumerateArray())
         {
             var blNumber = bill.TryGetProperty("blNumber", out var bl) ? bl.GetString() : "";
             var consignee = bill.TryGetProperty("consignee", out var cs) ? cs.GetString() : "";
+            var billCarrier = bill.TryGetProperty("carrier", out var bcr) && !string.IsNullOrWhiteSpace(bcr.GetString())
+                ? bcr.GetString()
+                : (bill.TryGetProperty("shippingLine", out var bsl) && !string.IsNullOrWhiteSpace(bsl.GetString()) ? bsl.GetString() : defaultShippingLine);
+            var billPod = bill.TryGetProperty("pod", out var bpod) && !string.IsNullOrWhiteSpace(bpod.GetString())
+                ? bpod.GetString()
+                : (bill.TryGetProperty("portOfDischarge", out var bpod2) && !string.IsNullOrWhiteSpace(bpod2.GetString()) ? bpod2.GetString() : "VNDAN");
+            var billCargoType = bill.TryGetProperty("cargoType", out var bct) && !string.IsNullOrWhiteSpace(bct.GetString())
+                ? bct.GetString()!
+                : (bill.TryGetProperty("loadType", out var blt) && !string.IsNullOrWhiteSpace(blt.GetString()) ? blt.GetString()! : "FCL");
+            var billConsolidator = bill.TryGetProperty("consolidator", out var bcsld) && !string.IsNullOrWhiteSpace(bcsld.GetString())
+                ? bcsld.GetString()
+                : (bill.TryGetProperty("cfsOperator", out var bcfs) && !string.IsNullOrWhiteSpace(bcfs.GetString()) ? bcfs.GetString() : (billCargoType.Equals("LCL", StringComparison.OrdinalIgnoreCase) ? "DANANG_CFS_01" : null));
 
             if (bill.TryGetProperty("containers", out var containers) && containers.ValueKind == JsonValueKind.Array)
             {
@@ -558,8 +675,18 @@ public class YardDischargeService : IYardDischargeService
                     var allocationScore = c.TryGetProperty("allocationScore", out var sc) && sc.TryGetInt32(out var s) ? s : 0;
                     var allocationReason = c.TryGetProperty("allocationReason", out var ar) ? ar.GetString() : null;
 
-                    // Nếu chưa từng bấm phân bổ tự động (chưa isPreAllocated):
-                    // Theo quy trình: Khi tàu cập bến, cont được tập kết tạm về Khu A để kiểm tra đối soát
+                    var contCarrier = c.TryGetProperty("shippingLine", out var csl) && !string.IsNullOrWhiteSpace(csl.GetString()) ? csl.GetString() : billCarrier;
+                    var contPod = c.TryGetProperty("pod", out var cpod) && !string.IsNullOrWhiteSpace(cpod.GetString()) ? cpod.GetString() : billPod;
+                    var contCargoType = c.TryGetProperty("cargoType", out var cct) && !string.IsNullOrWhiteSpace(cct.GetString()) ? cct.GetString()! : billCargoType;
+                    var contConsolidator = c.TryGetProperty("consolidator", out var ccs) && !string.IsNullOrWhiteSpace(ccs.GetString()) ? ccs.GetString() : billConsolidator;
+
+                    var weightCat = weight switch
+                    {
+                        < 12000m => "LIGHT",
+                        <= 20000m => "MEDIUM",
+                        _ => "HEAVY"
+                    };
+
                     if (!isPreAllocated || string.IsNullOrEmpty(reservedSlot))
                     {
                         var idx = list.Count;
@@ -597,6 +724,11 @@ public class YardDischargeService : IYardDischargeService
                         IsoType = isoType,
                         IsReefer = isReefer,
                         GrossWeightKg = weight,
+                        WeightCategory = weightCat,
+                        CargoType = contCargoType,
+                        ShippingLine = contCarrier,
+                        Pod = contPod,
+                        Consolidator = contConsolidator,
                         BlNumber = blNumber,
                         Consignee = consignee,
                         Commodity = commodity,
@@ -1068,13 +1200,55 @@ public class YardDischargeService : IYardDischargeService
 
 internal static class ContainerSortExtensions
 {
-    public static void sortContainers(this List<DischargeContainerItemDto> list)
+    public static void sortContainers(this List<DischargeContainerItemDto> list, string direction = "IMPORT")
     {
         list.Sort((a, b) =>
         {
+            // 1. Cont lạnh (Reefer) luôn ưu tiên cao nhất để nhận slot có ổ cắm điện
             if (a.IsReefer && !b.IsReefer) return -1;
             if (!a.IsReefer && b.IsReefer) return 1;
-            return b.GrossWeightKg.CompareTo(a.GrossWeightKg);
+
+            if (direction == "EXPORT")
+            {
+                // Quy tắc Hàng xuất (Mục 4.5.1):
+                // Phân tách theo Cảng dỡ (POD) -> Hãng tàu -> Cỡ loại (20ft vs 40ft) -> Nhóm trọng lượng (Nặng trước)
+                var podComp = string.Compare(a.Pod ?? "", b.Pod ?? "", StringComparison.OrdinalIgnoreCase);
+                if (podComp != 0) return podComp;
+
+                var lineComp = string.Compare(a.ShippingLine ?? "", b.ShippingLine ?? "", StringComparison.OrdinalIgnoreCase);
+                if (lineComp != 0) return lineComp;
+
+                var isA20 = (a.IsoType ?? "").StartsWith("20");
+                var isB20 = (b.IsoType ?? "").StartsWith("20");
+                if (isA20 != isB20) return isA20 ? -1 : 1;
+
+                // Nặng xếp trước (tầng 1) -> Nhẹ xếp sau (tầng trên)
+                return b.GrossWeightKg.CompareTo(a.GrossWeightKg);
+            }
+            else
+            {
+                // Quy tắc Hàng nhập (Mục 4.5.1):
+                // Hãng tàu -> Cỡ loại -> Vận đơn B/L (FCL) hoặc Chủ khai thác (LCL) -> Trọng lượng nặng trước
+                var lineComp = string.Compare(a.ShippingLine ?? "", b.ShippingLine ?? "", StringComparison.OrdinalIgnoreCase);
+                if (lineComp != 0) return lineComp;
+
+                var isA20 = (a.IsoType ?? "").StartsWith("20");
+                var isB20 = (b.IsoType ?? "").StartsWith("20");
+                if (isA20 != isB20) return isA20 ? -1 : 1;
+
+                if (a.CargoType == "LCL" && b.CargoType == "LCL")
+                {
+                    var cComp = string.Compare(a.Consolidator ?? "", b.Consolidator ?? "", StringComparison.OrdinalIgnoreCase);
+                    if (cComp != 0) return cComp;
+                }
+                else
+                {
+                    var blComp = string.Compare(a.BlNumber ?? "", b.BlNumber ?? "", StringComparison.OrdinalIgnoreCase);
+                    if (blComp != 0) return blComp;
+                }
+
+                return b.GrossWeightKg.CompareTo(a.GrossWeightKg);
+            }
         });
     }
 }
