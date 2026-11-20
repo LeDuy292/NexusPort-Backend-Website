@@ -59,9 +59,12 @@ public sealed partial class ServiceDraftService
             JsonSerializer.Serialize(new { input.Flow, input.MainServiceId, input.Source }, Json));
         await tx.CommitAsync(ct);
         try { await workflowEmail!.SendCode(email, code, ct); }
-        catch
+        catch (Exception ex)
         {
             await Exec("UPDATE eport_service_email_verifications SET invalidated_at=now() WHERE id=@p0", CancellationToken.None, challenge);
+            Console.WriteLine($"[ServiceDraftService] SendCode failed ({ex.GetType().Name}: {ex.Message})");
+            // Giữ nguyên lỗi cụ thể (thiếu cấu hình, timeout, SMTP từ chối...) để người dùng biết cách xử lý
+            if (ex is CatalogException) throw;
             throw new CatalogException("Không gửi được mã xác thực đến email. Vui lòng kiểm tra cấu hình email và thử lại.", 503, "SERVICE_EMAIL_DELIVERY_FAILED");
         }
         var at = email.IndexOf('@');

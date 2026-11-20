@@ -287,13 +287,19 @@ class HardwareGateService:
     def _begin_capture(self, lane: str):
         lane = self._normalize_lane(lane)
         with self._camera_state_lock:
+            already_live = self._selected_camera_lane_locked() == lane
             self._capture_camera_lane = lane
-            self._reset_lane_frame(lane)
+            # Camera làn này đang phát trực tiếp thì giữ nguyên khung hình, không xóa làm màn hình xem bị đen.
+            if not already_live:
+                self._reset_lane_frame(lane)
 
     def _end_capture(self, lane: str):
         with self._camera_state_lock:
             if self._capture_camera_lane == lane:
                 self._capture_camera_lane = None
+                # Quét xong vẫn giữ camera làn này bật để nhân viên xem tiếp (trước đây camera tắt ngay khi cảm biến quét xong).
+                self._camera_preview_lane = lane
+                self._camera_preview_expires_at = time.monotonic() + CAMERA_PREVIEW_TIMEOUT_SEC
 
     def _wait_for_camera_frame(self, lane: str, timeout: float = 5.0) -> bool:
         return self._frame_ready[lane].wait(timeout)

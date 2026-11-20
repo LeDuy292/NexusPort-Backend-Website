@@ -128,6 +128,8 @@ public class YardReceivingInspectionDto
     public string? YardBlockCode { get; set; }
     public string? LocationCoordinate { get; set; }
     public string? InspectorName { get; set; }
+    /// <summary>Ảnh container (data URL base64) do nhân viên bãi chụp khi nhận container; tối đa 4 ảnh.</summary>
+    public List<string>? PhotoImages { get; set; }
 }
 
 public class CreateYardTaskDto
