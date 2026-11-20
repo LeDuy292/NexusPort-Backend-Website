@@ -62,6 +62,14 @@ function startDispatchRealtime() {
   const timer = setInterval(() => { void pumpDispatchEvents(); }, 5000);
   timer.unref();
   void pumpDispatchEvents();
-  return () => clearInterval(timer);
+  const { syncManifestGateBookings } = require('./dispatch.service');
+  let sync = null;
+  const syncBookings = () => {
+    if (!sync) sync = syncManifestGateBookings().finally(() => { sync = null; });
+  };
+  const syncTimer = setInterval(syncBookings, 30000);
+  syncTimer.unref();
+  syncBookings();
+  return () => { clearInterval(timer); clearInterval(syncTimer); };
 }
 module.exports = { pumpDispatchEvents, startDispatchRealtime };

@@ -7,16 +7,12 @@ function resolveConnectionString(): string {
     return process.env.DATABASE_URL;
   }
 
-  const aivenHost = process.env.AIVEN_DB_HOST;
-  const aivenUser = process.env.AIVEN_DB_USER;
-  const aivenPass = process.env.AIVEN_DB_PASSWORD;
-  if (aivenHost && aivenUser && aivenPass) {
-    const aivenPort = process.env.AIVEN_DB_PORT || '20134';
-    const aivenDb = process.env.AIVEN_DB_NAME || 'defaultdb';
-    return `postgresql://${encodeURIComponent(aivenUser)}:${encodeURIComponent(aivenPass)}@${aivenHost}:${aivenPort}/${aivenDb}`;
-  }
-
-  return 'postgresql://postgres:120104@localhost:5432/nexusport';
+  const dbHost = process.env.DB_HOST || 'localhost';
+  const dbPort = process.env.DB_PORT || '5432';
+  const dbName = process.env.DB_NAME || 'nexusport';
+  const dbUser = process.env.DB_USER || 'postgres';
+  const dbPass = process.env.DB_PASSWORD || '';
+  return `postgresql://${encodeURIComponent(dbUser)}:${encodeURIComponent(dbPass)}@${dbHost}:${dbPort}/${dbName}`;
 }
 
 const rawConnectionString = resolveConnectionString();
@@ -28,9 +24,7 @@ const connectionString = rawConnectionString
 
 const isSslRequired =
   process.env.DB_SSL === 'true' ||
-  process.env.DB_TARGET === 'aiven' ||
-  Boolean(process.env.AIVEN_DB_HOST) ||
-  rawConnectionString.includes('aivencloud.com') ||
+  process.env.DB_SSL_MODE === 'require' ||
   (rawConnectionString.includes('sslmode=') && !rawConnectionString.includes('sslmode=disable'));
 
 const pool = new Pool({

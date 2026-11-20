@@ -63,6 +63,8 @@ class ESP32Controller:
         # Callback riêng cho 2 làn
         self._on_capture_in: Optional[Callable] = None
         self._on_capture_out: Optional[Callable] = None
+        # Callback báo trạng thái Barie (lane, state)
+        self._on_barrier_status: Optional[Callable[[str, str], None]] = None
 
         self._running = False
         self._reader_thread: Optional[threading.Thread] = None
@@ -79,20 +81,23 @@ class ESP32Controller:
         on_capture: Optional[Callable] = None,
         on_capture_in: Optional[Callable] = None,
         on_capture_out: Optional[Callable] = None,
+        on_barrier_status: Optional[Callable[[str, str], None]] = None,
     ) -> bool:
         """
         Khởi động kết nối Serial và thread đọc nền.
 
         Args:
-            on_capture     : Callback(lane) gọi khi nhận CAPTURE_IN/OUT hoặc CAPTURE.
-            on_capture_in  : Callback() gọi khi nhận CAPTURE_IN (làn Vào).
-            on_capture_out : Callback() gọi khi nhận CAPTURE_OUT (làn Ra).
+            on_capture         : Callback(lane) gọi khi nhận CAPTURE_IN/OUT hoặc CAPTURE.
+            on_capture_in      : Callback() gọi khi nhận CAPTURE_IN (làn Vào).
+            on_capture_out     : Callback() gọi khi nhận CAPTURE_OUT (làn Ra).
+            on_barrier_status  : Callback(lane, state) gọi khi nhận STATUS:OPENED/CLOSED.
         Returns:
             True nếu kết nối thành công ngay, False nếu đang retry.
         """
         self._on_capture = on_capture
         self._on_capture_in = on_capture_in
         self._on_capture_out = on_capture_out
+        self._on_barrier_status = on_barrier_status
         self._running = True
 
         self._reader_thread = threading.Thread(
@@ -118,7 +123,7 @@ class ESP32Controller:
 
     def send_open(self):
         """Gửi lệnh OPEN xuống ESP32 → mở barrier làn Vào (backward compat)."""
-        self._send("OPEN_IN")
+        return self._send("OPEN_IN")
 
     def send_close(self):
         """Gửi lệnh CLOSE xuống ESP32 → đóng barrier làn Vào (backward compat)."""
@@ -131,7 +136,7 @@ class ESP32Controller:
     # ── Làn Vào (IN) ──
     def send_open_in(self):
         """Gửi lệnh OPEN_IN → mở barrier làn Vào, bật LED xanh, kêu buzzer."""
-        self._send("OPEN_IN")
+        return self._send("OPEN_IN")
 
     def send_close_in(self):
         """Gửi lệnh CLOSE_IN → đóng barrier làn Vào, bật LED đỏ."""
@@ -190,6 +195,7 @@ class ESP32Controller:
                     self._serial.write(payload)
                     self._serial.flush()
                     logger.info("[ESP32] → Sent: %s", command)
+                    return True
                 except Exception as e:
                     logger.error("[ESP32] Send error: %s", e)
                     # Không đóng serial ngay khi chỉ bị timeout nhẹ
@@ -198,6 +204,7 @@ class ESP32Controller:
                         self.connected = False
             else:
                 logger.warning("[ESP32] Cannot send '%s': port not open.", command)
+        return False
 
     def _find_esp32_port(self) -> Optional[str]:
         """Tự động dò tìm cổng Serial của ESP32 (chip CH340, CP210x, FTDI)."""
@@ -352,6 +359,17 @@ class ESP32Controller:
                             self._on_capture_out()
                         except Exception as cb_err:
                             logger.error("[ESP32] on_capture_out callback error: %s", cb_err)
+                elif line.startswith("STATUS:"):
+                    status_val = line.split(":", 1)[1].strip()
+                    # status_val: OPENED_IN, CLOSED_IN, OPENED_OUT, CLOSED_OUT
+                    lane = "OUT" if "OUT" in status_val else "IN"
+                    state = "opened" if "OPENED" in status_val else "closed" if "CLOSED" in status_val else status_val.lower()
+                    logger.info("[ESP32] Barrier status changed: lane=%s, state=%s", lane, state)
+                    if self._on_barrier_status:
+                        try:
+                            self._on_barrier_status(lane, state)
+                        except Exception as cb_err:
+                            logger.error("[ESP32] on_barrier_status callback error: %s", cb_err)
 
             except serial.SerialException as e:
                 logger.error("[ESP32] Serial read error: %s — will reconnect", e)

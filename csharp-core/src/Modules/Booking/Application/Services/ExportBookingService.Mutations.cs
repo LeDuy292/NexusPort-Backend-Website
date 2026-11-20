@@ -11,7 +11,7 @@ public sealed partial class ExportBookingService
     public async Task<JsonObject> Decision(Guid id,ExportVersionRequest request,bool approve,CancellationToken ct)
     {
         await using var tx=await _db.Database.BeginTransactionAsync(ct);
-        var b=await Booking(id,true,ct);OwnLine(b);Version(b,request.ExpectedVersion);
+        var b=await Booking(id,true,ct);await OwnLine(b,ct);Version(b,request.ExpectedVersion);
         Require(S(b,"status")=="Pending","Status","Chỉ yêu cầu đang chờ duyệt mới được xử lý.");
         var v=await Voyage(G(b,"voyageId"),true,ct);
         Require(S(v,"status")=="Scheduled"&&D(v,"vgmCutoff")>DateTime.UtcNow,"Voyage","Chuyến đã đóng hoặc quá hạn khai container.");
@@ -45,7 +45,7 @@ public sealed partial class ExportBookingService
     {
         await using var tx=_db.Database.CurrentTransaction==null?await _db.Database.BeginTransactionAsync(ct):null;
         var b=await Booking(id,true,ct);
-        if(preparedLineReview)OwnLine(b);else await Own(b,ct);
+        if(preparedLineReview)await OwnLine(b,ct);else await Own(b,ct);
         Version(b,request.ExpectedVersion);
         Require(b["preparation"]==null || preparedLineReview,"Preparation","Gửi phiên bản container qua bước kiểm tra hãng tàu trước khi chuyển cảng.");
         Require(b["submission"]==null,"Submission","Hồ sơ Booking hợp nhất cần được cập nhật và gửi hãng tàu duyệt lại; không thay riêng danh sách đã gửi.");
@@ -126,24 +126,27 @@ public sealed partial class ExportBookingService
         Text(request.Shipper,"Người gửi hàng",1000);Text(request.Consignee,"Người nhận hàng",1000);Text(request.CargoDescription,"Mô tả hàng",2000);
         Require(request.NotifyParty?.Length<=1000||request.NotifyParty==null,"NotifyParty","Bên thông báo tối đa 1000 ký tự.");
         Require(request.PackagesCount>0&&request.GrossWeightKg>0,"Cargo","Số kiện và khối lượng hàng SI phải lớn hơn 0.");
-        Require(request.FreightTerms is "Prepaid" or "Collect" && request.BlType is "Original" or "TelexRelease","SI","Điều khoản cước/loại B/L không hợp lệ.");
+        Require(request.FreightTerms is "Prepaid" or "Collect" && request.BlType is "Original" or "TelexRelease" or "SeawayBill","SI","Điều khoản cước/loại B/L không hợp lệ.");
         Text(request.DestinationPort,"Cảng đến",200);
         Require(string.Equals(request.DestinationPort.Trim(),S(v,"portOfDischarge"),StringComparison.OrdinalIgnoreCase),"DestinationPort","Cảng đến SI phải khớp Booking.");
         // Cargo gross weight is intentionally not equated with packed-container VGM (includes tare).
         var si=JsonSerializer.SerializeToNode(new {request.Shipper,request.Consignee,request.NotifyParty,request.CargoDescription,request.PackagesCount,request.GrossWeightKg,request.FreightTerms,request.BlType,request.DestinationPort},Json)!;
-        await Exec("UPDATE export_bookings SET si=@p0::jsonb,si_status='Submitted',draft=NULL,freight_paid=CASE WHEN si->>'freightTerms' IS DISTINCT FROM @p1 THEN false ELSE freight_paid END,version=version+1,updated_at=now() WHERE id=@p2",ct,si.ToJsonString(),request.FreightTerms,id);
+        await Exec("UPDATE export_bookings SET si=@p0::jsonb,si_status='Submitted',draft=NULL,draft_deadline=NULL,amendment_request=NULL,amendment_fee_vnd=NULL,amendment_fee_status=NULL,freight_paid=CASE WHEN si->>'freightTerms' IS DISTINCT FROM @p1 THEN false ELSE freight_paid END,version=version+1,updated_at=now() WHERE id=@p2",ct,si.ToJsonString(),request.FreightTerms,id);
         await History(id,G(b,"voyageId"),"SiSubmitted","Khách hàng nộp Shipping Instruction.",ct);
-        await tx.CommitAsync(ct);return await Detail(id,ct);
+        await tx.CommitAsync(ct);
+        await DocEvent(S(b,"bookingNumber"),"SI",S(b,"siStatus")=="RevisionRequested"?"RESUBMITTED":"SUBMITTED",S(b,"siStatus"),"Submitted",null,null,null,si,ct);
+        return await Detail(id,ct);
     }
     public async Task<JsonObject> Draft(Guid id,ExportVersionRequest request,bool reopen,CancellationToken ct)
     {
         await using var tx=await _db.Database.BeginTransactionAsync(ct);
-        var b=await Booking(id,true,ct);OwnLine(b);Version(b,request.ExpectedVersion);
+        var b=await Booking(id,true,ct);await OwnLine(b,ct);Version(b,request.ExpectedVersion);
         Require(!new[]{"Pending","Rejected","Cancelled","BlIssued"}.Contains(S(b,"status")),"Status","Trạng thái Booking không cho phép xử lý SI/draft.");
+        DateTime? draftDeadline=null;
         if(reopen)
         {
             Text(request.Reason??"","Lý do",1000);
-            await Exec("UPDATE export_bookings SET si_status='RevisionRequested',draft=NULL,version=version+1,updated_at=now() WHERE id=@p0",ct,id);
+            await Exec("UPDATE export_bookings SET si_status='RevisionRequested',draft=NULL,draft_deadline=NULL,amendment_request=NULL,amendment_fee_vnd=NULL,amendment_fee_status=NULL,version=version+1,updated_at=now() WHERE id=@p0",ct,id);
         }
         else
         {
@@ -152,10 +155,21 @@ public sealed partial class ExportBookingService
             Require(containers.Count>0,"Containers","Cần danh sách container trước khi lập draft B/L.");
             Require(b["si"]?["grossWeightKg"]?.GetValue<decimal>()<=containers.Sum(x=>x["vgmKg"]!.GetValue<decimal>()),"GrossWeightKg","Khối lượng hàng SI không thể lớn hơn tổng VGM của danh sách container.");
             var draft=new JsonObject{["version"]=I(b,"draftVersion")+1,["si"]=b["si"]!.DeepClone(),["containers"]=new JsonArray(containers.Select(x=>(JsonNode)x).ToArray()),["preparedAt"]=DateTime.UtcNow};
-            await Exec("UPDATE export_bookings SET draft=@p0::jsonb,draft_version=draft_version+1,si_status='Draft',version=version+1,updated_at=now() WHERE id=@p1",ct,draft.ToJsonString(),id);
+            var voyageRow=await Voyage(G(b,"voyageId"),false,ct);
+            draftDeadline=DraftDeadline(voyageRow,DateTime.UtcNow);
+            draft["deadline"]=draftDeadline;
+            await Exec("UPDATE export_bookings SET draft=@p0::jsonb,draft_version=draft_version+1,draft_deadline=@p1,si_status='Draft',version=version+1,updated_at=now() WHERE id=@p2",ct,draft.ToJsonString(),draftDeadline,id);
         }
         await History(id,G(b,"voyageId"),reopen?"SiRevisionRequested":"DraftBlPrepared",reopen?request.Reason!:"Hãng tàu lập bản nháp B/L từ SI và danh sách container hiện tại.",ct);
-        await tx.CommitAsync(ct);return await Detail(id,ct);
+        await tx.CommitAsync(ct);
+        if(reopen)await DocEvent(S(b,"bookingNumber"),"SI","REVISION_REQUESTED",S(b,"siStatus"),"RevisionRequested",request.Reason,null,null,null,ct);
+        else
+        {
+            var nextDraft=I(b,"draftVersion")+1;
+            await DocEvent(S(b,"bookingNumber"),"DRAFT_BL","SENT","Submitted","Draft",null,nextDraft,null,null,ct);
+            await NotifyDraftSent(b,draftDeadline!.Value,nextDraft,ct);
+        }
+        return await Detail(id,ct);
     }
     public async Task<JsonObject> ConfirmDraft(Guid id,ExportVersionRequest request,CancellationToken ct)
     {
@@ -165,7 +179,9 @@ public sealed partial class ExportBookingService
         Require(S(b,"siStatus")=="Draft"&&b["draft"]!=null&&I(b,"draftVersion")==request.DraftVersion,"Draft","Bản nháp đã đổi hoặc chưa được hãng tàu lập. Tải lại và kiểm tra trước khi xác nhận.");
         await Exec("UPDATE export_bookings SET si_status='Confirmed',version=version+1,updated_at=now() WHERE id=@p0",ct,id);
         await History(id,G(b,"voyageId"),"DraftBlConfirmed","Khách hàng xác nhận đúng phiên bản draft B/L; SI được khóa.",ct);
-        await tx.CommitAsync(ct);return await Detail(id,ct);
+        await tx.CommitAsync(ct);
+        await DocEvent(S(b,"bookingNumber"),"DRAFT_BL","CONFIRMED","Draft","Confirmed",null,request.DraftVersion,null,null,ct);
+        return await Detail(id,ct);
     }
     public async Task<JsonObject> Cancel(Guid id,ExportVersionRequest request,CancellationToken ct)
     {

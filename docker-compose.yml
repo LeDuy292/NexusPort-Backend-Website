@@ -67,7 +67,7 @@ services:
     restart: unless-stopped
     environment:
       - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=Host=nexusport-db;Port=5432;Database=${DB_NAME:-nexusport_db};Username=${DB_USER:-nexusport_user};Password=${DB_PASSWORD:-NexusPort_Secure_2026!}
+      - ConnectionStrings__DefaultConnection=Host=nexusport-db;Port=5432;Database=${DB_NAME:-nexusport_db};Username=${DB_USER:-nexusport_user};Password=${DB_PASSWORD:-NexusPort_Secure_2026!};Timezone=UTC
       - Redis__ConnectionString=nexusport-redis:6379,password=${REDIS_PASSWORD:-NexusRedis2026!}
       - RabbitMQ__Host=nexusport-rabbitmq
       - RabbitMQ__Username=${RABBITMQ_USER:-nexusport_admin}

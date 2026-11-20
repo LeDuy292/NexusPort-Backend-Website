@@ -25,11 +25,12 @@ public sealed partial class ExportBookingService
     private readonly IBookingDocumentRequirementPolicy _documents;
     private readonly IS3StorageService? _storage;
     private readonly string _documentBucket;
+    private readonly IConfiguration? _configuration;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     public ExportBookingService(AppDbContext db, ICurrentUser user, IBookingService bookings, IBookingDocumentRequirementPolicy documents,
         IS3StorageService? storage = null, IConfiguration? configuration = null)
-    { _db = db; _user = user; _bookings = bookings; _documents = documents; _storage = storage; _documentBucket = configuration?["AWS:BucketName"] ?? "nexusport"; }
-    private bool Carrier => new[] { "Transport Company", "Carrier", "Carrier Staff" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
+    { _db = db; _user = user; _bookings = bookings; _documents = documents; _storage = storage; _documentBucket = configuration?["AWS:BucketName"] ?? "nexusport"; _configuration = configuration; }
+    private bool Carrier => new[] { "Transport Company", "Carrier Staff" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
     private bool Line => string.Equals(_user.Role, "Shipping Line", StringComparison.OrdinalIgnoreCase);
     private bool Admin => new[] { "Administrator", "Admin" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
     private bool Port => Admin || new[] { "Dispatcher", "Gate Officer", "Gate", "Yard Operator" }.Contains(_user.Role, StringComparer.OrdinalIgnoreCase);
@@ -57,12 +58,19 @@ public sealed partial class ExportBookingService
     private async Task CanRead(JsonObject booking, CancellationToken ct)
     {
         if (Carrier && G(booking, "carrierId") == await Company(ct)) return;
-        if (Line && G(booking, "shippingLineId") == Actor) return;
+        if (Line && await SameLine(G(booking, "shippingLineId"), ct)) return;
         if (Port) return;
         throw new NotFoundException("ExportBooking", G(booking, "id"));
     }
     private async Task Own(JsonObject booking, CancellationToken ct) { if (G(booking, "carrierId") != await Company(ct)) throw new NotFoundException("ExportBooking", G(booking, "id")); }
-    private void OwnLine(JsonObject booking) { if (!(Admin || (Line && G(booking, "shippingLineId") == Actor))) throw new NotFoundException("ExportBooking", G(booking, "id")); }
+    // Các tài khoản cùng một hãng tàu (shipping_line_accounts) dùng chung chuyến và booking của hãng.
+    private async Task<bool> SameLine(Guid? owner, CancellationToken ct)
+    {
+        if (owner == null) return false;
+        if (owner == Actor) return true;
+        return (await Rows("SELECT jsonb_build_object('id',a.user_id)::text AS \"Value\" FROM shipping_line_accounts a JOIN shipping_line_accounts me ON me.shipping_line_id=a.shipping_line_id WHERE me.user_id=@p0 AND a.user_id=@p1", ct, Actor, owner)).Count > 0;
+    }
+    private async Task OwnLine(JsonObject booking, CancellationToken ct) { if (!(Admin || (Line && await SameLine(G(booking, "shippingLineId"), ct)))) throw new NotFoundException("ExportBooking", G(booking, "id")); }
     private static void Version(JsonObject row, int expected) => Require(expected > 0 && I(row, "version") == expected, "Version", "Dữ liệu đã thay đổi. Tải lại thông tin trước khi tiếp tục.");
     private const string VoyageFields = """
         v.id,v.line_user_id AS "shippingLineId",v.vessel_name AS "vesselName",v.voyage_number AS "voyageNumber",
@@ -74,7 +82,8 @@ public sealed partial class ExportBookingService
         b.line_user_id AS "shippingLineId",COALESCE(u.full_name,u.username) AS "shippingLineName",
         b.voyage_id AS "voyageId",b.container_type_code AS "containerTypeCode",b.quantity,b.commodity_description AS "commodityDescription",
         b.status,b.version,b.port_status AS "portStatus",b.si,b.si_status AS "siStatus",b.draft_version AS "draftVersion",b.draft,
-        b.bl_number AS "blNumber",b.freight_paid AS "freightPaid",b.created_at AS "createdAt",b.created_by AS "createdBy",b.submission,b.preparation
+        b.bl_number AS "blNumber",b.freight_paid AS "freightPaid",b.created_at AS "createdAt",b.created_by AS "createdBy",b.submission,b.preparation,
+        b.draft_deadline AS "draftDeadline",b.amendment_request AS "amendmentRequest",b.amendment_fee_vnd AS "amendmentFeeVnd",b.amendment_fee_status AS "amendmentFeeStatus"
         """;
     private async Task<JsonObject> Booking(Guid id, bool locked, CancellationToken ct)
     {
@@ -99,6 +108,15 @@ public sealed partial class ExportBookingService
             FROM export_history WHERE export_booking_id=@p0 ORDER BY created_at,id) x
             """, ct, id)).Select(x => (JsonNode)x).ToArray());
         CustomerSubmissionVisibility(b);
+        b["documentEvents"] = new JsonArray((await Rows("""
+            SELECT row_to_json(x)::text AS "Value" FROM (SELECT id,document_type AS "documentType",action,from_status AS "fromStatus",to_status AS "toStatus",
+            actor_username AS "actorUsername",actor_role AS "actorRole",channel,field_changes AS "fieldChanges",document_version AS "documentVersion",note,created_at AS "createdAt"
+            FROM shipment_document_events WHERE direction='EXPORT' AND file_ref=@p0 ORDER BY created_at,id) x
+            """, ct, S(b, "bookingNumber"))).Select(x => (JsonNode)x).ToArray());
+        var preAlerts = await Rows("""
+            SELECT row_to_json(x)::text AS "Value" FROM (SELECT id,bl_number AS "blNumber",status,sent_at AS "sentAt",received_at AS "receivedAt" FROM shipment_pre_alerts WHERE export_booking_id=@p0) x
+            """, ct, id);
+        b["preAlert"] = preAlerts.Count == 0 ? null : preAlerts[0];
         await RenewDocumentLinks(b,G(b,"carrierId"),ct);
         if (b["preparation"] is JsonObject prepared)
         {
@@ -164,7 +182,7 @@ public sealed partial class ExportBookingService
     }
     public async Task<List<JsonObject>> Voyages(CancellationToken ct)
     {
-        var filter = Line ? " WHERE v.line_user_id=@p0" : "";
+        var filter = Line ? " WHERE v.line_user_id IN (SELECT user_id FROM shipping_line_accounts WHERE shipping_line_id=(SELECT shipping_line_id FROM shipping_line_accounts WHERE user_id=@p0) UNION SELECT @p0)" : "";
         return await Rows("SELECT row_to_json(x)::text AS \"Value\" FROM (SELECT " + VoyageFields + " FROM export_voyages v" + filter + " ORDER BY v.etd DESC LIMIT 500) x", ct, Line ? new object?[] { Actor } : Array.Empty<object?>());
     }
     public async Task<JsonObject> List(int page, int pageSize, string? search, string? status, Guid? voyageId, CancellationToken ct)
@@ -174,7 +192,7 @@ public sealed partial class ExportBookingService
         Require(Carrier || Line || Port,"Role","Không có quyền xem Booking xuất khẩu.");
         const string where="""
              FROM export_bookings b JOIN carriers c ON c.id=b.carrier_id JOIN users u ON u.id=b.line_user_id
-             WHERE (@p0::uuid IS NULL OR b.carrier_id=@p0) AND (@p1::uuid IS NULL OR b.line_user_id=@p1)
+             WHERE (@p0::uuid IS NULL OR b.carrier_id=@p0) AND (@p1::uuid IS NULL OR b.line_user_id IN (SELECT user_id FROM shipping_line_accounts WHERE shipping_line_id=(SELECT shipping_line_id FROM shipping_line_accounts WHERE user_id=@p1) UNION SELECT @p1))
              AND (@p2::text IS NULL OR b.booking_no ILIKE '%'||@p2||'%' OR c.company_name ILIKE '%'||@p2||'%')
              AND (@p3::text IS NULL OR b.status=@p3) AND (@p4::uuid IS NULL OR b.voyage_id=@p4)
             """;
@@ -221,6 +239,7 @@ public sealed partial class ExportBookingService
             VALUES(@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10)
             """,ct,id,request.RequestId,fingerprint,company,request.ShippingLineId,request.VoyageId,"EXP-"+id.ToString("N").ToUpperInvariant(),request.ContainerTypeCode.Trim().ToUpperInvariant(),request.Quantity,request.CommodityDescription.Trim(),Actor);
         await History(id,request.VoyageId,"BookingRequested","Khách hàng gửi yêu cầu đặt chỗ; chưa có danh sách container.",ct);
+        await AutoApprove(id,ct);
         await transaction.CommitAsync(ct);return await Detail(id,ct);
     }
     public async Task<JsonObject> CreateVoyage(CreateExportVoyageRequest request,CancellationToken ct)

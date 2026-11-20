@@ -22,7 +22,7 @@ public sealed class ServiceMailWorker(IServiceScopeFactory scopes,ILogger<Servic
             catch(Exception error){logger.LogWarning("Service mail queue unavailable ({ErrorType}); will retry.",error.GetType().Name);}
             if (!processed)
             {
-                try{await Task.Delay(TimeSpan.FromSeconds(10),stoppingToken);}catch(OperationCanceledException){break;}
+                try{await Task.Delay(TimeSpan.FromSeconds(30),stoppingToken);}catch(OperationCanceledException){break;}
             }
         }
     }

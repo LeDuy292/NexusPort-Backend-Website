@@ -42,8 +42,13 @@ const authenticateDispatcher = (req: DispatcherRequest, _res: Response, next: im
 };
 
 export class DispatcherController {
-  getSmartRoutes = async (_req: Request, res: Response, next: import('express').NextFunction): Promise<void> => {
-    try { res.setHeader('Cache-Control', 'no-store'); sendSuccess(res, await new DriverRouteService().monitor()); }
+  getSmartRoutes = async (req: Request, res: Response, next: import('express').NextFunction): Promise<void> => {
+    try {
+      const bookingId = z.string().uuid().safeParse(req.query.bookingId);
+      if (!bookingId.success) throw new ValidationError('Cần chọn booking để xem lộ trình xe.');
+      res.setHeader('Cache-Control', 'no-store');
+      sendSuccess(res, await new DriverRouteService().monitor(bookingId.data));
+    }
     catch (error) { next(error); }
   };
 

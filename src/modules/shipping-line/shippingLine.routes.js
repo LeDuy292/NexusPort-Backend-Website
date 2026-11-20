@@ -25,8 +25,9 @@ router.post('/seed/reset', ...manifestWriter, asyncHandler(async (_req, res) => 
 }));
 
 // 1. Dashboard
-router.get('/dashboard', asyncHandler(async (_req, res) => {
-  const data = await shippingLineService.getDashboardSummary();
+// Tổng quan tính từ DB theo hãng tàu đang đăng nhập
+router.get('/dashboard', authenticate, authorize(ROLES.SHIPPING_LINE, ROLES.ADMINISTRATOR), asyncHandler(async (req, res) => {
+  const data = await require('./shippingLine.dashboard').getDashboard(req.user);
   res.json({ success: true, data });
 }));
 
@@ -34,6 +35,12 @@ router.get('/dashboard', asyncHandler(async (_req, res) => {
 router.get('/vessels', asyncHandler(async (req, res) => {
   const data = await shippingLineService.getVessels(req.query.search);
   res.json({ success: true, data });
+}));
+
+router.post('/vessels', ...manifestWriter, asyncHandler(async (req, res) => {
+  const user = req.user ? req.user.username : 'shipping01';
+  const data = await shippingLineService.createVessel(req.body, user);
+  res.status(201).json({ success: true, message: 'Thêm tàu thành công', data });
 }));
 
 router.get('/voyages', asyncHandler(async (req, res) => {

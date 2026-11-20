@@ -24,7 +24,7 @@ public class ReeferMonitoringSimulatorWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        bool isEnabled = _configuration.GetValue<bool>("ReeferSimulator:Enabled", true);
+        bool isEnabled = _configuration.GetValue<bool>("ReeferSimulator:Enabled");
         int intervalSeconds = _configuration.GetValue<int>("ReeferSimulator:IntervalSeconds", 6);
 
         if (!isEnabled)

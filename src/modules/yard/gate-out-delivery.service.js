@@ -1,6 +1,7 @@
 'use strict';
 
 const { Op } = require('sequelize');
+const evidenceStorage = require('../../utils/evidenceStorage');
 const { v4: uuidv4 } = require('uuid');
 const { sequelize } = require('../../config/database');
 const { YardGateOutRequest } = require('../../models/YardGateOutRequest');
@@ -279,9 +280,13 @@ class GateOutDeliveryService {
     let containerReady = true;
     let yardReadyReason = 'Container sẵn sàng tại ô bãi chỉ định, không có chướng ngại vật.';
     if (yardReq) {
-      if (yardReq.blocking_containers > 0) {
+      // Dùng số cont chắn thực tế từ bản đồ bãi; cột blocking_containers chỉ là fallback khi không tra được ô
+      const realBlocking = await require('./yard.service').countRealBlockingContainers(yardReq);
+      const blockingCount = realBlocking !== null ? realBlocking : (yardReq.blocking_containers || 0);
+      yardReq.blocking_containers = blockingCount;
+      if (blockingCount > 0) {
         containerReady = false;
-        yardReadyReason = `Container hiện đang bị ${yardReq.blocking_containers} container khác đè phía trên. RTG đang tiến hành đảo chuyển, dự kiến 15 phút.`;
+        yardReadyReason = `Container hiện đang bị ${blockingCount} container khác đè phía trên. RTG đang tiến hành đảo chuyển, dự kiến 15 phút.`;
         failureReasons.push(`[Ô bãi]: ${yardReadyReason}`);
       } else {
         yardReadyReason = `Container đã sẵn sàng tại vị trí ô bãi ${yardReq.yard_slot} (Khu ${yardReq.yard_block}, Dãy ${yardReq.yard_bay}, Tầng ${yardReq.yard_tier}).`;
@@ -413,8 +418,30 @@ class GateOutDeliveryService {
       visitId = 'bbf2e357-b18a-465d-a7e0-dc853661b3d7';
     }
 
+    // Lệnh giao hàng điện tử (e-D/O) thực tế của container, để in lên phiếu; không có thì để trống (UI hiện "—")
+    let deliveryOrder = null;
+    try {
+      const [doRow] = await sequelize.query(`
+        SELECT do_number, valid_until, bl_number
+        FROM delivery_orders
+        WHERE containers::text ILIKE :pattern OR bl_number = :booking
+        ORDER BY (containers::text ILIKE :pattern) DESC, created_at DESC
+        LIMIT 1
+      `, {
+        replacements: { pattern: `%${yardReq.container_id}%`, booking: yardReq.booking_code || '' },
+        type: sequelize.QueryTypes.SELECT,
+      });
+      deliveryOrder = doRow || null;
+    } catch (e) {
+      console.warn('[EIR Issue] Không tra được e-D/O:', e.message);
+    }
+
     // 4. Lưu phiếu EIR vào bảng eir_transactions (Bất biến)
     const rawPayload = {
+      eDoNo: deliveryOrder?.do_number || null,
+      eDoValidUntil: deliveryOrder?.valid_until || null,
+      driverPhone: yardReq.driver_phone || null,
+      jobType: 'Giao hàng nhập (Delivery - lấy hàng nguyên ra khỏi bãi)',
       containerNumber: yardReq.container_id,
       containerType: yardReq.container_type,
       cargoType: yardReq.cargo_type,
@@ -422,7 +449,7 @@ class GateOutDeliveryService {
       condition: finalCondition,
       hasDamage: Boolean(hasDamage),
       damageDetails: Array.isArray(damageDetails) ? damageDetails : [],
-      damagePhotos: Array.isArray(damagePhotos) ? damagePhotos : [],
+      damagePhotos: await evidenceStorage.storeAll(damagePhotos, 'eir-damage'),
       yardSlot: yardReq.yard_slot,
       yardBlock: yardReq.yard_block,
       rtgCrane: yardReq.rtg_crane,
@@ -543,6 +570,10 @@ class GateOutDeliveryService {
         cargoType: yardReq.cargo_type,
         truckPlate: finalTruck,
         driverName: finalDriver,
+        driverPhone: yardReq.driver_phone || null,
+        eDoNo: deliveryOrder?.do_number || null,
+        eDoValidUntil: deliveryOrder?.valid_until || null,
+        jobType: rawPayload.jobType,
         sealNumber: finalSeal,
         condition: finalCondition,
         hasDamage: Boolean(hasDamage),

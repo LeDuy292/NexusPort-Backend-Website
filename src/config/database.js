@@ -1,7 +1,7 @@
 'use strict';
 
 const { Sequelize } = require('sequelize');
-const { db } = require('./env');
+const { db, nodeEnv } = require('./env');
 
 const sequelize = new Sequelize(db.name, db.user, db.password, {
   host: db.host,
@@ -48,9 +48,14 @@ async function connectDB() {
 }
 
 /**
- * Đồng bộ schema (chỉ dùng trong dev/test, dùng migrations ở production).
+ * Chỉ đồng bộ schema cho PostgreSQL cục bộ trong dev/test.
  */
 async function syncDB(options = {}) {
+  const host = db.host?.trim().toLowerCase();
+  if (!['development', 'test'].includes(nodeEnv) ||
+      !['localhost', '127.0.0.1', '::1', '[::1]'].includes(host)) {
+    throw new Error('Schema sync requires a local PostgreSQL database in development or test. Apply migrations to shared databases.');
+  }
   await sequelize.sync(options);
   console.log('[DB] Schema đã đồng bộ.');
 }

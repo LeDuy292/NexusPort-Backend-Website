@@ -92,7 +92,10 @@ function buildLayoutSnapshot(rows, generatedAt = new Date().toISOString()) {
 async function getLayoutSnapshot() {
   const { sequelize } = require("../../config/database");
   // One statement gives consistent occupancy and physical container positions.
-  const [rows] = await sequelize.query(`
+  // JIT của Postgres tốn ~2.7s biên dịch cho câu truy vấn này (chạy thật chỉ ~0.7s) nên tắt cho riêng transaction này.
+  const [rows] = await sequelize.transaction(async (transaction) => {
+    await sequelize.query('SET LOCAL jit = off', { transaction });
+    return sequelize.query(`
     SELECT yb.id AS "blockId", yb.code AS block, yb.name AS "blockName",
       ys.id, ys.bay, ys.row_no AS row, ys.tier,
       COALESCE(
@@ -174,8 +177,31 @@ async function getLayoutSnapshot() {
     ) bk ON true
     LEFT JOIN carriers carr ON carr.id = bk.carrier_id
     WHERE yb.is_active=true
-    ORDER BY yb.code,ys.bay,ys.row_no,ys.tier`);
+    ORDER BY yb.code,ys.bay,ys.row_no,ys.tier`, { transaction });
+  });
   return buildLayoutSnapshot(rows);
+}
+
+// Snapshot khá nặng (nhiều LATERAL JOIN trên DB từ xa) nên các màn hình chỉ đọc dùng bản cache ngắn hạn,
+// các request đồng thời dùng chung 1 lần truy vấn.
+const SNAPSHOT_TTL_MS = 15 * 1000;
+let snapshotCache = null;
+let snapshotCachedAt = 0;
+let snapshotInFlight = null;
+
+function getLayoutSnapshotCached(ttlMs = SNAPSHOT_TTL_MS) {
+  if (snapshotCache && Date.now() - snapshotCachedAt < ttlMs) return Promise.resolve(snapshotCache);
+  if (!snapshotInFlight) {
+    snapshotInFlight = getLayoutSnapshot()
+      .then((snap) => { snapshotCache = snap; snapshotCachedAt = Date.now(); return snap; })
+      .finally(() => { snapshotInFlight = null; });
+  }
+  return snapshotInFlight;
+}
+
+function invalidateLayoutSnapshotCache() {
+  snapshotCache = null;
+  snapshotCachedAt = 0;
 }
 
 function blockDirectory(snapshot) {
@@ -196,5 +222,7 @@ module.exports = {
   referenceLayout,
   buildLayoutSnapshot,
   getLayoutSnapshot,
+  getLayoutSnapshotCached,
+  invalidateLayoutSnapshotCache,
   blockDirectory,
 };

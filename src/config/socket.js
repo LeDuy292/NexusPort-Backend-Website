@@ -84,7 +84,7 @@ function initSocket(server) {
     }
 
     // Tham gia room nhân viên cổng (Gate Officer)
-    if (role === 'gate officer' || role === 'administrator') {
+      if (['gate officer', 'gate', 'administrator', 'admin'].includes(role)) {
       socket.join('gate:all');
     }
 

@@ -536,8 +536,7 @@ public class BookingController : ControllerBase
     private bool IsCarrierRole()
     {
         var role = _currentUser.Role;
-        return string.Equals(role, "Carrier", StringComparison.OrdinalIgnoreCase) ||
-               string.Equals(role, "Transport Company", StringComparison.OrdinalIgnoreCase) ||
+        return string.Equals(role, "Transport Company", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(role, "Carrier Staff", StringComparison.OrdinalIgnoreCase);
     }
 

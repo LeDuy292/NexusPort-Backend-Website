@@ -29,8 +29,8 @@ export const driverRouteQuery = `
  dest.slot_id AS "slotId",dest.zone,dest.block_code AS "blockCode",dest.bay,dest.row_no AS row,dest.tier,dest.slot_status AS "slotStatus",
  op."Id" AS "operationId",op."TaskCode" AS "taskCode",op."OperationType" AS "operationType",op."Status" AS "operationStatus",
  COALESCE(NULLIF(btrim(op."ToLocation"),''),CASE WHEN dest.slot_id IS NOT NULL THEN concat(dest.block_code,'-',dest.bay,'-',dest.row_no,'-',dest.tier) END,
-   CASE WHEN op."Id" IS NULL AND ri.map_data->>'source'='demo_admission' THEN ri.map_data->>'handoverLocation' END) AS "targetLocation",
- CASE WHEN op."Id" IS NOT NULL THEN 'operation' WHEN dest.reserved THEN 'reservation'
+   CASE WHEN ri.map_data->>'source'='demo_admission' THEN ri.map_data->>'handoverLocation' END) AS "targetLocation",
+ CASE WHEN NULLIF(btrim(op."ToLocation"),'') IS NOT NULL THEN 'operation' WHEN dest.reserved THEN 'reservation'
    WHEN dest.slot_id IS NOT NULL THEN 'container_position' WHEN ri.map_data->>'source'='demo_admission' THEN 'demo_admission' END AS "destinationSource",
  ri.id AS "instructionId",ri.from_gate AS "fromGate",ri.route_detail AS "routeDetail",ri.map_data AS "mapData",
  au.confirmed_at AS "containerConfirmedAt",ev.occurred_at AS "yardCompletedAt",
@@ -111,8 +111,8 @@ export class DriverRouteRepository {
   async findForDriver(driverId: string): Promise<DriverRouteRow[]> {
     return (await query(driverRouteQuery,[driverId,null,null])).rows;
   }
-  async findForDispatcher(): Promise<DriverRouteRow[]> {
-    return (await query(driverRouteQuery,[null,null,null])).rows;
+  async findForDispatcher(bookingId: string): Promise<DriverRouteRow[]> {
+    return (await query(driverRouteQuery,[null,null,bookingId])).rows;
   }
   async findForDriverAndContainer(driverId: string,containerId: string,bookingId?: string): Promise<DriverRouteRow | null> {
     const rows = (await query(driverRouteQuery,[driverId,containerId,bookingId ?? null])).rows;
