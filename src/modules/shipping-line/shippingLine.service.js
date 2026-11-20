@@ -207,10 +207,27 @@ class ShippingLineService {
   // ═══════════════════════════════════════════════════════════════════════════
   // 2. VESSEL & VOYAGE MANAGEMENT
   // ═══════════════════════════════════════════════════════════════════════════
-  async getVessels(search) {
-    if (!search) return vessels;
+  /**
+   * Tài khoản Hãng tàu chỉ thấy dữ liệu của hãng mình. Các vai trò khác (Administrator, Dispatcher…)
+   * và lời gọi nội bộ không truyền actor thì thấy tất cả.
+   */
+  async lineScope(actor) {
+    if (!actor || actor.role !== 'Shipping Line') return null;
+    return voyageSync.lineKeyOfUser(actor.id);
+  }
+
+  async getVessels(search, actor) {
+    const lineKey = await this.lineScope(actor);
+    let list = vessels;
+    if (lineKey) {
+      await voyageSync.syncFromDb(voyages, vessels);
+      // Tàu của hãng = tàu hãng tự thêm, hoặc tàu đang chạy trên chuyến của hãng
+      const usedByMe = new Set(voyages.filter(v => v.lineKey === lineKey).map(v => String(v.vesselName).toUpperCase()));
+      list = vessels.filter(v => v.lineKey === lineKey || usedByMe.has(String(v.vesselName).toUpperCase()));
+    }
+    if (!search) return list;
     const q = search.trim().toLowerCase();
-    return vessels.filter(
+    return list.filter(
       v => v.vesselName.toLowerCase().includes(q) ||
            v.imoNumber.includes(q) ||
            v.callSign.toLowerCase().includes(q)
@@ -239,14 +256,16 @@ class ShippingLineService {
       capacityTeu: Math.round(capacityTeu),
       status: 'ACTIVE',
       createdBy: user,
+      lineKey: await voyageSync.lineKeyOfUsername(user),
     };
     vessels.unshift(vessel);
     return vessel;
   }
 
-  async getVoyages(filters = {}) {
+  async getVoyages(filters = {}, actor) {
     await voyageSync.syncFromDb(voyages, vessels);
-    let result = [...voyages];
+    const lineKey = await this.lineScope(actor);
+    let result = lineKey ? voyages.filter(v => v.lineKey === lineKey) : [...voyages];
     if (filters.status) {
       result = result.filter(v => v.status === filters.status);
     } else if (String(filters.includeCompleted) !== 'true') {
@@ -332,6 +351,7 @@ class ShippingLineService {
       remarks: payload.remarks || '',
       manifestCount: 0,
       containerCount: 0,
+      lineKey: await voyageSync.lineKeyOfUsername(user),
     };
 
     // Chuyến xuất ghi luôn vào danh sách chuyến xuất trong DB (booking / ePort dùng chung)

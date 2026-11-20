@@ -22,16 +22,36 @@ const fromVn = (s) => (s ? new Date(String(s).includes('T') ? s : String(s).repl
 const DB_TO_LINE_STATUS = { Scheduled: 'SCHEDULED', Loading: 'OPERATING', Closed: 'OPERATING', Departed: 'DEPARTED' };
 const LINE_TO_DB_STATUS = (status) => (['DEPARTED', 'COMPLETED'].includes(status) ? 'Departed' : status === 'OPERATING' ? 'Loading' : 'Scheduled');
 
+/**
+ * Khóa "hãng tàu" của một tài khoản: shipping_line_id nếu có (các tài khoản cùng hãng dùng chung dữ liệu),
+ * ngược lại dùng chính id tài khoản. Dùng để gắn chủ sở hữu cho tàu / chuyến và lọc theo hãng đang đăng nhập.
+ */
+async function lineKeyOfUser(userId) {
+  if (!userId) return null;
+  const [row] = await sequelize.query(
+    `SELECT COALESCE((SELECT shipping_line_id::text FROM shipping_line_accounts WHERE user_id = :id LIMIT 1), :id::text) AS k`,
+    { replacements: { id: userId }, type: QueryTypes.SELECT },
+  );
+  return row?.k || null;
+}
+
+async function lineKeyOfUsername(username) {
+  const [user] = await sequelize.query('SELECT id FROM users WHERE username = :u LIMIT 1', { replacements: { u: username }, type: QueryTypes.SELECT });
+  return lineKeyOfUser(user?.id);
+}
+
 /** Kéo chuyến xuất trong DB vào danh sách chuyến của Hãng tàu (thêm mới hoặc cập nhật tuyến / mốc giờ). */
 async function syncFromDb(voyages, vessels) {
   const rows = await sequelize.query(
-    `SELECT id, voyage_number, vessel_name, port_of_loading, port_of_discharge, etd, cy_cutoff, vgm_cutoff, status
-       FROM export_voyages ORDER BY etd`,
+    `SELECT v.id, v.voyage_number, v.vessel_name, v.port_of_loading, v.port_of_discharge, v.etd, v.cy_cutoff, v.vgm_cutoff, v.status,
+            COALESCE((SELECT a.shipping_line_id::text FROM shipping_line_accounts a WHERE a.user_id = v.line_user_id LIMIT 1), v.line_user_id::text) AS line_key
+       FROM export_voyages v ORDER BY v.etd`,
     { type: QueryTypes.SELECT },
   );
   for (const r of rows) {
     const no = String(r.voyage_number).toUpperCase();
     const fromDb = {
+      lineKey: r.line_key,
       dbVoyageId: r.id,
       pol: r.port_of_loading,
       pod: r.port_of_discharge,
@@ -105,4 +125,4 @@ async function updateInDb(voyage) {
   }
 }
 
-module.exports = { syncFromDb, createInDb, updateInDb, isExportRoute };
+module.exports = { syncFromDb, createInDb, updateInDb, isExportRoute, lineKeyOfUser, lineKeyOfUsername };

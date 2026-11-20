@@ -112,6 +112,16 @@ export function createManifestRouter(repository = new ManifestRepository()): Rou
       sendSuccess(res, await repository.lookupContainer(number));
     } catch (e) { next(e); }
   });
+  router.get('/bill-check', async (req: ManifestRequest, res, next) => {
+    try {
+      requireShippingLine(req);
+      const blNumber = String(req.query.blNumber || '').trim().toUpperCase();
+      if (!blNumber || blNumber.length > 100) throw new ValidationError('Số vận đơn phải có từ 1 đến 100 ký tự.');
+      const exclude = req.query.excludeManifestId ? parseId(String(req.query.excludeManifestId)) : undefined;
+      const used = await repository.usedBillNumbers(req.manifestOwner!, [blNumber], exclude);
+      sendSuccess(res, { blNumber, available: used.length === 0 });
+    } catch (e) { next(e); }
+  });
   router.get('/:id', async (req: ManifestRequest, res, next) => {
     try { sendSuccess(res, await repository.detail(req.manifestOwner!, parseId(req.params.id))); } catch (e) { next(e); }
   });

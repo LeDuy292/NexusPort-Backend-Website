@@ -32,8 +32,8 @@ router.get('/dashboard', authenticate, authorize(ROLES.SHIPPING_LINE, ROLES.ADMI
 }));
 
 // 2. Vessels & Voyages
-router.get('/vessels', asyncHandler(async (req, res) => {
-  const data = await shippingLineService.getVessels(req.query.search);
+router.get('/vessels', authenticate, asyncHandler(async (req, res) => {
+  const data = await shippingLineService.getVessels(req.query.search, req.user);
   res.json({ success: true, data });
 }));
 
@@ -43,8 +43,8 @@ router.post('/vessels', ...manifestWriter, asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, message: 'Thêm tàu thành công', data });
 }));
 
-router.get('/voyages', asyncHandler(async (req, res) => {
-  const data = await shippingLineService.getVoyages(req.query);
+router.get('/voyages', authenticate, asyncHandler(async (req, res) => {
+  const data = await shippingLineService.getVoyages(req.query, req.user);
   res.json({ success: true, data });
 }));
 

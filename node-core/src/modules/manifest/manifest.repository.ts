@@ -34,7 +34,8 @@ export class ManifestRepository {
   async lookupContainers(numbers: string[]): Promise<RegisteredEquipment[]> {
     return (await query(`${registeredEquipment} WHERE c.container_no=ANY($1::text[]) AND NOT c.identity_quarantined`, [numbers])).rows;
   }
-  async usedBillNumbers(owner: string, numbers: string[]): Promise<string[]> {
+  async usedBillNumbers(owner: string, numbers: string[], excludeManifestId?: string): Promise<string[]> {
+    if (excludeManifestId) return (await query('SELECT bl_number FROM shipping_manifest_bills WHERE owner_id=$1 AND bl_number=ANY($2::text[]) AND manifest_id<>$3', [owner, numbers, excludeManifestId])).rows.map(r => r.bl_number);
     return (await query('SELECT bl_number FROM shipping_manifest_bills WHERE owner_id=$1 AND bl_number=ANY($2::text[])', [owner, numbers])).rows.map(r => r.bl_number);
   }
   async lookupContainer(number: string): Promise<RegisteredEquipment | null> {
