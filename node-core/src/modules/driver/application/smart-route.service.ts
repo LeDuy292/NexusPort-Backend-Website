@@ -5,11 +5,14 @@ import {
   returnsToMainRoad,
 } from "../../../shared/yard/tien-sa-map";
 import { createHash } from "crypto";
+import tienSaPlan from "../../../shared/yard/tien-sa-plan.json";
 import {
   RouteNode,
   RouteTarget,
   SmartRoute,
   shortestRoute,
+  turnByTurn,
+  SIM_SPEED_MPS,
 } from "../domain/smart-route";
 import { DriverRouteRow } from "../infrastructure/driver-route.repository";
 import {
@@ -107,7 +110,12 @@ export class SmartRouteService {
           ? "YARD_LOCATION_NOT_ASSIGNED"
           : (snapshot.errorCode ?? "YARD_MAP_NOT_CONFIGURED"),
       );
-    const map = simple ? buildTienSaMap() : snapshot.map!;
+    const configured = simple ? buildTienSaMap() : snapshot.map!;
+    // Bản đồ cấu hình trong DB cùng phiên bản mặt bằng Tiên Sa vẫn phải mang nhãn terminalPlan để web / app chịu vẽ đường đi lên mặt bằng.
+    const map =
+      !configured.terminalPlan && configured.version === tienSaPlan.version
+        ? { ...configured, terminalPlan: { version: tienSaPlan.version } }
+        : configured;
     if (simple && snapshot.map) {
       const same = snapshot.map.version === map.version;
       if (
@@ -217,6 +225,13 @@ export class SmartRouteService {
           ? "Đi tiếp ra đường sau và theo đường nội bộ đến cổng ra."
           : "Đi từ đường chính vào làn giao nhận; sau khi làm hàng, đi tiếp ra đường sau để ra cổng.";
     }
+    // Sơ đồ mô phỏng (mỗi đoạn chỉ 1 m): chỉ đường rẽ trái/phải theo toạ độ và quy đổi khoảng cách mô phỏng.
+    const placeholder = !simple && path.segments.every((edge) => edge.distanceMeters <= 1);
+    const guide = placeholder ? turnByTurn(path.waypoints, path.segments) : null;
+    if (guide) {
+      result.distanceMeters = guide.meters;
+      result.estimatedSeconds = Math.max(1, Math.ceil(guide.meters / SIM_SPEED_MPS));
+    }
     result.directions = [
       ...(simple && target.source === "gate" && returnsToMainRoad(assignedBlock)
         ? [
@@ -224,7 +239,7 @@ export class SmartRouteService {
           ]
         : []),
       `Xuất phát từ ${result.origin.label}.`,
-      ...path.segments
+      ...(guide ? guide.steps : path.segments
         .map((edge, index) => ({ edge, index }))
         .filter(({ index }) => {
           if (!simple || index === path.segments.length - 1) return true;
@@ -242,7 +257,7 @@ export class SmartRouteService {
             (simple
               ? `Tiếp tục theo đường nội bộ đến ${path.waypoints[index + 1].label}.`
               : `Đi ${edge.distanceMeters} m đến ${path.waypoints[index + 1].label}.`),
-        ),
+        )),
       target.type === "slot"
         ? `Đến Block ${target.block}, Bay ${target.bay}, Row ${target.row}. Dừng theo hướng dẫn Yard để xử lý container tại Tier ${target.tier}.`
         : `Dừng tại khu vực được phân công: ${target.location}.`,

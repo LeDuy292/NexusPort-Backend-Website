@@ -83,12 +83,12 @@ public class GateVerificationService : IGateVerificationService
         Booking.Domain.Entities.Booking? booking = null;
 
         // 1. Tra cứu Vehicle & Driver trong DB trước theo biển số
-        var vehicles = await _context.Set<Vehicle.Domain.Entities.Vehicle>().ToListAsync(cancellationToken);
-        var matchedVehicle = vehicles.FirstOrDefault(v => NormalizePlate(v.PlateNumber) == normalizedDetectedPlate);
+        var matchedVehicle = await FindVehicleByPlateAsync(normalizedDetectedPlate, cancellationToken);
         if (matchedVehicle == null && !string.IsNullOrWhiteSpace(request.RfidTag))
         {
-            matchedVehicle = vehicles.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v.RfidTag) && 
-                string.Equals(v.RfidTag.Trim(), request.RfidTag.Trim(), StringComparison.OrdinalIgnoreCase));
+            var rfid = request.RfidTag.Trim().ToUpper();
+            matchedVehicle = await _context.Set<Vehicle.Domain.Entities.Vehicle>()
+                .FirstOrDefaultAsync(v => v.RfidTag != null && v.RfidTag.Trim().ToUpper() == rfid, cancellationToken);
         }
 
         if (!string.IsNullOrWhiteSpace(request.BookingNumber))
@@ -192,6 +192,18 @@ public class GateVerificationService : IGateVerificationService
         var failureReason = ruleEvalResult.FailureReason;
         var message = ruleEvalResult.Message;
 
+        // Cổng ra: xe phải đã Gate In, chưa Gate Out và đã hoàn thành giao nhận container (bãi đã nhận, tài xế đã xác nhận).
+        if (isGateOut && booking != null && string.Equals(status, "PASS", StringComparison.OrdinalIgnoreCase))
+        {
+            var gateOutCheck = await GateOutDeliveryAsync(booking.Id, cancellationToken);
+            if (gateOutCheck.HasValue)
+            {
+                status = "FAIL";
+                failureReason = gateOutCheck.Value.Reason;
+                message = gateOutCheck.Value.Message;
+            }
+        }
+
         // 4. Khởi tạo và lưu GateVerificationRecord vào DB
         var verificationCode = $"GVR-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
         var record = new GateVerificationRecord
@@ -284,6 +296,29 @@ public class GateVerificationService : IGateVerificationService
         };
     }
 
+    private async Task<(string Reason, string Message)?> GateOutDeliveryAsync(Guid bookingId, CancellationToken cancellationToken)
+    {
+        var gatedIn = await _context.Database.SqlQueryRaw<int>(
+            "SELECT count(*)::int AS \"Value\" FROM gate_transactions WHERE booking_id={0} AND gate_type='gate_in' AND status='completed'",
+            bookingId).SingleAsync(cancellationToken);
+        if (gatedIn == 0)
+            return ("GATE_OUT_NOT_GATED_IN", "Xe chưa Gate In theo booking này nên không thể ra cổng.");
+        var gatedOut = await _context.Database.SqlQueryRaw<int>(
+            "SELECT count(*)::int AS \"Value\" FROM gate_transactions g WHERE g.booking_id={0} AND g.gate_type='gate_out' AND g.status='completed' " +
+            "AND g.checked_at >= (SELECT max(x.checked_at) FROM gate_transactions x WHERE x.booking_id={0} AND x.gate_type='gate_in' AND x.status='completed')",
+            bookingId).SingleAsync(cancellationToken);
+        if (gatedOut > 0)
+            return ("GATE_OUT_ALREADY", "Xe đã được ghi nhận ra cổng trước đó.");
+        var pending = await _context.Database.SqlQueryRaw<int>(
+            "SELECT ((SELECT count(*) FROM booking_containers bc WHERE bc.booking_id={0} AND NOT EXISTS(" +
+            "SELECT 1 FROM container_confirmation_audits a WHERE a.booking_id=bc.booking_id AND a.container_id=bc.container_id)) + " +
+            "(SELECT count(*) FROM yard_tasks y WHERE y.booking_id={0} AND y.\"IsDeleted\"=false AND lower(y.\"Status\") NOT IN ('completed','cancelled','canceled')))::int AS \"Value\"",
+            bookingId).SingleAsync(cancellationToken);
+        if (pending > 0)
+            return ("GATE_OUT_DELIVERY_INCOMPLETE", "Xe chưa hoàn thành giao nhận container (bãi chưa xác nhận nhận hoặc tài xế chưa xác nhận). Chưa cho ra cổng.");
+        return null;
+    }
+
     private async Task PublishDispatcherEventAsync(GateVerificationRecord record, string gateType, CancellationToken cancellationToken)
     {
         try
@@ -306,8 +341,7 @@ public class GateVerificationService : IGateVerificationService
         var normalizedPlate = NormalizePlate(request.VehiclePlate);
 
         // 1. Tìm Vehicle
-        var vehicles = await _context.Set<Vehicle.Domain.Entities.Vehicle>().ToListAsync(cancellationToken);
-        var vehicle = vehicles.FirstOrDefault(v => NormalizePlate(v.PlateNumber) == normalizedPlate);
+        var vehicle = await FindVehicleByPlateAsync(normalizedPlate, cancellationToken);
 
         // 2. Tìm Booking
         Booking.Domain.Entities.Booking? booking = null;
@@ -422,8 +456,7 @@ public class GateVerificationService : IGateVerificationService
         if (!string.IsNullOrWhiteSpace(plate))
         {
             var normPlate = NormalizePlate(plate);
-            var vehicles = await _context.Set<Vehicle.Domain.Entities.Vehicle>().ToListAsync(cancellationToken);
-            vehicle = vehicles.FirstOrDefault(v => NormalizePlate(v.PlateNumber) == normPlate);
+            vehicle = await FindVehicleByPlateAsync(normPlate, cancellationToken);
         }
 
         if (booking == null && vehicle != null)
@@ -446,12 +479,7 @@ public class GateVerificationService : IGateVerificationService
             throw new NexusPort.Shared.Exceptions.ValidationException("Booking", "Cần booking hợp lệ trước khi xác nhận vào cổng.");
         if(evidence.BookingId!=booking.Id)
             throw new NexusPort.Shared.Exceptions.ValidationException("Verification","Xác minh không thuộc booking này.");
-        if (container != null && !await _context.Set<Booking.Domain.Entities.BookingContainer>()
-            .AnyAsync(x => x.BookingId == booking.Id && x.ContainerId == container.Id && x.ContainerVisitId != null, cancellationToken))
-            throw new NexusPort.Shared.Exceptions.ValidationException("Container", "Container không thuộc lượt bãi của booking này.");
-        if (booking.IsCombined && (container == null || !await _context.Set<Booking.Domain.Entities.BookingOperation>()
-            .AnyAsync(op => op.BookingId == booking.Id && op.ContainerId == container.Id && op.OperationType == "Export" && op.ExpectedGateDirection == "GateIn", cancellationToken)))
-            throw new NexusPort.Shared.Exceptions.ValidationException("Container", "Chuyến hai chiều phải vào cổng cùng container Giao đã đăng ký.");
+        // Cổng vào chỉ đối soát biển số + lịch booking + lệnh vào cổng; container chỉ được chụp ảnh giám định, không đối soát.
 
         await using var gateTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
         await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT id FROM bookings WHERE id={booking.Id} FOR UPDATE", cancellationToken);
@@ -628,6 +656,17 @@ public class GateVerificationService : IGateVerificationService
 
         await _verificationRepository.UpdateAsync(record, cancellationToken);
         return MapToDto(record);
+    }
+
+    // Tra xe theo biển số ngay trong database (một truy vấn nhỏ) thay vì tải toàn bộ bảng xe; chỉ khi không khớp mới quét đầy đủ để giữ đúng kết quả.
+    private async Task<Vehicle.Domain.Entities.Vehicle?> FindVehicleByPlateAsync(string normalizedPlate, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(normalizedPlate)) return null;
+        var set = _context.Set<Vehicle.Domain.Entities.Vehicle>();
+        var found = await set.FirstOrDefaultAsync(v => v.PlateNumber.Replace("-", "").Replace(".", "").Replace(" ", "").ToUpper() == normalizedPlate, cancellationToken);
+        if (found != null) return found;
+        var all = await set.ToListAsync(cancellationToken);
+        return all.FirstOrDefault(v => NormalizePlate(v.PlateNumber) == normalizedPlate);
     }
 
     private static string NormalizePlate(string? plate)

@@ -17,6 +17,7 @@ public class YardReceipt : BaseEntity, IAggregateRoot
     public string InspectorName { get; set; } = string.Empty;
     public string YardBlockCode { get; set; } = string.Empty;
     public string LocationCoordinate { get; set; } = string.Empty; // Block-Bay-Row-Tier
+    public string PhotoUrls { get; set; } = "[]"; // Mảng URL ảnh container trên S3 (JSON)
 
     public YardReceipt() { }
 

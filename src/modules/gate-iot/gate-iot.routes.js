@@ -7,7 +7,7 @@ const { sequelize } = require('../../config/database');
 const { QueryTypes } = require('sequelize');
 const { authenticate } = require('../../middlewares/authenticate');
 const { authorize } = require('../../middlewares/authorize');
-const { authorizeEntry, claimInboundHardwareOpen, entryGate, normalizePlate } = require('./gate-entry-admission');
+const { authorizeEntry, claimInboundHardwareOpen, entryGate, normalizePlate, recordEntryPassage } = require('./gate-entry-admission');
 
 const router = Router();
 const gateOfficer = authorize('Gate Officer', 'Gate', 'Administrator', 'Admin');
@@ -15,6 +15,17 @@ const gateOfficer = authorize('Gate Officer', 'Gate', 'Administrator', 'Admin');
 router.post('/entry-admission', authenticate, gateOfficer, async (req, res, next) => {
   try {
     const data = await authorizeEntry(req.user.id, req.body ?? {});
+    res.json({ success: true, data });
+  } catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
+    next(error);
+  }
+});
+
+// Cổng mở tự động: xe được điều độ gọi sớm nhất qua cổng vào, ghi Gate In và đổi trạng thái chuyến / lịch hẹn.
+router.post('/auto-passage', authenticate, gateOfficer, async (req, res, next) => {
+  try {
+    const data = await recordEntryPassage({ source: 'auto' });
     res.json({ success: true, data });
   } catch (error) {
     if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
@@ -59,20 +70,24 @@ router.get('/verify-plate', async (req, res) => {
     }
 
     const result = await sequelize.query(
-      `SELECT id, booking_code, vehicle_plate, status, appointment_start, appointment_end, driver_name, gate_type
-       FROM bookings
-       WHERE status IN ('approved', 'ready', 'checked_in')
-         AND appointment_start <= now()
-         AND appointment_end   >= now()
-         AND UPPER(REPLACE(REPLACE(REPLACE(vehicle_plate, '-', ''), '.', ''), ' ', '')) = :normalized
-       ORDER BY appointment_start ASC
+      // Cổng ra: xe đã Gate In, chưa Gate Out và đã hoàn thành giao nhận container (bãi đã nhận, tài xế đã xác nhận).
+      `SELECT b.id, b.booking_code, b.vehicle_plate, b.status, b.appointment_start, b.appointment_end, b.driver_name, b.gate_type
+       FROM bookings b
+       WHERE UPPER(REPLACE(REPLACE(REPLACE(b.vehicle_plate, '-', ''), '.', ''), ' ', '')) = :normalized
+         AND EXISTS (SELECT 1 FROM gate_transactions g WHERE g.booking_id = b.id AND g.gate_type = 'gate_in' AND g.status = 'completed')
+         AND NOT EXISTS (SELECT 1 FROM gate_transactions g WHERE g.booking_id = b.id AND g.gate_type = 'gate_out' AND g.status = 'completed')
+         AND NOT EXISTS (SELECT 1 FROM booking_containers bc WHERE bc.booking_id = b.id AND NOT EXISTS (
+           SELECT 1 FROM container_confirmation_audits a WHERE a.booking_id = bc.booking_id AND a.container_id = bc.container_id))
+         AND NOT EXISTS (SELECT 1 FROM yard_tasks y WHERE y.booking_id = b.id AND y."IsDeleted" = false
+           AND lower(y."Status") NOT IN ('completed', 'cancelled', 'canceled'))
+       ORDER BY b.updated_at DESC
        LIMIT 1`,
       { replacements: { normalized }, type: QueryTypes.SELECT }
     );
 
     if (!result || result.length === 0) {
       console.log(`[verify-plate] '${rawPlate}' (normalized: '${normalized}') → NOT FOUND`);
-      return res.json({ valid: false, reason: 'no_active_booking', plate: rawPlate });
+      return res.json({ valid: false, reason: 'gate_out_not_ready', plate: rawPlate });
     }
 
     const booking = result[0];

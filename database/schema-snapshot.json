@@ -1,5 +1,5 @@
 {
- "exportedAt": "2026-11-19T20:13:44.048Z",
+ "exportedAt": "2026-11-20T00:16:04.405Z",
  "migrations": [
   "005",
   "20260925_001",
@@ -67,7 +67,15 @@
   "20261120_061",
   "20261120_062",
   "20261120_063",
-  "20261120_064"
+  "20261120_064",
+  "20261120_065",
+  "20261120_066",
+  "20261120_069",
+  "20261120_070",
+  "20261120_071",
+  "20261120_072",
+  "20261120_073",
+  "20261120_074"
  ],
  "tables": {
   "Equipments": {
@@ -4021,6 +4029,10 @@
     "amendment_fee_status": {
      "type": "character varying",
      "nullable": true
+    },
+    "manifest_id": {
+     "type": "uuid",
+     "nullable": true
     }
    },
    "constraints": [
@@ -4303,7 +4315,7 @@
     },
     "eta": {
      "type": "timestamp with time zone",
-     "nullable": false
+     "nullable": true
     },
     "receive_from": {
      "type": "timestamp with time zone",
@@ -4403,6 +4415,10 @@
     "actual_seal_number": {
      "type": "character varying",
      "nullable": true
+    },
+    "hardware_requested_at": {
+     "type": "timestamp with time zone",
+     "nullable": true
     }
    },
    "constraints": [
@@ -4467,6 +4483,10 @@
     "gate_transaction_id": {
      "type": "uuid",
      "nullable": true
+    },
+    "source": {
+     "type": "text",
+     "nullable": false
     }
    },
    "constraints": [
@@ -4574,7 +4594,8 @@
    ],
    "triggers": [
     "trg_export_gate_passage",
-    "trg_finish_pickup_visit"
+    "trg_finish_pickup_visit",
+    "trg_sync_trip_on_gate_passage"
    ]
   },
   "gate_verification_records": {

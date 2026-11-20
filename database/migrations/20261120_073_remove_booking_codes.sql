@@ -10,7 +10,7 @@ CREATE INDEX IF NOT EXISTS ix_export_bookings_manifest ON export_bookings (manif
 UPDATE bills_of_lading SET booking_no = NULL WHERE booking_no IS NOT NULL;
 
 INSERT INTO nexusport_schema_versions(version, description)
-SELECT '20261120_068', 'Bỏ mã booking: ePort khai báo theo số vận đơn'
-WHERE NOT EXISTS (SELECT 1 FROM nexusport_schema_versions WHERE version = '20261120_068');
+SELECT '20261120_073', 'Bỏ mã booking: ePort khai báo theo số vận đơn'
+WHERE NOT EXISTS (SELECT 1 FROM nexusport_schema_versions WHERE version = '20261120_073');
 
 COMMIT;
