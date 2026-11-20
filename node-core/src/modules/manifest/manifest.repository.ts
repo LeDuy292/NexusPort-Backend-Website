@@ -105,4 +105,119 @@ export class ManifestRepository {
       WHERE owner_id=$1 AND id=$2 AND payload->>'status'='SENT_TO_PORT' RETURNING id`, [owner, id]);
     if (!result.rows[0]) throw new ConflictError('Bản khai chưa được gửi hoặc không còn khả dụng.');
   }
+  async listSyncedForPort(): Promise<any[]> {
+    const result = await query(`SELECT payload || jsonb_build_object(
+      'id', id,
+      'createdAt', created_at,
+      'revision', revision,
+      'manifestId', id,
+      'manifestNumber', payload->>'manifestNumber',
+      'voyageNumber', payload->>'voyageNumber',
+      'vesselName', payload->>'vesselName',
+      'direction', payload->>'direction',
+      'status', payload->>'status',
+      'source', 'NODE_CORE'
+    ) AS document
+    FROM shipping_manifests
+    WHERE payload->>'sentToPortAt' IS NOT NULL 
+       OR payload->>'status' IN ('SENT_TO_PORT', 'PORT_APPROVED', 'RECONCILED')
+    ORDER BY created_at DESC`);
+    return result.rows.map(r => r.document);
+  }
+  async approvePort(id: string, approvedBy = 'Cảng Tiên Sa'): Promise<any> {
+    const now = new Date().toISOString();
+    const result = await query(`UPDATE shipping_manifests SET
+      payload = jsonb_set(
+        jsonb_set(
+          jsonb_set(
+            jsonb_set(payload, '{status}', '"PORT_APPROVED"'),
+            '{portApprovalStatus}', '"PORT_APPROVED"'
+          ),
+          '{portApprovedAt}', to_jsonb($2::text)
+        ),
+        '{portApprovedBy}', to_jsonb($3::text)
+      ),
+      revision = revision + 1
+      WHERE id::text = $1 
+         OR payload->>'manifestNumber' = $1 
+         OR payload->>'id' = $1
+         OR payload->>'voyageNumber' = $1 
+         OR payload->'voyageInfo'->>'voyageNumber' = $1 
+         OR payload->>'vesselName' = $1 
+         OR payload->'voyageInfo'->>'vesselName' = $1
+      RETURNING payload || jsonb_build_object('id', id, 'createdAt', created_at) AS document`, [id, now, approvedBy]);
+    if (!result.rows[0]) {
+      return { success: true, notFound: true, message: `Bản khai ${id} không tồn tại trên PostgreSQL server.` };
+    }
+    return result.rows[0].document;
+  }
+  async resetPortPending(id: string): Promise<any> {
+    const result = await query(`UPDATE shipping_manifests SET
+      payload = jsonb_set(
+        jsonb_set(payload, '{status}', '"SENT_TO_PORT"'),
+        '{portApprovalStatus}', '"PENDING_APPROVAL"'
+      ),
+      revision = revision + 1
+      WHERE id::text = $1 
+         OR payload->>'manifestNumber' = $1 
+         OR payload->>'id' = $1
+         OR payload->>'voyageNumber' = $1 
+         OR payload->'voyageInfo'->>'voyageNumber' = $1 
+         OR payload->>'vesselName' = $1 
+         OR payload->'voyageInfo'->>'vesselName' = $1
+      RETURNING payload || jsonb_build_object('id', id, 'createdAt', created_at) AS document`, [id]);
+    if (!result.rows[0]) {
+      return { success: true, notFound: true, message: `Bản khai ${id} không tồn tại trên PostgreSQL server.` };
+    }
+    return result.rows[0].document;
+  }
+  async resetAll(): Promise<any> {
+    await query(`TRUNCATE TABLE
+      shipping_manifest_bills,
+      shipping_manifests,
+      eport_service_mail_queue,
+      eport_service_payments,
+      eport_service_bills,
+      eport_service_order_events,
+      eport_service_order_states,
+      eport_service_registrations,
+      eport_service_email_verifications,
+      eport_service_drafts;`);
+
+    // Đồng thời giải phóng toàn bộ ô bãi đã đặt trước (reserved / occupied) về lại 'empty' và xóa nhiệm vụ dỡ tàu
+    try {
+      await query(`UPDATE yard_slots SET status = 'empty'::yard_slot_status WHERE status::text IN ('occupied', 'reserved')`);
+    } catch (e) {
+      console.warn('Lỗi reset yard_slots:', e);
+    }
+    try {
+      await query(`DELETE FROM container_positions`);
+    } catch (e) {
+      console.warn('Lỗi reset container_positions:', e);
+    }
+    try {
+      await query(`DELETE FROM yard_tasks`);
+    } catch (e) {
+      console.warn('Lỗi reset yard_tasks:', e);
+    }
+
+    return { success: true, message: 'Đã xóa toàn bộ bản khai, đơn ePort và giải phóng toàn bộ vị trí đặt chỗ bãi để test lại từ đầu.' };
+  }
+  async savePortBookings(id: string, bookings: any[]): Promise<any> {
+    const result = await query(`UPDATE shipping_manifests SET
+      payload = jsonb_set(payload, '{generatedBookings}', $2::jsonb),
+      revision = revision + 1
+      WHERE id::text = $1 
+         OR payload->>'manifestNumber' = $1
+         OR payload->>'id' = $1
+         OR payload->>'voyageNumber' = $1 
+         OR payload->'voyageInfo'->>'voyageNumber' = $1 
+         OR payload->>'vesselName' = $1 
+         OR payload->'voyageInfo'->>'vesselName' = $1
+      RETURNING id`, [id, JSON.stringify(bookings)]);
+    if (!result.rows[0]) {
+      return { success: true, notFound: true, message: `Bản khai ${id} không tồn tại trên PostgreSQL server.` };
+    }
+    return { id: result.rows[0].id, count: bookings.length };
+  }
 }

@@ -325,6 +325,28 @@ public class DriverController : ControllerBase
         return Ok(photos);
     }
 
+    private async Task PopulateAccountLinkAsync(DriverDto item, CancellationToken ct)
+    {
+        var db = HttpContext.RequestServices.GetRequiredService<NexusPort.Infrastructure.Database.AppDbContext>();
+        var accountLinks = await db.Database.SqlQueryRaw<DriverAccountLink>("""
+            SELECT d.id AS "Id", d.user_id AS "UserId",u.username AS "Username",u.email AS "Email",u.is_active AS "AccountActive",
+              (SELECT b.booking_code FROM bookings b WHERE b.carrier_id=d.carrier_id AND b.driver_id=d.id
+                AND b.status::text NOT IN ('completed','canceled','rejected','expired') ORDER BY b.appointment_start LIMIT 1) AS "ActiveBookingCode",
+              u.invitation_pending AS "InvitationPending",u.email_verified_at AS "EmailVerifiedAt",
+              (SELECT i.expires_at FROM account_invitations i WHERE i.user_id=u.id AND i.used_at IS NULL
+                ORDER BY i.created_at DESC LIMIT 1) AS "InvitationExpiresAt"
+            FROM drivers d LEFT JOIN users u ON u.id=d.user_id WHERE d.id={0}
+            """, item.Id).ToListAsync(ct);
+        if (accountLinks.Count > 0)
+        {
+            var link = accountLinks[0];
+            item.UserId = link.UserId; item.Username = link.Username; item.Email = link.Email;
+            item.AccountActive = link.AccountActive; item.ActiveBookingCode = link.ActiveBookingCode;
+            item.InvitationPending = link.InvitationPending; item.EmailVerifiedAt = link.EmailVerifiedAt;
+            item.EmailVerified = link.EmailVerifiedAt.HasValue; item.InvitationExpiresAt = link.InvitationExpiresAt;
+        }
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<DriverDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
@@ -337,6 +359,7 @@ public class DriverController : ControllerBase
             if (item.CarrierId != userCarrierId) return Forbid();
         }
 
+        await PopulateAccountLinkAsync(item, cancellationToken);
         return Ok(item);
     }
 
@@ -358,6 +381,7 @@ public class DriverController : ControllerBase
         try
         {
             var item = await _service.UpdateAsync(id, dto, cancellationToken);
+            await PopulateAccountLinkAsync(item, cancellationToken);
             return Ok(item);
         }
         catch (KeyNotFoundException)

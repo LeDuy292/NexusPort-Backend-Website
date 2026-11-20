@@ -16,7 +16,6 @@ public static class RoleConstants
     public const string GateOfficer = "GateOfficer";
     public const string Dispatcher = "Dispatcher";
     public const string Driver = "Driver";
-    public const string Carrier = "Carrier";
 }
 
 public static class ErrorCodes

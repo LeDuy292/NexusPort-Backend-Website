@@ -128,6 +128,8 @@ public class YardReceivingInspectionDto
     public string? YardBlockCode { get; set; }
     public string? LocationCoordinate { get; set; }
     public string? InspectorName { get; set; }
+    /// <summary>Ảnh container (data URL base64) do nhân viên bãi chụp khi nhận container; tối đa 4 ảnh.</summary>
+    public List<string>? PhotoImages { get; set; }
 }
 
 public class CreateYardTaskDto
@@ -156,4 +158,18 @@ public class YardOperatorDto
     public bool IsAvailable { get; set; } = true;
     public string? CurrentTaskCode { get; set; }
 }
+
+public class ActiveYardContainerDto
+{
+    public string ContainerNo { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string Type { get; set; } = "40FT HC";
+    public string Line { get; set; } = string.Empty;
+    public string Cargo { get; set; } = string.Empty;
+    public string Weight { get; set; } = string.Empty;
+    public string Category { get; set; } = "DRY";
+    public int DwellDays { get; set; } = 2;
+    public string? NextVessel { get; set; }
+}
+
 

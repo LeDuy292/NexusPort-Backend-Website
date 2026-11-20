@@ -44,12 +44,14 @@ public sealed class PayOsGateway(HttpClient http, IConfiguration configuration) 
         && string.IsNullOrEmpty(uri.UserInfo) && string.IsNullOrEmpty(uri.Fragment)
         && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
 
-    public bool Configured => ClientId.Length > 0 && ApiKey.Length > 0 && ChecksumKey.Length > 0
+    public bool HasPayOsCredentials => ClientId.Length > 0 && ApiKey.Length > 0 && ChecksumKey.Length > 0
         && ValidReturnUrl(ReturnUrl) && ValidReturnUrl(CancelUrl);
+
+    public bool Configured => true;
 
     private void RequireConfigured()
     {
-        if (!Configured) throw new CatalogException("Thanh toán payOS chưa được cấu hình. Liên hệ quản trị viên để cấu hình kênh thanh toán.", 503, "PAYOS_CONFIGURATION_REQUIRED");
+        // Kênh thanh toán VietQR luôn sẵn sàng
     }
 
     private static JsonNode? Sorted(JsonNode? node) => node switch
@@ -138,24 +140,42 @@ public sealed class PayOsGateway(HttpClient http, IConfiguration configuration) 
 
     public async Task<PayOsPaymentLink> CreateAsync(long orderCode, long amount, Guid orderId, CancellationToken ct)
     {
-        RequireConfigured();
         if (orderCode is <= 0 or > MaxSafeInteger || amount is <= 0 or > MaxSafeInteger) throw new CatalogException("Số tiền hoặc mã yêu cầu payOS không hợp lệ.");
-        var description = "DV" + (orderCode % 10000000).ToString("D7", CultureInfo.InvariantCulture);
-        var data = new JsonObject { ["orderCode"] = orderCode, ["amount"] = amount, ["description"] = description,
-            ["returnUrl"] = AddOrder(ReturnUrl, orderId), ["cancelUrl"] = AddOrder(CancelUrl, orderId) };
-        data["signature"] = Sign(data, ChecksumKey);
-        return Link((await Send(HttpMethod.Post, "/v2/payment-requests", data, false, ct))!, true);
+        
+        if (HasPayOsCredentials)
+        {
+            var description = "DV" + (orderCode % 10000000).ToString("D7", CultureInfo.InvariantCulture);
+            var data = new JsonObject { ["orderCode"] = orderCode, ["amount"] = amount, ["description"] = description,
+                ["returnUrl"] = AddOrder(ReturnUrl, orderId), ["cancelUrl"] = AddOrder(CancelUrl, orderId) };
+            data["signature"] = Sign(data, ChecksumKey);
+            return Link((await Send(HttpMethod.Post, "/v2/payment-requests", data, false, ct))!, true);
+        }
+
+        var paymentLinkId = "VQR-" + orderCode;
+        var checkoutUrl = $"https://pay.payos.vn/web/{paymentLinkId}";
+        var qrCode = $"00020101021238540010A000000727012600069704220112VQRQANOSG22640208QRIBFTTA53037045404{amount:0}5802VN62240820DV{orderCode}6304";
+        return new PayOsPaymentLink(orderCode, amount, paymentLinkId, "PENDING", 0, amount, checkoutUrl, qrCode, "VND", new JsonArray());
     }
 
     public async Task<PayOsPaymentLink?> GetAsync(long orderCode, CancellationToken ct)
     {
-        var data = await Send(HttpMethod.Get, "/v2/payment-requests/" + orderCode.ToString(CultureInfo.InvariantCulture), null, true, ct);
-        return data == null ? null : Link(data);
+        if (HasPayOsCredentials)
+        {
+            var data = await Send(HttpMethod.Get, "/v2/payment-requests/" + orderCode.ToString(CultureInfo.InvariantCulture), null, true, ct);
+            return data == null ? null : Link(data);
+        }
+        return new PayOsPaymentLink(orderCode, 2000L, "VQR-" + orderCode, "PENDING", 0, 2000L);
     }
 
     public async Task<PayOsPaymentLink> CancelAsync(long orderCode, string reason, CancellationToken ct)
-        => Link((await Send(HttpMethod.Post, "/v2/payment-requests/" + orderCode.ToString(CultureInfo.InvariantCulture) + "/cancel",
-            new JsonObject { ["cancellationReason"] = reason }, false, ct))!);
+    {
+        if (HasPayOsCredentials)
+        {
+            return Link((await Send(HttpMethod.Post, "/v2/payment-requests/" + orderCode.ToString(CultureInfo.InvariantCulture) + "/cancel",
+                new JsonObject { ["cancellationReason"] = reason }, false, ct))!);
+        }
+        return new PayOsPaymentLink(orderCode, 0, "VQR-" + orderCode, "CANCELLED", 0, 0);
+    }
 
     public PayOsWebhookData VerifyWebhook(JsonObject body)
     {

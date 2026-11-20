@@ -97,10 +97,16 @@ export class DriverRouteService {
     } : null;
     result.target = slot ? {
       type: 'slot', location: row.targetLocation || `${slot.block}-${slot.bay}-${slot.row}-${slot.tier}`,
-      ...slot, source: row.destinationSource ?? 'reservation',
+      ...slot, source: row.destinationSource === 'reservation_record' ? 'reservation' : row.destinationSource ?? 'reservation',
+    } : row.destinationSource === 'reservation_record' && row.reservationBlock ? {
+      // Vị trí do điều độ đặt trong yêu cầu booking cổng (persistent_yard_reservations): đi đến đúng block / bay đã đặt.
+      type: 'area', location: row.reservationBlock, slotId: null, block: row.reservationBlock, zone: null,
+      bay: row.reservationBay != null ? Number(row.reservationBay) : null,
+      row: row.reservationRow != null ? Number(row.reservationRow) : null,
+      tier: row.reservationTier != null ? Number(row.reservationTier) : null, source: 'reservation',
     } : row.targetLocation?.trim() && (row.operationId || row.destinationSource === 'demo_admission') ? {
       type: 'area', location: row.targetLocation.trim(), slotId: null,
-      block: null, zone: null, bay: null, row: null, tier: null, source: row.operationId ? 'operation' : 'demo_admission',
+      block: null, zone: null, bay: null, row: null, tier: null, source: row.destinationSource === 'demo_admission' ? 'demo_admission' : 'operation',
     } : null;
     const arrived = row.destinationKey === routeDestinationKey(row) ? row.arrivedAt ?? null : null;
     const readyForExit = !!row.containerConfirmedAt && row.bookingStatus === 'completed';
@@ -142,8 +148,8 @@ export class DriverRouteService {
     return result;
   }
 
-  async monitor(): Promise<{ routes: DriverRoute[]; generatedAt: string }> {
-    return { routes: await Promise.all((await this.repository.findForDispatcher()).map(row => this.enrich(row))), generatedAt: new Date().toISOString() };
+  async monitor(bookingId: string): Promise<{ routes: DriverRoute[]; generatedAt: string }> {
+    return { routes: await Promise.all((await this.repository.findForDispatcher(bookingId)).map(row => this.enrich(row))), generatedAt: new Date().toISOString() };
   }
 
   async arrive(driverId: string, containerId: string, input: unknown): Promise<DriverRoute> {

@@ -44,7 +44,75 @@ function resolveStatusGroup(status) {
  * @param {string} driverId - UUID của Driver
  * @param {Object} query - { status, page, limit }
  */
+/**
+ * Lệnh điều phối (booking đã duyệt, giao cho tài xế) cũng là một chuyến vận chuyển của tài xế.
+ * Tạo chuyến cho các lịch hẹn của tài xế chưa có chuyến, để màn hình "Chuyến vận chuyển" khớp với lệnh điều phối.
+ * transport_trips.driver_id là id tài khoản (users.id) của tài xế.
+ */
+async function ensureTripsForDriverBookings(userId) {
+  const bookings = await sequelize.query(
+    `SELECT b.id, b.booking_code, b.booking_type::text AS booking_type, COALESCE(b.vehicle_plate, t.plate_number) AS plate, b.truck_id,
+            b.appointment_start, b.appointment_end, b.description,
+            (SELECT ct.container_no FROM booking_containers bc JOIN containers ct ON ct.id = bc.container_id WHERE bc.booking_id = b.id LIMIT 1) AS container_no,
+            (SELECT ty.code FROM booking_containers bc JOIN containers ct ON ct.id = bc.container_id
+               LEFT JOIN container_types ty ON ty.id = ct.container_type_id WHERE bc.booking_id = b.id LIMIT 1) AS container_type,
+            (SELECT ct.seal_no FROM booking_containers bc JOIN containers ct ON ct.id = bc.container_id WHERE bc.booking_id = b.id LIMIT 1) AS seal_no
+       FROM bookings b JOIN drivers dr ON dr.id = b.driver_id LEFT JOIN trucks t ON t.id = b.truck_id
+      WHERE dr.user_id = :userId AND b.status::text IN ('approved', 'ready')
+        AND NOT EXISTS (SELECT 1 FROM transport_trips x WHERE x.booking_id = b.id)`,
+    { replacements: { userId }, type: sequelize.QueryTypes.SELECT },
+  );
+  for (const b of bookings) {
+    const type = String(b.booking_type || '').toLowerCase() === 'pickup' ? 'Pickup' : 'Dropoff';
+    await createTrip({
+      driverId: userId,
+      bookingId: b.id,
+      bookingCode: b.booking_code,
+      bookingType: type,
+      truckPlate: b.plate,
+      truckId: b.truck_id,
+      containerNo: b.container_no,
+      containerType: b.container_type,
+      sealNo: b.seal_no,
+      appointmentStart: b.appointment_start,
+      appointmentEnd: b.appointment_end,
+      note: b.description || (type === 'Pickup' ? 'Lấy container theo lệnh điều phối' : 'Giao container theo lệnh điều phối'),
+    });
+  }
+  await syncTripsWithDispatch(userId);
+  return bookings.length;
+}
+
+/**
+ * Đồng bộ trạng thái chuyến theo lệnh điều phối:
+ *  - tài xế đã xác nhận lệnh gọi (dispatch "acknowledged") thì chuyến đang "Assigned" thành "Acknowledged";
+ *  - lịch hẹn bị huỷ hoặc từ chối thì chuyến chưa hoàn tất thành "Cancelled".
+ */
+async function syncTripsWithDispatch(userId) {
+  const rows = await sequelize.query(
+    `SELECT t.id, t.status, b.status::text AS booking_status, ds.status AS dispatch_status
+       FROM transport_trips t
+       JOIN bookings b ON b.id = t.booking_id
+       LEFT JOIN booking_dispatch_state ds ON ds.booking_id = b.id
+      WHERE t.driver_id = :userId AND t.status NOT IN ('Completed', 'Cancelled')`,
+    { replacements: { userId }, type: sequelize.QueryTypes.SELECT },
+  );
+  for (const r of rows) {
+    let next = null;
+    let note = null;
+    if (['canceled', 'cancelled', 'rejected'].includes(String(r.booking_status).toLowerCase())) {
+      next = 'Cancelled'; note = 'Lịch hẹn đã bị huỷ hoặc từ chối';
+    } else if (r.dispatch_status === 'acknowledged' && r.status === 'Assigned') {
+      next = 'Acknowledged'; note = 'Tài xế đã xác nhận lệnh gọi của điều độ';
+    }
+    if (!next || next === r.status) continue;
+    await sequelize.query('UPDATE transport_trips SET status = :next, updated_at = now() WHERE id = :id', { replacements: { next, id: r.id } });
+    await recordHistory(r.id, r.status, next, userId, note);
+  }
+}
+
 async function getMyTrips(driverId, { status, page = 1, limit = 20 } = {}) {
+  await ensureTripsForDriverBookings(driverId).catch((err) => console.warn('[Trips] Không tạo được chuyến từ lệnh điều phối:', err.message));
   const where = { driver_id: driverId };
 
   if (status && status !== 'all' && status !== 'ALL') {
@@ -558,6 +626,8 @@ function formatTrip(trip) {
     mapUrl: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
     sealNo: trip.seal_no,
     containerCondition: trip.container_condition,
+    eirNo: trip.eir_no || null,
+    eirPhotos: Array.isArray(trip.eir_photo_urls) ? trip.eir_photo_urls : [],
     recipientName: trip.recipient_name,
     status: trip.status,
     statusGroup,
@@ -621,6 +691,7 @@ function formatTrip(trip) {
 }
 
 module.exports = {
+  ensureTripsForDriverBookings,
   getMyTrips,
   getTripById,
   acknowledgeTrip,

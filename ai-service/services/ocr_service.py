@@ -1,5 +1,6 @@
 import re
 import os
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0" 
 import cv2
 import numpy as np
 import requests as http_requests
@@ -21,9 +22,9 @@ AZURE_REGION = os.getenv("AZURE_VISION_REGION", "eastus").strip()
 
 class OCRService:
     """
-    Dịch vụ OCR nhận diện ký tự biển số xe Việt Nam sử dụng Azure AI Vision Read API.
-    - Tốc độ xử lý: ~0.5 - 1.0 giây
-    - Nhận diện chính xác biển xe ô tô, xe tải, container và biển xe máy 2 hàng.
+    Dịch vụ OCR nhận diện ký tự biển số xe Việt Nam.
+    - Ưu tiên 1: Azure AI Vision Read API (~0.5-1.0s, chính xác cao nhất)
+    - Fallback  : EasyOCR local (chạy offline, không cần cloud credentials)
     """
 
     def __init__(self, languages: List[str] = ["en"], gpu: bool = False):
@@ -31,10 +32,30 @@ class OCRService:
         self.key = AZURE_KEY
         self.azure_available = bool(self.endpoint and self.key)
 
+        # EasyOCR lazy-load (tải model lần đầu mất ~10-20s)
+        self._easyocr_reader = None
+        self._easyocr_languages = languages
+        self._easyocr_gpu = gpu
+
         if self.azure_available:
             print(f"[INFO] OCRService: Azure AI Vision active at {self.endpoint}")
         else:
-            print("[ERROR] OCRService: Azure Vision credentials missing!")
+            print("[WARN] OCRService: Azure Vision credentials missing — sẽ dùng EasyOCR local làm fallback.")
+            self._load_easyocr()
+
+    def _load_easyocr(self):
+        """Tải EasyOCR reader (singleton, chỉ load 1 lần)."""
+        if self._easyocr_reader is not None:
+            return
+        try:
+            import easyocr
+            print("[INFO] OCRService: Đang tải EasyOCR model (lần đầu có thể mất ~20s)...")
+            self._easyocr_reader = easyocr.Reader(self._easyocr_languages, gpu=self._easyocr_gpu)
+            print("[INFO] OCRService: EasyOCR sẵn sàng.")
+        except ImportError:
+            print("[ERROR] OCRService: easyocr chưa được cài. Chạy: pip install easyocr")
+        except Exception as e:
+            print(f"[ERROR] OCRService: Không tải được EasyOCR: {e}")
 
     def extract_plate_from_lines(self, lines: List[str]) -> Tuple[str, float]:
         """
@@ -101,9 +122,80 @@ class OCRService:
 
         return "", 0.0
 
+    def _preprocess_plate(self, img: np.ndarray) -> np.ndarray:
+        """
+        Tiền xử lý ảnh biển số để tăng độ chính xác EasyOCR:
+        - Resize lên 2x (biển số nhỏ hay bị mờ)
+        - Chuyển Grayscale → tăng tương phản CLAHE
+        - Sharpen nhẹ
+        """
+        h, w = img.shape[:2]
+        # Upscale nếu ảnh quá nhỏ
+        if w < 300:
+            scale = 300 / w
+            img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(4, 4))
+        gray = clahe.apply(gray)
+        # Sharpen
+        kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+        gray = cv2.filter2D(gray, -1, kernel)
+        # Trả về BGR để EasyOCR nhận
+        return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
+    def _recognize_easyocr(self, plate_img: np.ndarray) -> Dict[str, Any]:
+        """
+        Nhận diện biển số qua EasyOCR (chạy local, không cần cloud).
+        Dùng làm fallback khi Azure không khả dụng.
+        """
+        default_res = {"plate_number": "", "confidence": 0.0, "raw_text": "", "raw_details": []}
+
+        if self._easyocr_reader is None:
+            self._load_easyocr()
+        if self._easyocr_reader is None:
+            return default_res
+
+        try:
+            processed = self._preprocess_plate(plate_img)
+            results = self._easyocr_reader.readtext(processed, detail=1, paragraph=False)
+
+            all_lines = []
+            all_words = []
+            for (_, text, prob) in results:
+                text = text.strip()
+                if text:
+                    all_lines.append(text)
+                    all_words.append({"text": text, "confidence": prob})
+
+            raw_full = " ".join(all_lines)
+            avg_conf = float(sum(w["confidence"] for w in all_words) / len(all_words)) if all_words else 0.0
+
+            print(f"[INFO] EasyOCR raw lines: {all_lines}")
+
+            formatted_plate, format_conf = self.extract_plate_from_lines(all_lines)
+            final_conf = round(avg_conf * (format_conf if format_conf > 0 else 0.8), 4)
+
+            if formatted_plate:
+                print(f"[INFO] EasyOCR success: '{formatted_plate}' (conf: {final_conf}) raw: '{raw_full}'")
+            else:
+                print(f"[INFO] EasyOCR: không khớp pattern biển số VN từ: {all_lines}")
+
+            return {
+                "plate_number": formatted_plate,
+                "confidence": final_conf if formatted_plate else 0.0,
+                "raw_text": raw_full,
+                "raw_details": all_words
+            }
+        except Exception as e:
+            print(f"[ERROR] EasyOCR exception: {e}")
+            return default_res
+
     def recognize(self, plate_img: np.ndarray) -> Dict[str, Any]:
         """
-        Nhận diện biển số xe qua Azure AI Vision Read API.
+        Nhận diện biển số xe:
+        - Ưu tiên: Azure AI Vision Read API (cloud, chính xác cao)
+        - Fallback: EasyOCR local (không cần internet/credentials)
         """
         default_res = {
             "plate_number": "",
@@ -115,12 +207,12 @@ class OCRService:
         if plate_img is None or plate_img.size == 0:
             return default_res
 
+        # ── Nếu không có Azure → dùng EasyOCR ngay ──────────────────────────
         if not self.azure_available:
-            print("[ERROR] Azure AI Vision not configured.")
-            return default_res
+            return self._recognize_easyocr(plate_img)
 
+        # ── Thử Azure trước ───────────────────────────────────────────────────
         try:
-            # Mã hóa ảnh sang JPEG chất lượng cao
             success, buf = cv2.imencode(".jpg", plate_img, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
             if not success:
                 return default_res
@@ -142,7 +234,9 @@ class OCRService:
 
             if resp.status_code != 200:
                 print(f"[WARNING] Azure OCR HTTP {resp.status_code}: {resp.text[:200]}")
-                return default_res
+                # Fallback sang EasyOCR khi Azure lỗi
+                print("[INFO] Fallback sang EasyOCR...")
+                return self._recognize_easyocr(plate_img)
 
             data = resp.json()
             read_result = data.get("readResult", {})
@@ -164,7 +258,6 @@ class OCRService:
             raw_full = " ".join(all_lines)
             avg_word_conf = float(sum(w["confidence"] for w in all_words) / len(all_words)) if all_words else 0.8
 
-            # Trích xuất biển số chuẩn từ danh sách các dòng Azure đọc được
             formatted_plate, format_conf = self.extract_plate_from_lines(all_lines)
             final_conf = round(avg_word_conf * (format_conf if format_conf > 0 else 0.8), 4)
 
@@ -172,6 +265,12 @@ class OCRService:
                 print(f"[INFO] Azure OCR success: '{formatted_plate}' (conf: {final_conf}) from raw: '{raw_full}'")
             else:
                 print(f"[INFO] Azure OCR lines: {all_lines} (no valid VN plate matched)")
+                # Fallback EasyOCR nếu Azure không match pattern
+                if all_lines:
+                    print("[INFO] Azure không khớp pattern — thử EasyOCR fallback...")
+                    easy_res = self._recognize_easyocr(plate_img)
+                    if easy_res["plate_number"]:
+                        return easy_res
 
             return {
                 "plate_number": formatted_plate,
@@ -181,5 +280,5 @@ class OCRService:
             }
 
         except Exception as e:
-            print(f"[ERROR] Azure OCR exception: {e}")
-            return default_res
+            print(f"[ERROR] Azure OCR exception: {e} — fallback EasyOCR")
+            return self._recognize_easyocr(plate_img)

@@ -6,6 +6,10 @@ không dùng dữ liệu mẫu hay cập nhật thành công chỉ trong bộ nh
 
 ## Phạm vi nhánh Transport Company
 
+Trang `/booking` hiện dùng để theo dõi danh sách lịch hẹn đã có, điều phối xe/tài xế
+và xem lộ trình container; không còn màn hình tạo lịch mới hoặc Booking theo lô.
+Tạo Booking xuất hàng và tạo lô vẫn nằm trong luồng `/export-booking`.
+
 Giao diện hãng tàu và module cổng được giữ nguyên theo HEAD. Nhánh này chỉ thay
 đổi Booking khách hàng, API Booking liên quan và schema lưu hồ sơ. Các endpoint
 duyệt/trao đổi trạng thái trong Booking là hợp đồng tích hợp cho các role khác;

@@ -1,4 +1,6 @@
 import os
+import shutil
+import tempfile
 from typing import Dict, Any, Optional, Tuple
 import cv2
 import numpy as np
@@ -20,13 +22,25 @@ class PlateDetector:
 
         if os.path.exists(model_path):
             try:
+                # Thử load trực tiếp từ đường dẫn gốc
                 self.net = cv2.dnn.readNetFromONNX(model_path)
+            except Exception:
+                # OpenCV trên Windows không đọc được đường dẫn chứa ký tự tiếng Việt (Đồ án, Tài liệu)
+                # Fallback: copy sang thư mục Temp với tên thuần ASCII để load
+                try:
+                    temp_dir = tempfile.gettempdir()
+                    temp_model_path = os.path.join(temp_dir, "nexusport_license_plate.onnx")
+                    if not os.path.exists(temp_model_path) or os.path.getsize(temp_model_path) != os.path.getsize(model_path):
+                        shutil.copyfile(model_path, temp_model_path)
+                    self.net = cv2.dnn.readNetFromONNX(temp_model_path)
+                except Exception as e:
+                    print(f"[ERROR] Could not load license plate ONNX model: {e}")
+
+            if self.net is not None:
                 # Tối ưu chạy trên CPU
                 self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
                 self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-                print(f"[INFO] PlateDetector loaded ONNX model: {model_path}")
-            except Exception as e:
-                print(f"[ERROR] Could not load license plate ONNX model: {e}")
+                print(f"[INFO] PlateDetector loaded ONNX model successfully.")
         else:
             print(f"[WARNING] license_plate.onnx not found at {model_path}")
 

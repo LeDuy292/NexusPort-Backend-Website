@@ -22,6 +22,61 @@ export class GateController {
       sendSuccess(res, await new GateMovementService().completeOut(actor, req.body));
     } catch (error) { next(error); }
   };
+
+  /**
+   * GET /api/gate/verify-plate?plate=47AB-294.69&gateCode=GATE_IN_A
+   * Dùng bởi gate_runner.py (ESP32 OCR) để kiểm tra biển số có booking hợp lệ không.
+   * Trả về { valid: true/false, booking: {...} | null }
+   */
+  verifyPlate = async (req: Request, res: Response, next: import('express').NextFunction): Promise<void> => {
+    try {
+      const rawPlate = String(req.query.plate ?? '').trim();
+      if (!rawPlate) {
+        res.json({ valid: false, reason: 'missing_plate' });
+        return;
+      }
+
+      // Chuẩn hoá biển số: bỏ ký tự thừa, uppercase để so sánh linh hoạt
+      // "47-AB 294.69" / "47AB29469" / "47AB-294.69" → đều tìm được
+      const normalized = rawPlate.toUpperCase().replace(/[\s.-]/g, '');
+
+      const result = await query(
+        `SELECT id, booking_code, vehicle_plate, status, appointment_start, appointment_end, driver_name, gate_type
+         FROM bookings
+         WHERE status IN ('approved', 'ready', 'checked_in')
+           AND appointment_start <= now()
+           AND appointment_end   >= now()
+           AND UPPER(REPLACE(REPLACE(REPLACE(vehicle_plate, '-', ''), '.', ''), ' ', '')) = $1
+         ORDER BY appointment_start ASC
+         LIMIT 1`,
+        [normalized]
+      );
+
+      if (result.rows.length === 0) {
+        console.log(`[verify-plate] plate='${rawPlate}' normalized='${normalized}' → NOT FOUND`);
+        res.json({ valid: false, reason: 'no_active_booking', plate: rawPlate });
+        return;
+      }
+
+      const booking = result.rows[0];
+      console.log(`[verify-plate] plate='${rawPlate}' → FOUND booking ${booking.booking_code} (${booking.status})`);
+      res.json({
+        valid: true,
+        plate: rawPlate,
+        booking: {
+          id: booking.id,
+          bookingCode: booking.booking_code,
+          vehiclePlate: booking.vehicle_plate,
+          status: booking.status,
+          driverName: booking.driver_name,
+          gateType: booking.gate_type,
+          appointmentStart: booking.appointment_start,
+          appointmentEnd: booking.appointment_end,
+        }
+      });
+    } catch (error) { next(error); }
+  };
+
   locations = async (_req: Request, res: Response, next: import('express').NextFunction): Promise<void> => {
     try { sendSuccess(res, (await query(`SELECT id,code,name,CASE WHEN code IN ('GATE-02','GATE-03') THEN 'gate_out' ELSE 'gate_in' END AS "gateType",is_active AS "isActive" FROM gates WHERE is_active AND code IN ('GATE-01','GATE-02','GATE-03') ORDER BY code`)).rows); }
     catch (error) { next(error); }
@@ -56,6 +111,7 @@ export const createGateRouter = (): Router => {
   const router = Router();
   const controller = new GateController();
 
+  router.get('/verify-plate', controller.verifyPlate);   // ← ESP32 OCR verify
   router.get('/locations', controller.locations);
   router.post('/complete-out', controller.completeOut);
   router.get('/', controller.getAll);

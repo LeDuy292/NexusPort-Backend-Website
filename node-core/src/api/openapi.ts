@@ -103,15 +103,20 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
   },
   'GET /api/v1/containers/yard-visits': {
     summary: 'Search yard visits, planned appointments and issued EIRs',
-    description: 'Requires a filter. Visits and linked details are scoped to the authenticated role and account. Date filters match actual gate events or scheduled appointments.',
+    description: 'Visits and linked details are scoped to the authenticated role and account. Yard operators may request sort=recentActivity without another filter. Results are paginated; date filters match actual gate events or scheduled appointments.',
     parameters: [
       { name: 'containerNumber', in: 'query', schema: { type: 'string', minLength: 4, maxLength: 11 } },
       { name: 'visitStatus', in: 'query', schema: { type: 'string', enum: ['planned', 'active', 'completed', 'canceled'] } },
+      { name: 'sort', in: 'query', schema: { type: 'string', enum: ['recentActivity'] } },
       ...['dateFrom', 'dateTo'].map(name => ({ name, in: 'query', schema: { type: 'string', format: 'date-time' } })),
       ...['plateNumber', 'customerName'].map(name => ({ name, in: 'query', description: 'Yard visit operators only', schema: { type: 'string' } })),
       { name: 'page', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 10000, default: 1 } },
       { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } },
     ],
+  },
+  'GET /api/v1/containers/yard-overview': {
+    summary: 'Get port yard overview counts for today and active storage',
+    description: 'Yard operators only. Counts today\'s planned Dropoff/Pickup bookings, active yard inventory and overdue active visits using the five-day booking rule.',
   },
   'GET /api/v1/containers/intake/shipping-line/iso-types': {
     summary: 'List ISO markings supported for registration with their catalog types and nominal dimensions',
@@ -156,8 +161,9 @@ const operationOverrides: Record<string, Record<string, unknown>> = {
     } } } },
   },
   'GET /api/v1/dispatcher/smart-routes': {
-    summary: 'Monitor actual Gate In, yard arrival, container handover and Gate Out for dispatched trucks',
+    summary: 'Monitor Gate In, yard arrival, container handover and Gate Out for the selected booking',
     security: [{ BearerAuth: [] }],
+    parameters: [{ name: 'bookingId', in: 'query', required: true, schema: { type: 'string', format: 'uuid' } }],
   },
   'PUT /api/v1/dispatcher/smart-routes/conditions': {
     summary: 'Set a temporary road restriction or congestion observation on the active yard map',

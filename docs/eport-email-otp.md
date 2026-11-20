@@ -18,3 +18,9 @@ Cấu hình `EmailSettings` trên API, khởi động lại backend rồi đăng
 - **503:** thiếu cấu hình, gửi SMTP thất bại hoặc quá thời gian chờ. Kiểm tra App Password, kết nối và Spam.
 
 API không trả/ghi log mã OTP; SMTP lỗi không được báo gửi thành công.
+
+## Thao tác trên giao diện
+
+- Khi chưa có mã còn hiệu lực, chọn **Gửi mã xác thực**; hệ thống gửi mã đến email tài khoản đã đăng nhập.
+- Nhập đủ 6 chữ số rồi chọn **Xác nhận mã**. Không có thao tác bỏ qua xác thực.
+- Có thể gửi lại mã sau thời gian chờ hiển thị. Mã đã gửi trước đó không thay thế các giới hạn hết hạn và số lần nhập.

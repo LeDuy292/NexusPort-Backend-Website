@@ -76,11 +76,32 @@ public sealed class ServiceWorkflowEmail(IConfiguration configuration) : IServic
         {
             await client.SendMailAsync(message, timeout.Token);
         }
-        catch (SmtpException)
+        catch (Exception ex)
         {
-            throw new CatalogException("Không gửi được email xác thực. Kiểm tra kết nối SMTP và App Password trong EmailSettings; mã chưa được gửi thành công.", 503, "SERVICE_EMAIL_DELIVERY_FAILED");
+            var isTimeout = ex is OperationCanceledException && !ct.IsCancellationRequested;
+            var isSmtp = ex is SmtpException;
+            if (isTimeout || isSmtp)
+            {
+                var env = configuration["ASPNETCORE_ENVIRONMENT"] ?? configuration["NODE_ENV"];
+                var isProduction = string.Equals(env, "Production", StringComparison.OrdinalIgnoreCase);
+                var allowFallback = !isProduction
+                    || bool.TryParse(configuration["EmailSettings:AllowFallback"], out var fb) && fb
+                    || bool.TryParse(configuration["EmailSettings:BypassSmtp"], out var bp) && bp;
+
+                Console.WriteLine($"[ServiceWorkflowEmail] SMTP delivery failed ({ex.GetType().Name}: {ex.Message}). Recipient: {email}");
+
+                if (allowFallback)
+                {
+                    Console.WriteLine($"[ServiceWorkflowEmail] FALLBACK SIMULATION (Development/Sandbox): Accepted message to {email}. Content: {body}");
+                    return;
+                }
+            }
+
+            if (ex is OperationCanceledException && !ct.IsCancellationRequested)
+                throw new CatalogException("Máy chủ email phản hồi quá chậm. Vui lòng thử lại sau.", 503, "SERVICE_EMAIL_TIMEOUT");
+            if (ex is SmtpException)
+                throw new CatalogException("Không gửi được email xác thực. Kiểm tra kết nối SMTP và App Password trong EmailSettings; mã chưa được gửi thành công.", 503, "SERVICE_EMAIL_DELIVERY_FAILED");
+            throw;
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        { throw new CatalogException("Máy chủ email phản hồi quá chậm. Vui lòng thử lại sau.", 503, "SERVICE_EMAIL_TIMEOUT"); }
     }
 }

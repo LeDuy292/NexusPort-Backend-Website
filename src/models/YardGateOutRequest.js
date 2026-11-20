@@ -1,9 +1,9 @@
 'use strict';
 
-const { DataTypes, Model } = require('sequelize');
+const { DataTypes, Model, Op } = require('sequelize');
 const { sequelize } = require('../config/database');
 
-const GATE_OUT_STATUSES = ['PENDING', 'IN_PROGRESS', 'READY_FOR_GATE_OUT', 'COMPLETED', 'CANCELLED'];
+const GATE_OUT_STATUSES = ['PENDING', 'IN_PROGRESS', 'READY_FOR_GATE_OUT', 'COMPLETED', 'CANCELLED', 'GATED_OUT', 'CANCELLED_EDO_HELD'];
 const URGENCY_LEVELS = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'];
 const SLOT_STATUSES = ['Occupied', 'Available', 'Reserved'];
 
@@ -214,6 +214,12 @@ YardGateOutRequest.init(
     indexes: [
       { fields: ['status'] },
       { fields: ['container_id'] },
+      {
+        name: 'uq_yard_gate_out_active_container',
+        unique: true,
+        fields: [sequelize.fn('upper', sequelize.fn('trim', sequelize.col('container_id')))],
+        where: { status: { [Op.notIn]: ['COMPLETED', 'CANCELLED', 'GATED_OUT', 'CANCELLED_EDO_HELD'] } },
+      },
       { fields: ['truck_plate'] },
       { fields: ['yard_slot'] },
       { fields: ['slot_status'] },

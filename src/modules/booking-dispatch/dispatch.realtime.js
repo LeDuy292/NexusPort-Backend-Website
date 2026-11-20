@@ -3,6 +3,7 @@ const { QueryTypes } = require('sequelize');
 const { sequelize } = require('../../config/database');
 const { getIO, emitToDispatchers, emitToDriver } = require('../../config/socket');
 const { runAutoAdmission } = require('./yard-admission');
+const { settleOpenedGates } = require('../gate-iot/gate-entry-admission');
 let running = null;
 let lastError = 0;
 async function deliver() {
@@ -51,7 +52,7 @@ async function expireCalls() {
   }
 }
 function pumpDispatchEvents() {
-  if (!running) running = (async () => { await expireCalls(); await runAutoAdmission(); await deliver(); })()
+  if (!running) running = (async () => { await expireCalls(); await runAutoAdmission(); await settleOpenedGates(); await deliver(); })()
     .catch(error => {
       if (Date.now() - lastError > 30000) { lastError = Date.now(); console.error('[Booking dispatch realtime]', error.message); }
     }).finally(() => { running = null; });
@@ -62,6 +63,14 @@ function startDispatchRealtime() {
   const timer = setInterval(() => { void pumpDispatchEvents(); }, 5000);
   timer.unref();
   void pumpDispatchEvents();
-  return () => clearInterval(timer);
+  const { syncManifestGateBookings } = require('./dispatch.service');
+  let sync = null;
+  const syncBookings = () => {
+    if (!sync) sync = syncManifestGateBookings().finally(() => { sync = null; });
+  };
+  const syncTimer = setInterval(syncBookings, 30000);
+  syncTimer.unref();
+  syncBookings();
+  return () => { clearInterval(timer); clearInterval(syncTimer); };
 }
 module.exports = { pumpDispatchEvents, startDispatchRealtime };

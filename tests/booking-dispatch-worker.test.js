@@ -82,6 +82,29 @@ test('overlapping pumps share a single run', async () => {
   expect(sequelize.query).toHaveBeenCalledTimes(2);
 });
 
+test('manifest sync runs in the background without overlapping or blocking the realtime pump', async () => {
+  jest.useFakeTimers();
+  sequelize.query.mockImplementation(async sql => sql.includes('SELECT booking_id') ? [[]] : []);
+  let finish;
+  const service = require('../src/modules/booking-dispatch/dispatch.service');
+  const sync = jest.spyOn(service, 'syncManifestGateBookings')
+    .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+    .mockResolvedValue(undefined);
+  const stop = startDispatchRealtime();
+  try {
+    await pumpDispatchEvents();
+    expect(sequelize.query).toHaveBeenCalledTimes(2);
+    await jest.advanceTimersByTimeAsync(60000);
+    expect(sync).toHaveBeenCalledTimes(1);
+    finish();
+    await jest.advanceTimersByTimeAsync(30000);
+    expect(sync).toHaveBeenCalledTimes(2);
+    stop();
+    await jest.advanceTimersByTimeAsync(30000);
+    expect(sync).toHaveBeenCalledTimes(2);
+  } finally { stop(); }
+});
+
 test('worker errors remain visible and a later pump can retry', async () => {
   const log = jest.spyOn(console,'error').mockImplementation(() => {});
   sequelize.query.mockRejectedValueOnce(new Error('database unavailable'));

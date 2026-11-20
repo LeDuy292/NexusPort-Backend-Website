@@ -37,7 +37,7 @@ describe('Manifest Excel HTTP upload contract', () => {
     base = `http://127.0.0.1:${(server.address() as {port:number}).port}/manifests`;
   });
   beforeEach(() => {
-    (query as jest.Mock).mockResolvedValue({rows:[{id:owner}]});
+    (query as jest.Mock).mockResolvedValue({rows:[{id:owner, role:'Shipping Line'}]});
     lookup.mockResolvedValue([{containerNumber:'CMAU3381923',containerId:randomUUID(),isoType:'20RF',isoSizeType:'22R1',isReefer:true}]);
     used.mockResolvedValue([]);
   });
@@ -49,7 +49,10 @@ describe('Manifest Excel HTTP upload contract', () => {
     expect((await upload(buildFile(), 'Manifest.xlsx', false)).status).toBe(401);
     expect((await fetch(`${base}/import/template`)).status).toBe(401);
     (query as jest.Mock).mockResolvedValue({rows:[]});
+    expect((await upload(buildFile())).status).toBe(401);
+    (query as jest.Mock).mockResolvedValue({rows:[{id:owner, role:'Dispatcher'}]});
     expect((await upload(buildFile())).status).toBe(403);
+    expect((await fetch(`${base}/import/template`, {headers:{Authorization:`Bearer ${token}`}})).status).toBe(403);
     expect(lookup).not.toHaveBeenCalled();
   });
   it('downloads a valid blank template and accepts a real multipart upload without saving anything', async () => {

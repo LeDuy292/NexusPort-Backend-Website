@@ -1,18 +1,48 @@
 import os
+os.environ["OPENCV_VIDEOIO_PRIORITY_MSMF"] = "0"  # Tắt lớp giải mã MSMF của Windows, ép dùng DirectShow chống sọc/treo
 import base64
 import json
+import logging
 import requests
 from typing import Optional
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect
+from uuid import UUID
+from contextlib import asynccontextmanager
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from services.pipeline import SmartPortGatePipeline
+from services.esp32_controller import ESP32Controller
+from services.hardware_gate_service import HardwareGateService
+
+# Khởi tạo dịch vụ phần cứng quản lý ESP32 và Camera
+camera_index = int(os.getenv("GATE_CAMERA_INDEX", os.getenv("GATE_CAMERA_IN", "0")))
+hw_service = HardwareGateService(
+    port=os.getenv("GATE_SERIAL_PORT", "COM7"),
+    baud=int(os.getenv("GATE_BAUD_RATE", "115200")),
+    cam_in_idx=camera_index,
+    cam_out_idx=camera_index
+)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: tự động khởi động dịch vụ phần cứng trong nền
+    hw_service.start()
+    yield
+    # Shutdown: dừng dịch vụ
+    hw_service.stop()
 
 app = FastAPI(
     title="NexusPort AI Smart Gate Service",
     description="Microservice AI nhận diện phương tiện, biển số xe tự động phục vụ Smart Port Gate Automation & IoT Camera Integration",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS cho phép Frontend và Backend .NET kết nối
@@ -24,8 +54,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Khởi tạo Pipeline một lần khi khởi động (Singleton)
-pipeline = SmartPortGatePipeline()
+# Pipeline tái sử dụng từ hw_service
+pipeline = hw_service.pipeline or SmartPortGatePipeline()
+esp32 = hw_service.esp32 or ESP32Controller()
 
 
 def broadcast_to_gate_officers(result: dict, overview_base64: Optional[str] = None):
@@ -252,6 +283,119 @@ async def websocket_gate_camera(
             await websocket.close()
         except Exception:
             pass
+
+
+@app.get("/api/v1/gate/video-feed")
+def get_video_feed(lane: str = "IN"):
+    """
+    Live MJPEG Video Feed từ Webcam cho Web UI:
+    <img src="http://localhost:8000/api/v1/gate/video-feed?lane=IN" />
+    """
+    return StreamingResponse(
+        hw_service.generate_mjpeg_stream(lane=lane),
+        media_type="multipart/x-mixed-replace; boundary=frame"
+    )
+
+
+@app.post("/api/v1/gate/camera/start")
+def start_gate_camera(lane: str = "IN"):
+    """Bật camera quan sát theo yêu cầu từ giao diện."""
+    try:
+        return hw_service.set_camera_preview(lane, True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/gate/camera/stop")
+def stop_gate_camera(lane: str = "IN"):
+    """Tắt camera quan sát từ giao diện."""
+    try:
+        return hw_service.set_camera_preview(lane, False)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/gate/barrier/open")
+def manual_barrier_open(lane: Optional[str] = Query("IN")):
+    """Giữ lệnh mở làn ra cho các phiên bản giao diện cũ."""
+    if (lane or "").upper() == "OUT":
+        return hw_service.manual_open_out()
+    raise HTTPException(status_code=403, detail="Cổng vào cần lệnh mở barie đã xác minh.")
+
+
+class VerifiedBarrierOpen(BaseModel):
+    commandId: UUID
+
+
+@app.post("/api/v1/gate/barrier/open/in")
+def verified_barrier_open_in(command: VerifiedBarrierOpen):
+    return hw_service.open_authorized_in(str(command.commandId))
+
+
+@app.post("/api/v1/gate/barrier/open/out")
+def manual_barrier_open_out():
+    """Cưỡng bức mở Barrier Làn Ra (OUT)."""
+    return hw_service.manual_open_out()
+
+
+@app.post("/api/v1/gate/barrier/close")
+def manual_barrier_close(lane: Optional[str] = Query("IN")):
+    """
+    Cưỡng bức đóng Barrier từ Web UI (nút 'Hạ barie') theo làn chỉ định (IN hoặc OUT).
+    """
+    if (lane or "").upper() == "OUT":
+        return hw_service.manual_close_out()
+    return hw_service.manual_close_in()
+
+
+@app.post("/api/v1/gate/barrier/close/in")
+def manual_barrier_close_in():
+    """Cưỡng bức đóng Barrier Làn Vào (IN)."""
+    return hw_service.manual_close_in()
+
+
+@app.post("/api/v1/gate/barrier/close/out")
+def manual_barrier_close_out():
+    """Cưỡng bức đóng Barrier Làn Ra (OUT)."""
+    return hw_service.manual_close_out()
+
+
+@app.post("/api/v1/gate/barrier/fail")
+def manual_barrier_fail(lane: Optional[str] = Query("IN")):
+    """
+    Báo lỗi / từ chối xe từ Web UI theo làn chỉ định (IN hoặc OUT).
+    """
+    if (lane or "").upper() == "OUT":
+        return hw_service.manual_fail_out()
+    return hw_service.manual_fail_in()
+
+
+@app.post("/api/v1/gate/barrier/fail/in")
+def manual_barrier_fail_in():
+    """Báo lỗi Làn Vào (IN)."""
+    return hw_service.manual_fail_in()
+
+
+@app.post("/api/v1/gate/barrier/fail/out")
+def manual_barrier_fail_out():
+    """Báo lỗi Làn Ra (OUT)."""
+    return hw_service.manual_fail_out()
+
+
+@app.get("/api/v1/gate/hardware-status")
+def get_hardware_status():
+    """
+    Thông tin tình trạng kết nối phần cứng thời gian thực (ESP32 COM8, Camera, AI Pipeline, Sự kiện gần nhất).
+    """
+    return hw_service.get_status()
+
+
+@app.get("/api/v1/gate/esp32-status")
+def get_esp32_status():
+    """
+    Kiểm tra trạng thái kết nối ESP32 phần cứng (COM port + Serial).
+    """
+    return hw_service.get_status().get("esp32", {})
 
 
 @app.post("/api/v1/gate/simulate")

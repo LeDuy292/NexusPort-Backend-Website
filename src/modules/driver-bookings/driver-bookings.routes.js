@@ -33,6 +33,12 @@ router.post('/notifications/:id/read', driver, uuidParam('id'), handle(async (re
   await service.markRead(req.user.id, req.params.id);
   res.json({ success: true });
 }));
+// Tài xế tự xác nhận đã qua cổng vào (khi cổng chưa tự ghi nhận); chỉ áp dụng cho lịch hẹn của chính họ
+router.post('/:id/passed-gate', driver, uuidParam('id'), handle(async (req, res) => {
+  const { recordEntryPassage } = require('../gate-iot/gate-entry-admission');
+  const data = await recordEntryPassage({ bookingId: req.params.id, driverUserId: req.user.id, source: 'driver' });
+  res.json({ success: true, data });
+}));
 router.get('/:id', driver, uuidParam('id'), handle(async (req, res) => {
   res.json({ success: true, data: { booking: await service.getBooking(req.user.id, req.params.id) } });
 }));

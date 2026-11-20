@@ -15,9 +15,6 @@ using NexusPort.Modules.Identity.Infrastructure.Repositories;
 using NexusPort.Modules.Vessel.Application.Interfaces;
 using NexusPort.Modules.Vessel.Application.Services;
 using NexusPort.Modules.Vessel.Infrastructure.Repositories;
-using NexusPort.Modules.Berth.Application.Interfaces;
-using NexusPort.Modules.Berth.Application.Services;
-using NexusPort.Modules.Berth.Infrastructure.Repositories;
 using NexusPort.Modules.Container.Application.Interfaces;
 using NexusPort.Modules.Container.Application.Services;
 using NexusPort.Modules.Container.Infrastructure.Repositories;
@@ -54,6 +51,18 @@ public static class ServiceCollectionExtensions
         var connectionString = configuration.GetConnectionString("DefaultConnection") 
             ?? "Host=localhost;Port=5432;Database=NexusPort;Username=postgres;Password=pgadmin4";
 
+        // The hosted database is shared by several apps and frequently exhausts
+        // its connection slots. Reuse one reserved connection and queue requests.
+        var connectionOptions = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
+        if (!string.Equals(connectionOptions.Host, "localhost", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(connectionOptions.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
+        {
+            connectionOptions.MaxPoolSize = 1;
+            connectionOptions.MinPoolSize = 1;
+            connectionOptions.Timeout = Math.Max(connectionOptions.Timeout, 30);
+            connectionString = connectionOptions.ConnectionString;
+        }
+
         var dataSourceBuilder = new Npgsql.NpgsqlDataSourceBuilder(connectionString);
         dataSourceBuilder.MapEnum<NexusPort.Modules.Driver.Domain.Enums.DriverStatus>("driver_status");
         dataSourceBuilder.MapEnum<NexusPort.Modules.Vehicle.Domain.Enums.TruckStatus>("truck_status");
@@ -78,6 +87,7 @@ public static class ServiceCollectionExtensions
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<ExportBookingService>();
+        services.AddHostedService<NexusPort.Modules.Booking.Infrastructure.BackgroundServices.ExportDraftDeadlineWorker>();
 
         var jwtSecret = configuration["Jwt:Secret"] ?? "NexusPort_Super_Secret_Key_For_Jwt_Authentication_2026!";
         services.AddSingleton<IJwtService>(new JwtService(jwtSecret));
@@ -167,7 +177,6 @@ public static class ServiceCollectionExtensions
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Identity.Infrastructure.Configurations.UserConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Booking.Infrastructure.Configurations.BookingConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Vessel.Infrastructure.Configurations.VesselConfiguration).Assembly);
-        AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Berth.Infrastructure.Configurations.BerthConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Container.Infrastructure.Configurations.ContainerConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Yard.Infrastructure.Configurations.YardBlockConfiguration).Assembly);
         AppDbContext.ModuleAssemblies.Add(typeof(NexusPort.Modules.Gate.Infrastructure.Configurations.GateTransactionConfiguration).Assembly);
@@ -192,10 +201,6 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IVesselRepository, VesselRepository>();
         services.AddScoped<IVesselService, VesselService>();
 
-        // Berth
-        services.AddScoped<IBerthRepository, BerthRepository>();
-        services.AddScoped<IBerthService, BerthService>();
-
         // Container
         services.AddScoped<IContainerRepository, ContainerRepository>();
         services.AddScoped<IContainerService, ContainerService>();
@@ -206,8 +211,18 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IYardReceivingService, YardReceivingService>();
         services.AddScoped<IYardTaskService, YardTaskService>();
         services.AddScoped<IYardRestackService, YardRestackService>();
+        services.AddScoped<IYardDischargeService, YardDischargeService>();
         services.AddScoped<NexusPort.Modules.Yard.Application.Interfaces.IReeferMonitoringService, NexusPort.Modules.Yard.Application.Services.ReeferMonitoringService>();
         services.AddHostedService<NexusPort.Modules.Yard.Infrastructure.BackgroundServices.ReeferMonitoringSimulatorWorker>();
+
+        // Yard - Container Preparation Module
+        services.AddScoped<NexusPort.Modules.Yard.Preparation.Application.Services.IPreparationPlanner, NexusPort.Modules.Yard.Preparation.Application.Services.PreparationPlanner>();
+        services.AddScoped<NexusPort.Modules.Yard.Preparation.Application.Services.IPreparationService, NexusPort.Modules.Yard.Preparation.Application.Services.PreparationService>();
+        FluentValidation.ServiceCollectionExtensions.AddValidatorsFromAssemblyContaining(services, typeof(NexusPort.Modules.Yard.Preparation.Application.Validators.CancelTaskRequestValidator));
+        services.AddHostedService<NexusPort.Modules.Yard.Preparation.Infrastructure.BackgroundServices.PreparationMonitoringWorker>();
+
+        // Booking-based yard storage reminders (09:00 Vietnam time)
+        services.AddHostedService<NexusPort.Modules.Booking.Infrastructure.BackgroundServices.BookingStorageReminderWorker>();
 
         // Gate
         services.AddScoped<IGateRepository, GateRepository>();

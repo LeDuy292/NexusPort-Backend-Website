@@ -69,6 +69,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ServiceCatalog", "ServiceCa
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NexusPort.Modules.ServiceCatalog", "src\Modules\ServiceCatalog\NexusPort.Modules.ServiceCatalog.csproj", "{664ED239-1447-4758-9726-EC5BB74BF164}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PreparationPlannerChecks", "tests\PreparationPlannerChecks\PreparationPlannerChecks.csproj", "{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -271,6 +275,18 @@ Global
 		{664ED239-1447-4758-9726-EC5BB74BF164}.Release|x64.Build.0 = Release|Any CPU
 		{664ED239-1447-4758-9726-EC5BB74BF164}.Release|x86.ActiveCfg = Release|Any CPU
 		{664ED239-1447-4758-9726-EC5BB74BF164}.Release|x86.Build.0 = Release|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Debug|x64.Build.0 = Debug|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Debug|x86.Build.0 = Debug|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Release|x64.ActiveCfg = Release|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Release|x64.Build.0 = Release|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Release|x86.ActiveCfg = Release|Any CPU
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -308,5 +324,6 @@ Global
 		{2FCE1E47-3EFE-41E0-B96C-4C6BFE6A7126} = {55CB054A-9FFF-99E3-F5F6-93937756980C}
 		{46813D46-09DD-B017-9364-6435EDBA03BF} = {EC447DCF-ABFA-6E24-52A5-D7FD48A5C558}
 		{664ED239-1447-4758-9726-EC5BB74BF164} = {46813D46-09DD-B017-9364-6435EDBA03BF}
+		{C3F0E756-C726-43F0-A9AD-2A6CF5881BBF} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

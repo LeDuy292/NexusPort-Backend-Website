@@ -23,3 +23,13 @@ Chỉ thanh toán số tiền do phần Dispatcher trả về sau xác nhận. P
 Prefix `/api/v1/ServiceOrders/{id}`: `GET /payments`, `POST /payments`, `POST /payments/{paymentId}/sync`, `POST /payments/{paymentId}/cancel`.
 
 Thao tác gửi UUID `requestId`, `expectedVersion` của workflow và lý do khi hủy. Khóa và webhook phải được cấu hình trước khi tạo giao dịch thật.
+
+## Mức tiền PayOS trong Development
+
+- Tổng phí đơn (`order.total`) luôn giữ nguyên số Dispatcher trả về và tiếp tục hiển thị trên hồ sơ.
+- Để tạo QR nhận đúng 2.000 VND khi phát triển, đặt `ASPNETCORE_ENVIRONMENT=Development` và `NEXUSPORT_EPORT_PAYOS_AMOUNT=2000` trong môi trường chạy API. Bỏ trống biến thứ hai để PayOS nhận đủ tổng phí.
+- Production bỏ qua biến ghi đè và luôn dùng toàn bộ số tiền đơn. Webhook có chữ ký hợp lệ chỉ được chấp nhận khi mã đơn, link và số tiền khớp chính xác lần thanh toán đã lưu.
+- Biên lai ghi riêng tổng phí đơn và số tiền giao dịch PayOS đã nhận. Nội dung chuyển khoản là `DV` cùng 7 chữ số mã giao dịch (9 ký tự ASCII).
+- QR đã tạo trước khi bật cấu hình 2.000 VND giữ nguyên số tiền cũ; hãy hủy yêu cầu đang chờ rồi tạo yêu cầu mới.
+
+Xem tài liệu kiến trúc toàn diện tại [Tài liệu Kiến trúc Đơn Dịch Vụ & Thanh Toán ePort](eport-service-orders-architecture.md).

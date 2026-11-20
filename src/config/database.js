@@ -1,7 +1,7 @@
 'use strict';
 
 const { Sequelize } = require('sequelize');
-const { db } = require('./env');
+const { db, nodeEnv } = require('./env');
 
 const sequelize = new Sequelize(db.name, db.user, db.password, {
   host: db.host,
@@ -30,19 +30,32 @@ const sequelize = new Sequelize(db.name, db.user, db.password, {
  * Kiểm tra kết nối tới PostgreSQL.
  */
 async function connectDB() {
-  try {
-    await sequelize.authenticate();
-    console.log('[DB] Kết nối PostgreSQL thành công.');
-  } catch (error) {
-    console.error('[DB] Không thể kết nối PostgreSQL:', error.message);
-    throw error;
+  const maxRetries = 10;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      await sequelize.authenticate();
+      console.log('[DB] Kết nối PostgreSQL thành công.');
+      return;
+    } catch (error) {
+      console.warn(`[DB] Kết nối lần ${attempt} chưa thành công: ${error.message}`);
+      if (attempt === maxRetries) {
+        console.error('[DB] Không thể kết nối PostgreSQL:', error.message);
+        throw error;
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
   }
 }
 
 /**
- * Đồng bộ schema (chỉ dùng trong dev/test, dùng migrations ở production).
+ * Chỉ đồng bộ schema cho PostgreSQL cục bộ trong dev/test.
  */
 async function syncDB(options = {}) {
+  const host = db.host?.trim().toLowerCase();
+  if (!['development', 'test'].includes(nodeEnv) ||
+      !['localhost', '127.0.0.1', '::1', '[::1]'].includes(host)) {
+    throw new Error('Schema sync requires a local PostgreSQL database in development or test. Apply migrations to shared databases.');
+  }
   await sequelize.sync(options);
   console.log('[DB] Schema đã đồng bộ.');
 }

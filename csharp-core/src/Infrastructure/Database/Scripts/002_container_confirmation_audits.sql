@@ -1,7 +1,7 @@
 CREATE TABLE IF NOT EXISTS container_confirmation_audits (
     id uuid PRIMARY KEY,
     booking_id uuid NOT NULL REFERENCES bookings(id),
-    container_id uuid NOT NULL REFERENCES "Containers"(id),
+    container_id uuid NOT NULL REFERENCES public.containers(id),
     driver_id uuid NOT NULL REFERENCES drivers(id),
     condition varchar(30) NOT NULL,
     notes varchar(1000),

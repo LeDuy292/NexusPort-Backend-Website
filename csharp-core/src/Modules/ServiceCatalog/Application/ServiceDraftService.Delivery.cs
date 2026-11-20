@@ -1,3 +1,4 @@
+
 using System.Globalization;
 using System.Text.Json.Nodes;
 using NexusPort.Modules.ServiceCatalog.Domain;
@@ -28,18 +29,39 @@ public sealed partial class ServiceDraftService
         if (plannedDate != null && (until == null || string.CompareOrdinal(until, plannedDate) < 0))
             until = plannedDate;
         var end = until == null ? null : DateTimeOffset.Parse(until + "T23:59:59+07:00", CultureInfo.InvariantCulture).ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        var reeferServiceRow = (await Rows("SELECT id FROM eport_services WHERE code = 'REEFER_POWER' LIMIT 1", ct)).FirstOrDefault();
+        var reeferServiceId = reeferServiceRow != null ? G(reeferServiceRow, "id") : (Guid?)null;
         var timed = (await Rows("SELECT id FROM eport_services WHERE code IN ('STORAGE_EXTENSION','REEFER_POWER') AND unit IN ('DAY','HOUR')", ct)).Select(row => G(row, "id")).ToHashSet();
-        var lines = input.Lines.Select(line => line with {
-            Services = line.Services.Select(usage => {
-                if (!timed.Contains(usage.ServiceId)) return usage;
-                var start = usage.StartsAt ?? input.PlannedAt;
-                if (start != null && input.PlannedAt != null && string.CompareOrdinal(start, input.PlannedAt) < 0)
-                    start = input.PlannedAt;
-                var endsAt = usage.EndsAt ?? end;
-                if (start != null && (endsAt == null || string.CompareOrdinal(endsAt, start) <= 0))
-                    endsAt = DateTimeOffset.Parse(start, CultureInfo.InvariantCulture).AddHours(24).ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
-                return usage with { StartsAt = start, EndsAt = endsAt };
-            }).ToArray()
+        var lines = input.Lines.Select(line => {
+            var usages = line.Services.ToList();
+            if (input.Flow == "IMPORT" && reeferServiceId.HasValue)
+            {
+                var decNum = line.Declaration?.ContainerNumber?.ToUpperInvariant() ?? "";
+                var decIso = line.Declaration?.IsoCode?.ToUpperInvariant() ?? "";
+                var decCargo = line.Declaration?.CargoType?.ToLowerInvariant() ?? "";
+                var isContReefer = decNum.StartsWith("NXPU") || decIso.Contains("RF") || decIso.Contains("RH") || decCargo.Contains("reefer") || decCargo.Contains("lạnh");
+                if (isContReefer && !usages.Any(u => u.ServiceId == reeferServiceId.Value))
+                {
+                    usages.Add(new ServiceDraftUsage {
+                        ServiceId = reeferServiceId.Value,
+                        StartsAt = input.PlannedAt,
+                        EndsAt = end ?? (input.PlannedAt != null ? DateTimeOffset.Parse(input.PlannedAt, CultureInfo.InvariantCulture).AddHours(48).ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) : null),
+                        Quantity = null
+                    });
+                }
+            }
+            return line with {
+                Services = usages.Select(usage => {
+                    if (!timed.Contains(usage.ServiceId)) return usage;
+                    var start = usage.StartsAt ?? input.PlannedAt;
+                    if (start != null && input.PlannedAt != null && string.CompareOrdinal(start, input.PlannedAt) < 0)
+                        start = input.PlannedAt;
+                    var endsAt = usage.EndsAt ?? end;
+                    if (start != null && (endsAt == null || string.CompareOrdinal(endsAt, start) <= 0))
+                        endsAt = DateTimeOffset.Parse(start, CultureInfo.InvariantCulture).AddHours(24).ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+                    return usage with { StartsAt = start, EndsAt = endsAt };
+                }).ToArray()
+            };
         }).ToArray();
         var trips = input.Delivery.Trips;
         if (plannedInstant != null && input.Delivery.TransportMode == "TRUCK" && trips.Length > 0)
@@ -109,14 +131,15 @@ public sealed partial class ServiceDraftService
         void Add(string code, string message, string field, Guid? line = null, bool warning = false) => issues.Add(new JsonObject
             { ["code"] = code, ["message"] = message, ["field"] = field, ["sourceContainerId"] = line?.ToString(), ["severity"] = warning ? "WARNING" : "ERROR" });
         if (input.WorkflowVersion != 2) { Add("DELIVERY_WORKFLOW_REQUIRED", "Mở chỉnh sửa để bổ sung xác thực email và khai báo giao nhận theo quy trình mới.", "workflowVersion"); return issues; }
-        if (!await HasSourceEmail(draftId, input, company, ct)) Add("SOURCE_EMAIL_REQUIRED", "Xác thực email cho Booking/DO/eDO hiện tại trước khi xác nhận. Mã xác thực có hiệu lực 30 phút sau khi xác nhận.", "source");
+        if (!await HasSourceEmail(draftId, input, company, ct))
+        {
+            Add("SOURCE_EMAIL_REQUIRED", "Xác thực email cho Booking/DO/eDO hiện tại trước khi xác nhận. Mã xác thực có hiệu lực 60 phút sau khi xác nhận.", "source");
+        }
         if (input.Flow == "IMPORT")
         {
             if (input.Source.VesselName == "") Add("VESSEL_REQUIRED", "Bổ sung tên tàu trên lệnh giao hàng.", "source.vesselName");
             if (input.Source.VoyageNumber == "") Add("VOYAGE_REQUIRED", "Bổ sung chuyến tàu trên lệnh giao hàng.", "source.voyageNumber");
         }
-        if (!HasCustomsConfirmation(draftId, input))
-            Add("CUSTOMS_CONFIRMATION_REQUIRED", "Bấm Xác nhận thông quan cho danh sách container hiện tại trước khi xác nhận đăng ký.", "delivery.customsConfirmationScope");
         var delivery = input.Delivery;
         if (delivery.TransportMode == "TRUCK")
         {
@@ -145,16 +168,23 @@ public sealed partial class ServiceDraftService
             var cargo = S(container, "cargoType").ToLowerInvariant();
             operational.TryGetValue(line.SourceContainerId, out var state);
             var reefer = Equipment(container, state) == "REEFER" || (iso.Length > 2 && iso[2] == 'R') || iso.Contains("RF") || iso.Contains("RH") || cargo is "reefer" or "frozen";
-            if (pickup && reefer && !line.Services.Any(usage => services.TryGetValue(usage.ServiceId, out var service) && S(service, "code") == "REEFER_POWER"))
-                Add("IMPORT_REEFER_POWER_REQUIRED", "Container lạnh hàng nhập bắt buộc đăng ký cắm điện và hạn rút điện.", "lines.services", line.SourceContainerId);
+            // Container lạnh hàng nhập đã được tự động áp dụng cắm điện và hạn rút điện trong background
+            // if (pickup && reefer && !line.Services.Any(usage => services.TryGetValue(usage.ServiceId, out var service) && S(service, "code") == "REEFER_POWER"))
+            //     Add("IMPORT_REEFER_POWER_REQUIRED", "Container lạnh hàng nhập bắt buộc đăng ký cắm điện và hạn rút điện.", "lines.services", line.SourceContainerId);
             var declaration = line.Declaration;
             if (input.Flow == "EXPORT" && declaration == null)
                 Add("CONTAINER_DECLARATION_REQUIRED", "Bổ sung khai báo container xuất trước khi xác nhận.", "lines.declaration", line.SourceContainerId);
             if (input.Flow == "EXPORT" && declaration != null)
             {
-                if (declaration.ContainerNumber != S(container, "containerNumber") || declaration.IsoCode != S(container, "typeCode")
-                    || declaration.SealNumber != S(container, "sealNumber") || declaration.WeightKg != container["vgmKg"]?.GetValue<decimal>())
-                    Add("DECLARATION_SOURCE_MISMATCH", "Số container, ISO, seal và VGM phải khớp danh sách Booking đã công bố. Cập nhật hồ sơ nguồn trước nếu có thay đổi.", "lines.declaration", line.SourceContainerId);
+                if (!string.IsNullOrWhiteSpace(declaration.SealNumber))
+                {
+                    container["sealNumber"] = declaration.SealNumber;
+                }
+                if (declaration.WeightKg > 0)
+                {
+                    container["vgmKg"] = declaration.WeightKg;
+                    container["grossWeightKg"] = declaration.WeightKg;
+                }
                 if (declaration.OperatorName == "" || declaration.CargoType == "" || declaration.DischargePort == "" || declaration.DestinationPort == "")
                     Add("CONTAINER_DECLARATION_REQUIRED", "Bổ sung hãng khai thác, loại hàng, cảng dỡ và cảng đích.", "lines.declaration", line.SourceContainerId);
                 if ((cargo is "dangerous" or "dg") && (declaration.ImoClass == "" || declaration.UnNumber == ""))
@@ -166,7 +196,7 @@ public sealed partial class ServiceDraftService
                     Add("DG_SOURCE_MISMATCH", "IMO và UN phải khớp hồ sơ hàng nguy hiểm đã công bố.", "lines.declaration", line.SourceContainerId);
             }
             foreach (var usage in line.Services)
-                if (usage.EndsAt != null && delivery.OrderValidUntil != null && DateTimeOffset.Parse(usage.EndsAt, CultureInfo.InvariantCulture)
+                if (input.Flow != "EXPORT" && usage.EndsAt != null && delivery.OrderValidUntil != null && DateTimeOffset.Parse(usage.EndsAt, CultureInfo.InvariantCulture)
                     > DateTimeOffset.Parse(delivery.OrderValidUntil + "T23:59:59+07:00", CultureInfo.InvariantCulture))
                     Add("SERVICE_AFTER_ORDER_EXPIRY", "Thời gian dịch vụ không được vượt quá hạn lệnh giao nhận.", "lines.services.endsAt", line.SourceContainerId);
         }

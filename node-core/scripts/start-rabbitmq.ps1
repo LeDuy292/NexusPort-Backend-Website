@@ -2,6 +2,15 @@ param([switch]$Install)
 $ErrorActionPreference = 'Stop'
 $runtimeDirectory = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../outputs/local-rabbitmq'))
 $nodeEnvPath = Join-Path $PSScriptRoot '../.env'
+$enableRabbit = $env:ENABLE_RABBITMQ
+if (-not $enableRabbit -and (Test-Path -LiteralPath $nodeEnvPath)) {
+  $enableLine = Get-Content -LiteralPath $nodeEnvPath | Where-Object { $_ -match '^ENABLE_RABBITMQ=' } | Select-Object -First 1
+  if ($enableLine) { $enableRabbit = ($enableLine -replace '^ENABLE_RABBITMQ=', '').Trim().Trim('"').Trim("'") }
+}
+if ($enableRabbit -eq 'false') {
+  Write-Output 'RabbitMQ is disabled (ENABLE_RABBITMQ=false). Skipping local RabbitMQ startup.'
+  exit 0
+}
 $brokerUrl = $env:RABBITMQ_URL
 if (-not $brokerUrl -and (Test-Path -LiteralPath $nodeEnvPath)) {
   $line = Get-Content -LiteralPath $nodeEnvPath | Where-Object { $_ -match '^RABBITMQ_URL=' } | Select-Object -First 1

@@ -11,34 +11,46 @@ public sealed partial class ExportBookingService
     public async Task<JsonObject> Freight(Guid id,ExportVersionRequest request,CancellationToken ct)
     {
         await using var tx=await _db.Database.BeginTransactionAsync(ct);
-        var b=await Booking(id,true,ct);OwnLine(b);Version(b,request.ExpectedVersion);
+        var b=await Booking(id,true,ct);await OwnLine(b,ct);Version(b,request.ExpectedVersion);
         Require(b["si"]!=null&&!new[]{"Pending","Cancelled","Rejected","BlIssued"}.Contains(S(b,"status")),"Status","Booking/SI không còn cho phép thay đổi thanh toán cước.");
         await Exec("UPDATE export_bookings SET freight_paid=@p0,version=version+1,updated_at=now() WHERE id=@p1",ct,request.IsPaid,id);
         await History(id,G(b,"voyageId"),"FreightPaymentRecorded",request.IsPaid?"Hãng tàu ghi nhận đã thanh toán cước vận tải biển.":"Hãng tàu điều chỉnh trạng thái cước chưa thanh toán.",ct);
         await tx.CommitAsync(ct);return await Detail(id,ct);
     }
-    public async Task<JsonObject> IssueBl(Guid id,ExportVersionRequest request,CancellationToken ct)
+    /// <summary>
+    /// Hãng tàu phát hành B/L khi hàng đã xếp tàu và tàu đã rời bến. Không qua SI/draft của shipper:
+    /// hãng tàu tự nhập thông tin B/L và chọn hình thức B/L. Hệ thống không thu tiền; với cước trả trước,
+    /// hãng tàu chỉ xác nhận thủ công là đã thu.
+    /// </summary>
+    public async Task<JsonObject> IssueBl(Guid id,ExportIssueBlRequest request,CancellationToken ct)
     {
         await using var tx=await _db.Database.BeginTransactionAsync(ct);
-        var b=await Booking(id,true,ct);OwnLine(b);Version(b,request.ExpectedVersion);
+        var b=await Booking(id,true,ct);await OwnLine(b,ct);Version(b,request.ExpectedVersion);
         var v=await Voyage(G(b,"voyageId"),true,ct);
         var retained=(await Containers(id,ct)).Where(x=>!new[]{"Excluded","Rolled"}.Contains(S(x,"status"))).ToList();
         Require(S(v,"status")=="Departed"&&S(b,"status")=="Loaded"&&retained.Count>0&&retained.All(x=>S(x,"status")=="Loaded"),"Loading","Chỉ phát hành B/L khi chuyến đã rời cầu và toàn bộ container giữ lại đã xếp tàu.");
-        Require(S(b,"siStatus")=="Confirmed"&&b["draft"]!=null,"SI","Khách hàng chưa xác nhận draft B/L.");
-        var confirmedContainers=b["draft"]?["containers"]?.AsArray().OfType<JsonObject>().ToList()??new();
-        Require(confirmedContainers.Count==retained.Count&&retained.All(container=>confirmedContainers.Any(confirmed=>
-            G(confirmed,"id")==G(container,"id")&&S(confirmed,"sealNumber")==S(container,"sealNumber")&&
-            confirmed["vgmKg"]!.GetValue<decimal>()==container["vgmKg"]!.GetValue<decimal>())),
-            "Draft","Danh sách container giữ lại đã thay đổi. Hãng tàu cần yêu cầu sửa SI và khách hàng xác nhận draft mới trước khi phát hành.");
-        Require(S(b["si"],"freightTerms")!="Prepaid"||b["freightPaid"]!.GetValue<bool>(),"Freight","Cước trả trước chưa được hãng tàu xác nhận thanh toán.");
+        var shipper=string.IsNullOrWhiteSpace(request.Shipper)?S(b,"companyName"):request.Shipper.Trim();
+        Text(shipper,"Người gửi hàng",1000);Text(request.Consignee,"Người nhận hàng",1000);Text(request.CargoDescription,"Mô tả hàng",2000);
+        Require(request.NotifyParty?.Length<=1000||request.NotifyParty==null,"NotifyParty","Bên thông báo tối đa 1000 ký tự.");
+        Require(request.PackagesCount>0&&request.GrossWeightKg>0,"Cargo","Số kiện và khối lượng hàng phải lớn hơn 0.");
+        Require(request.GrossWeightKg<=retained.Sum(x=>x["vgmKg"]!.GetValue<decimal>()),"GrossWeightKg","Khối lượng hàng không thể lớn hơn tổng VGM của các container.");
+        Require(request.FreightTerms is "Prepaid" or "Collect","FreightTerms","Điều kiện cước không hợp lệ.");
+        Require(request.BlType is "Original" or "TelexRelease" or "SeawayBill","BlType","Hình thức B/L không hợp lệ.");
+        // Hệ thống không thu tiền: cước trả trước cần hãng tàu xác nhận thủ công là đã thu.
+        Require(request.FreightTerms!="Prepaid"||request.IsPaid,"Freight","Cước trả trước chưa được hãng tàu xác nhận đã thu.");
         var number="BL-"+Guid.NewGuid().ToString("N").ToUpperInvariant();
-        // Preserve the exact confirmed draft, adding final on-board evidence rather than editing it.
-        var issued=b["draft"]!.DeepClone().AsObject();issued["blNumber"]=number;issued["issuedAt"]=DateTime.UtcNow;
+        var si=new JsonObject{["shipper"]=shipper,["consignee"]=request.Consignee.Trim(),["notifyParty"]=request.NotifyParty?.Trim(),
+            ["cargoDescription"]=request.CargoDescription.Trim(),["packagesCount"]=request.PackagesCount,["grossWeightKg"]=request.GrossWeightKg,
+            ["freightTerms"]=request.FreightTerms,["blType"]=request.BlType,["destinationPort"]=S(v,"portOfDischarge")};
+        var issued=new JsonObject{["si"]=si,["containers"]=new JsonArray(retained.Select(x=>(JsonNode)x.DeepClone()).ToArray()),["blNumber"]=number,["issuedAt"]=DateTime.UtcNow};
         issued["onBoardAt"]=retained.Select(x=>D(x,"loadedAt")).Max();
         issued["loadingEvidence"]=new JsonArray(retained.Select(x=>(JsonNode)x).ToArray());
-        await Exec("UPDATE export_bookings SET status='BlIssued',bl_number=@p0,draft=@p1::jsonb,version=version+1,updated_at=now() WHERE id=@p2",ct,number,issued.ToJsonString(),id);
-        await History(id,G(b,"voyageId"),"BlIssued","Hãng tàu phát hành B/L "+number+" từ bản nháp đã xác nhận.",ct);
-        await tx.CommitAsync(ct);return await Detail(id,ct);
+        await Exec("UPDATE export_bookings SET status='BlIssued',bl_number=@p0,si=@p1::jsonb,draft=@p2::jsonb,freight_paid=@p3,version=version+1,updated_at=now() WHERE id=@p4",ct,number,si.ToJsonString(),issued.ToJsonString(),request.IsPaid,id);
+        await History(id,G(b,"voyageId"),"BlIssued","Hãng tàu phát hành B/L "+number+" ("+request.BlType+").",ct);
+        // Hàng xuất dỡ ở cảng khác: không mở hồ sơ hàng nhập tại cảng này (hồ sơ nhập chỉ mở từ bản khai nhập).
+        await tx.CommitAsync(ct);
+        await DocEvent(S(b,"bookingNumber"),"BL","ISSUED",null,"BlIssued",null,null,null,issued,ct);
+        return await Detail(id,ct);
     }
     private static void EventShape(ExportPortEventRequest request)
     {
@@ -84,6 +96,41 @@ public sealed partial class ExportBookingService
                 """,ct,request.ExportContainerId,G(c,"containerId"),D(c,"gateInAt"));
             Require(positions.Count>0,"Yard","Chưa có bằng chứng container đã hạ đúng lượt bãi. Gate In xe chưa đủ điều kiện ghi nhận xếp tàu.");
             await Exec("UPDATE export_booking_containers SET status='Loaded',loaded_at=@p0 WHERE id=@p1",ct,request.OccurredAt,request.ExportContainerId);
+            // Loaded is the physical end of this container's yard stay, just as
+            // completed GateOut is for a truck Pickup. Close the visit and free
+            // its slot at the actual loading time so storage aging stops here.
+            await Exec("""
+                UPDATE container_positions p SET is_current=false,removed_at=@p0
+                FROM export_gate_links l JOIN booking_containers bc ON bc.booking_id=l.gate_booking_id
+                WHERE l.export_container_id=@p1 AND p.container_id=bc.container_id AND p.is_current
+                """,ct,request.OccurredAt,request.ExportContainerId);
+            await Exec("""
+                UPDATE yard_slot_reservations r SET reserved_to=@p0
+                FROM export_gate_links l JOIN booking_containers bc ON bc.booking_id=l.gate_booking_id
+                WHERE l.export_container_id=@p1 AND r.container_id=bc.container_id AND r.reserved_to IS NULL
+                """,ct,request.OccurredAt,request.ExportContainerId);
+            await Exec("""
+                UPDATE yard_slots s SET status='empty'::yard_slot_status
+                WHERE s.status IN ('occupied','reserved') AND s.id IN (
+                  SELECT p.slot_id FROM container_positions p
+                  JOIN export_gate_links l ON l.export_container_id=@p0
+                  JOIN booking_containers bc ON bc.booking_id=l.gate_booking_id AND bc.container_id=p.container_id
+                  WHERE p.removed_at=@p1 AND p.is_current=false
+                )
+                  AND NOT EXISTS(SELECT 1 FROM container_positions p WHERE p.slot_id=s.id AND p.is_current)
+                  AND NOT EXISTS(SELECT 1 FROM yard_slot_reservations r WHERE r.slot_id=s.id AND r.reserved_to IS NULL)
+                """,ct,request.ExportContainerId,request.OccurredAt);
+            await Exec("""
+                UPDATE container_visits visit SET visit_status='completed',completed_at=@p0,updated_at=now()
+                FROM export_gate_links l JOIN booking_containers bc ON bc.booking_id=l.gate_booking_id
+                WHERE l.export_container_id=@p1 AND visit.id=bc.container_visit_id
+                  AND visit.container_id=bc.container_id AND visit.visit_status='active'
+                """,ct,request.OccurredAt,request.ExportContainerId);
+            await Exec("""
+                UPDATE containers c SET status='loaded'::container_status,left_at=@p0,updated_at=now()
+                FROM export_gate_links l JOIN booking_containers bc ON bc.booking_id=l.gate_booking_id
+                WHERE l.export_container_id=@p1 AND c.id=bc.container_id
+                """,ct,request.OccurredAt,request.ExportContainerId);
         }
         else if(request.EventType=="GateInRejected")
         {
@@ -96,10 +143,10 @@ public sealed partial class ExportBookingService
         await History(id,G(b,"voyageId"),request.EventType,request.Reason??"Cảng ghi nhận container đã xếp lên tàu.",ct);
         await tx.CommitAsync(ct);return await Detail(id,ct);
     }
-    private void VoyageLine(JsonObject voyage) => Require(Admin||(Line&&G(voyage,"shippingLineId")==Actor),"Role","Không có quyền xử lý chuyến tàu của hãng khác.");
+    private async Task VoyageLine(JsonObject voyage,CancellationToken ct) => Require(Admin||(Line&&await SameLine(G(voyage,"shippingLineId"),ct)),"Role","Không có quyền xử lý chuyến tàu của hãng khác.");
     public async Task<JsonObject> ClosePreview(Guid id,CancellationToken ct)
     {
-        var v=await Voyage(id,false,ct);VoyageLine(v);
+        var v=await Voyage(id,false,ct);await VoyageLine(v,ct);
         var rows=await Rows("""
             SELECT row_to_json(x)::text AS "Value" FROM (SELECT e.id,e.export_booking_id AS "exportBookingId",e.container_no AS "containerNumber",e.status,e.customs_cleared AS "customsCleared",e.vgm_kg AS "vgmKg",
             CASE WHEN e.status<>'GateIn' THEN 'Container chưa vào cảng' WHEN NOT e.customs_cleared THEN 'Chưa thông quan' WHEN e.vgm_kg<=0 THEN 'VGM không hợp lệ' ELSE NULL END AS reason
@@ -111,7 +158,7 @@ public sealed partial class ExportBookingService
     public async Task<JsonObject> CloseVoyage(Guid id,ExportVersionRequest request,CancellationToken ct)
     {
         await using var tx=await _db.Database.BeginTransactionAsync(ct);
-        var v=await Voyage(id,true,ct);VoyageLine(v);Version(v,request.ExpectedVersion);
+        var v=await Voyage(id,true,ct);await VoyageLine(v,ct);Version(v,request.ExpectedVersion);
         Require(S(v,"status")=="Scheduled"&&DateTime.UtcNow>=D(v,"cyCutoff"),"CyCutoff","Chỉ chốt chuyến đang lên lịch sau CY cut-off.");
         var preview=await ClosePreview(id,ct);
         foreach(var item in preview["excluded"]!.AsArray().OfType<JsonObject>())
@@ -166,13 +213,13 @@ public sealed partial class ExportBookingService
     }
     public async Task<JsonObject?> Manifest(Guid id,CancellationToken ct)
     {
-        var v=await Voyage(id,false,ct);VoyageLine(v);
+        var v=await Voyage(id,false,ct);await VoyageLine(v,ct);
         return (await Rows("SELECT jsonb_build_object('voyageId',voyage_id,'snapshot',snapshot,'status',status,'version',version,'sentAt',sent_at)::text AS \"Value\" FROM export_manifests WHERE voyage_id=@p0",ct,id)).SingleOrDefault();
     }
     public async Task<JsonObject> BuildManifest(Guid id,ExportVersionRequest request,bool send,CancellationToken ct)
     {
         await using var tx=await _db.Database.BeginTransactionAsync(ct);
-        var v=await Voyage(id,true,ct);VoyageLine(v);
+        var v=await Voyage(id,true,ct);await VoyageLine(v,ct);
         Require(S(v,"status")=="Departed","Voyage","Chỉ lập manifest xuất khẩu sau khi tàu rời cầu theo phạm vi mô phỏng của dự án.");
         var current=await Manifest(id,ct);
         if(send)

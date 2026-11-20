@@ -1,11 +1,12 @@
 'use strict';
-const POLICY = { earlyArrivalMinutes: 12 * 60, lateGraceMinutes: 10, callResponseMinutes: 10 };
+const EARLY_ARRIVAL_DAYS = 3;
+const POLICY = { earlyArrivalMinutes: EARLY_ARRIVAL_DAYS * 24 * 60, lateGraceMinutes: 10, callResponseMinutes: 10 };
 const fail = (message, statusCode = 409) => Object.assign(new Error(message), { statusCode });
 const activeBooking = booking => ['approved', 'ready'].includes(booking.status.toLowerCase());
 function checkArrival(booking, now = new Date()) {
   if (!activeBooking(booking)) throw fail('Booking chưa được duyệt hoặc không còn chờ điều phối.');
   if (now.getTime() < Date.parse(booking.appointmentStart) - POLICY.earlyArrivalMinutes * 60000) {
-    throw fail('Có thể xác nhận từ 12 giờ trước giờ hẹn.');
+    throw fail(`Có thể xác nhận từ ${EARLY_ARRIVAL_DAYS} ngày trước giờ hẹn.`);
   }
 }
 function decorate(booking, now = new Date()) {
@@ -18,9 +19,12 @@ function decorate(booking, now = new Date()) {
   const lateAt = effective?.arrivedAt ? Date.parse(effective.arrivedAt) : time;
   const isLate = lateAt > start + POLICY.lateGraceMinutes * 60000;
   const held = effective?.holdUntil && Date.parse(effective.holdUntil) > time;
+  // Tài xế phải xác nhận chuyến vận chuyển trước khi báo đã đến cổng
+  const tripConfirmed = Boolean(booking.tripStatus) && booking.tripStatus !== 'Assigned';
   return { ...booking, dispatch, coordination: {
     isLate,
-    canArrive: active && !effective && withinArrivalWindow,
+    tripConfirmed,
+    canArrive: active && !effective && withinArrivalWindow && tripConfirmed,
     canCall: Boolean(active && effective?.status === 'ready' && !held && withinArrivalWindow),
     canAcknowledge: Boolean(active && effective?.status === 'called' && Date.parse(effective.callExpiresAt) > time),
     isHeld: Boolean(held),
@@ -28,7 +32,7 @@ function decorate(booking, now = new Date()) {
 }
 function checkCall(booking, now = new Date()) {
   if (!decorate(booking, now).coordination.canCall) {
-    throw fail('Chỉ gọi xe đã sẵn sàng, từ 12 giờ trước giờ hẹn và không trong thời gian chờ thêm.');
+    throw fail(`Chỉ gọi xe đã sẵn sàng, từ ${EARLY_ARRIVAL_DAYS} ngày trước giờ hẹn và không trong thời gian chờ thêm.`);
   }
 }
 function expectedVersion(input) {

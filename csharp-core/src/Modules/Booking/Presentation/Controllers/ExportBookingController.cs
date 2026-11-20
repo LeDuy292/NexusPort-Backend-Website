@@ -69,20 +69,10 @@ public sealed class ExportBookingController : ControllerBase
     public async Task<IActionResult> Reject(Guid id, ExportVersionRequest request, CancellationToken ct) => Ok(await _service.Decision(id, request, false, ct));
     [Authorize(Roles = Customers)] [HttpPost("{id:guid}/containers")]
     public async Task<IActionResult> Containers(Guid id, DeclareExportContainersRequest request, CancellationToken ct) => Ok(await _service.Declare(id, request, ct));
-    [Authorize(Roles = Customers)] [HttpPost("{id:guid}/si")]
-    public async Task<IActionResult> Si(Guid id, ExportSiRequest request, CancellationToken ct) => Ok(await _service.SubmitSi(id, request, ct));
-    [Authorize(Roles = Lines)] [HttpPost("{id:guid}/draft-bl")]
-    public async Task<IActionResult> Draft(Guid id, ExportVersionRequest request, CancellationToken ct) => Ok(await _service.Draft(id, request, false, ct));
-    [Authorize(Roles = Lines)] [HttpPost("{id:guid}/request-si-revision")]
-    public async Task<IActionResult> Revise(Guid id, ExportVersionRequest request, CancellationToken ct) => Ok(await _service.Draft(id, request, true, ct));
-    [Authorize(Roles = Customers)] [HttpPost("{id:guid}/confirm-draft")]
-    public async Task<IActionResult> Confirm(Guid id, ExportVersionRequest request, CancellationToken ct) => Ok(await _service.ConfirmDraft(id, request, ct));
     [Authorize(Roles = Customers)] [HttpPost("{id:guid}/cancel")]
     public async Task<IActionResult> Cancel(Guid id, ExportVersionRequest request, CancellationToken ct) => Ok(await _service.Cancel(id, request, ct));
-    [Authorize(Roles = Lines)] [HttpPost("{id:guid}/freight-payment")]
-    public async Task<IActionResult> Freight(Guid id, ExportVersionRequest request, CancellationToken ct) => Ok(await _service.Freight(id, request, ct));
     [Authorize(Roles = Lines)] [HttpPost("{id:guid}/issue-bl")]
-    public async Task<IActionResult> Bl(Guid id, ExportVersionRequest request, CancellationToken ct) => Ok(await _service.IssueBl(id, request, ct));
+    public async Task<IActionResult> Bl(Guid id, ExportIssueBlRequest request, CancellationToken ct) => Ok(await _service.IssueBl(id, request, ct));
     [Authorize(Roles = PortStaff)] [HttpPost("{id:guid}/port-event")]
     public async Task<IActionResult> Port(Guid id, ExportPortEventRequest request, CancellationToken ct) => Ok(await _service.PortEvent(id, request, ct));
     [HttpGet("voyages")]

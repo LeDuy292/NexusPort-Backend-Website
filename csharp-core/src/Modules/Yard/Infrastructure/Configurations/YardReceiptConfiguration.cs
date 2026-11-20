@@ -24,6 +24,7 @@ public class YardReceiptConfiguration : IEntityTypeConfiguration<YardReceipt>
         builder.Property(x => x.InspectorName).HasColumnName("inspector_name").HasMaxLength(100).IsRequired();
         builder.Property(x => x.YardBlockCode).HasColumnName("yard_block_code").HasMaxLength(20).IsRequired();
         builder.Property(x => x.LocationCoordinate).HasColumnName("location_coordinate").HasMaxLength(50).IsRequired();
+        builder.Property(x => x.PhotoUrls).HasColumnName("photo_urls").HasColumnType("jsonb").IsRequired();
         builder.Property(x => x.CreatedAt).HasColumnName("created_at").IsRequired();
         builder.Property(x => x.CreatedBy).HasColumnName("created_by");
         builder.Property(x => x.UpdatedAt).HasColumnName("updated_at");

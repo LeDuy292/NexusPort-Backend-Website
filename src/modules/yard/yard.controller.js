@@ -145,6 +145,55 @@ async function recordContainerMovement(req, res, next) {
   }
 }
 
+async function unstackMove(req, res, next) {
+  try {
+    const result = await yardService.unstackMove(req.params.id, req.body, req.user?.id);
+    res.status(200).json({ success: true, message: 'Đã hoàn tất đảo chuyển container chắn.', data: result });
+  } catch (err) { next(err); }
+}
+
+async function moveToBufferStage(req, res, next) {
+  try {
+    const result = await yardService.moveToBufferStage(req.params.id, req.body, req.user?.id);
+    res.status(200).json({ success: true, message: 'Đã đưa container ra bãi đệm gần đường xe chạy.', data: result });
+  } catch (err) { next(err); }
+}
+
+async function confirmReadyDelivery(req, res, next) {
+  try {
+    const result = await yardService.confirmReadyForDelivery(req.params.id, req.body, req.user?.id);
+    res.status(200).json({ success: true, message: 'Đã chốt trạng thái SẴN SÀNG GIAO cho khách.', data: result });
+  } catch (err) { next(err); }
+}
+
+async function confirmReadyLoading(req, res, next) {
+  try {
+    const result = await yardService.confirmReadyForLoading(req.params.id, req.body, req.user?.id);
+    res.status(200).json({ success: true, message: 'Đã chốt trạng thái SẴN SÀNG XẾP TÀU.', data: result });
+  } catch (err) { next(err); }
+}
+
+async function dispatchApronTruck(req, res, next) {
+  try {
+    const result = await yardService.dispatchApronTruck(req.params.id, req.body, req.user?.id);
+    res.status(200).json({ success: true, message: result.message, data: result });
+  } catch (err) { next(err); }
+}
+
+async function toggleReeferPower(req, res, next) {
+  try {
+    const result = await yardService.toggleReeferPower(req.params.id, req.body, req.user?.id);
+    res.status(200).json({ success: true, message: 'Cập nhật trạng thái nguồn điện container lạnh thành công.', data: result });
+  } catch (err) { next(err); }
+}
+
+async function cancelPreparationOrShutOut(req, res, next) {
+  try {
+    const result = await yardService.cancelPreparationOrShutOut(req.params.id, req.body, req.user?.id);
+    res.status(200).json({ success: true, message: result.message || 'Thao tác hủy / cờ giữ thành công.', data: result });
+  } catch (err) { next(err); }
+}
+
 module.exports = {
   getGateOutRequests,
   getGateOutRequestById,
@@ -155,5 +204,12 @@ module.exports = {
   getSlotOccupancyHistory,
   exportSlotOccupancyHistory,
   recordContainerMovement,
+  unstackMove,
+  moveToBufferStage,
+  confirmReadyDelivery,
+  confirmReadyLoading,
+  dispatchApronTruck,
+  toggleReeferPower,
+  cancelPreparationOrShutOut,
 };
 

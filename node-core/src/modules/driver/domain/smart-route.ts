@@ -228,3 +228,44 @@ export function shortestRoute(
     ),
   };
 }
+
+// Sơ đồ bãi chỉ để mô phỏng chỉ đường: mỗi đơn vị toạ độ trên sơ đồ tương ứng khoảng 0,15 m, xe chạy khoảng 10 km/h.
+export const SIM_METERS_PER_UNIT = 0.15;
+export const SIM_SPEED_MPS = 2.8;
+
+/**
+ * Chỉ dẫn từng chặng theo toạ độ sơ đồ: gộp các đoạn thẳng liên tiếp, nói rõ rẽ trái / rẽ phải / quay đầu và khoảng cách mô phỏng.
+ * Toạ độ SVG có trục y hướng xuống nên tích có hướng dương nghĩa là rẽ phải.
+ */
+export function turnByTurn(
+  waypoints: RouteNode[],
+  segments: Array<{ instruction?: string }>,
+): { steps: string[]; meters: number } {
+  type Run = { dx: number; dy: number; length: number; end: RouteNode };
+  const runs: Run[] = [];
+  let approach: string | undefined;
+  for (let i = 0; i < segments.length; i++) {
+    const a = waypoints[i], b = waypoints[i + 1];
+    const dx = b.x - a.x, dy = b.y - a.y, length = Math.hypot(dx, dy);
+    if (length < 0.5) { approach = segments[i].instruction ?? approach; continue; }
+    const last = runs[runs.length - 1];
+    const same = last && Math.abs(Math.atan2(last.dx * dy - last.dy * dx, last.dx * dx + last.dy * dy)) < (20 * Math.PI) / 180;
+    if (same) { last.length += length; last.end = b; }
+    else runs.push({ dx, dy, length, end: b });
+  }
+  const steps: string[] = [];
+  let meters = 0;
+  runs.forEach((run, i) => {
+    const m = Math.max(1, Math.round(run.length * SIM_METERS_PER_UNIT));
+    meters += m;
+    let lead = 'Đi thẳng';
+    if (i > 0) {
+      const prev = runs[i - 1];
+      const deg = (Math.atan2(prev.dx * run.dy - prev.dy * run.dx, prev.dx * run.dx + prev.dy * run.dy) * 180) / Math.PI;
+      lead = Math.abs(deg) >= 150 ? 'Quay đầu' : deg > 0 ? 'Rẽ phải' : 'Rẽ trái';
+    }
+    steps.push(`${lead}, đi khoảng ${m} m đến ${run.end.label}.`);
+  });
+  if (approach) steps.push(approach);
+  return { steps, meters };
+}

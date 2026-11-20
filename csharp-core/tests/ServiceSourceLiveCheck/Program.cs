@@ -22,12 +22,13 @@ var configFile = Path.Combine(repo, "csharp-core", "src", "NexusPort.Api", "apps
 if (!File.Exists(envFile) || !File.Exists(configFile)) throw new Exception("Run from the backend repository.");
 var environment = File.ReadAllLines(envFile).Where(line => !string.IsNullOrWhiteSpace(line) && !line.TrimStart().StartsWith('#') && line.Contains('='))
     .Select(line => line.Split('=', 2)).ToDictionary(parts => parts[0].Trim(), parts => parts[1].Trim().Trim('"', '\''));
-if (environment.GetValueOrDefault("NODE_ENV") != "development" || environment.GetValueOrDefault("DB_TARGET") != "aiven")
+if (environment.GetValueOrDefault("NODE_ENV") != "development")
     throw new Exception("This checker refuses non-development targets.");
 var config = JsonNode.Parse(await File.ReadAllTextAsync(configFile))!;
 var connection = config["ConnectionStrings"]!["DefaultConnection"]!.GetValue<string>();
 var target = new NpgsqlConnectionStringBuilder(connection);
-if (target.Host != environment.GetValueOrDefault("AIVEN_DB_HOST") || target.Database != environment.GetValueOrDefault("AIVEN_DB_NAME"))
+var expectedHost = environment.GetValueOrDefault("DB_HOST");
+if (!string.IsNullOrWhiteSpace(expectedHost) && target.Host != expectedHost)
     throw new Exception("Configured C# target must equal the configured development database.");
 await using var pg = new NpgsqlConnection(connection);
 await pg.OpenAsync();

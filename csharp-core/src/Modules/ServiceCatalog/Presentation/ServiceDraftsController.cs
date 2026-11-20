@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 using NexusPort.Modules.ServiceCatalog.Application;
@@ -12,9 +13,27 @@ namespace NexusPort.Modules.ServiceCatalog.Presentation;
 [Authorize(Roles = "Transport Company,Carrier,Carrier Staff")]
 public sealed class ServiceDraftsController(ServiceDraftService service) : ControllerBase
 {
+    private static bool IsTransientDatabaseError(Exception error)
+        => error is NpgsqlException pg && pg.IsTransient
+            || error is InvalidOperationException { InnerException: NpgsqlException inner } && inner.IsTransient;
+
+    private static bool IsConnectionSlotError(Exception error)
+        => error is PostgresException { SqlState: "53300" }
+            || error.InnerException is not null && IsConnectionSlotError(error.InnerException);
+
     private async Task<IActionResult> Run(Func<Task<object>> action)
     {
-        try { return Ok(await action()); }
+        try
+        {
+            var readOnly = HttpMethods.IsGet(Request.Method) || Request.Path.Value?.EndsWith("/email-status", StringComparison.Ordinal) == true;
+            for (var attempt = 0; ; attempt++)
+            {
+                try { return Ok(await action()); }
+                catch (Exception error) when (attempt < 4 &&
+                    (IsConnectionSlotError(error) || readOnly && attempt < 2 && IsTransientDatabaseError(error)))
+                { await Task.Delay(IsConnectionSlotError(error) ? 1000 * (attempt + 1) : 500 * (attempt + 1), HttpContext.RequestAborted); }
+            }
+        }
         catch (AppException error) { return StatusCode(error.StatusCode, new { message = error.Message, errorCode = error.ErrorCode }); }
         catch (PostgresException error) when (error.SqlState == "23514" && error.ConstraintName == "eport_service_registration_email_guard")
         { return UnprocessableEntity(new { message = "Xác thực email đã hết hiệu lực hoặc hồ sơ nguồn đã thay đổi. Mở lại bản nháp và xác thực trước khi xác nhận.", errorCode = "SERVICE_SOURCE_EMAIL_REQUIRED" }); }
@@ -24,7 +43,7 @@ public sealed class ServiceDraftsController(ServiceDraftService service) : Contr
         { return Conflict(new { message = "Dữ liệu vừa thay đổi trong lúc xác nhận. Kiểm tra lại hồ sơ và biểu phí.", errorCode = "SERVICE_CONFIRMATION_CONFLICT" }); }
         catch (PostgresException error) when (error.SqlState is "23503" or "23505")
         { return Conflict(new { message = "Dữ liệu nguồn vừa thay đổi. Tải lại trước khi lưu bản nháp.", errorCode = "SERVICE_DRAFT_CONFLICT" }); }
-        catch (NpgsqlException error) when (error.IsTransient)
+        catch (Exception error) when (IsTransientDatabaseError(error) || IsConnectionSlotError(error))
         {
             Response.Headers.RetryAfter = "3";
             return StatusCode(503, new { message = "Kết nối cơ sở dữ liệu tạm thời gián đoạn. Vui lòng thử lại sau ít giây.", errorCode = "SERVICE_DATABASE_UNAVAILABLE" });

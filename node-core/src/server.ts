@@ -13,8 +13,6 @@ const server = createServer(app);
 const realtimeGateway = new DriverRealtimeGateway(server);
 const broker = RabbitMQClient.getInstance();
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-let reconnectAttempts = 0;
-let realtimeStarting = false;
 let stopping = false;
 let databaseWarmupRunning = false;
 let databaseWarmupTimer: ReturnType<typeof setTimeout> | undefined;
@@ -82,5 +80,12 @@ const shutdown = async () => {
   await Promise.allSettled([broker.close(), pool.end()]);
   process.exit(0);
 };
+process.on('uncaughtException', (err) => {
+  logger.error('[node-core] Uncaught exception:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  logger.error('[node-core] Unhandled rejection:', reason);
+});
+
 process.once('SIGTERM', () => void shutdown());
 process.once('SIGINT', () => void shutdown());
