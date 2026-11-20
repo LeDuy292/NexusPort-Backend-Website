@@ -175,6 +175,18 @@ TransportTrip.init(
       allowNull: true,
       comment: 'Tình trạng container khi giao (Nguyên chì / Tốt / Móp nhẹ...)',
     },
+    // Phiếu e-EIR chiều vào và ảnh container do nhân viên bãi chụp khi nhận (migration 077)
+    eir_no: {
+      type: DataTypes.STRING(80),
+      allowNull: true,
+      comment: 'Số phiếu e-EIR chiều vào',
+    },
+    eir_photo_urls: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: [],
+      comment: 'Ảnh container khi bãi nhận (URL S3)',
+    },
     recipient_name: {
       type: DataTypes.STRING(100),
       allowNull: true,

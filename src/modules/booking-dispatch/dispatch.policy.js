@@ -19,9 +19,12 @@ function decorate(booking, now = new Date()) {
   const lateAt = effective?.arrivedAt ? Date.parse(effective.arrivedAt) : time;
   const isLate = lateAt > start + POLICY.lateGraceMinutes * 60000;
   const held = effective?.holdUntil && Date.parse(effective.holdUntil) > time;
+  // Tài xế phải xác nhận chuyến vận chuyển trước khi báo đã đến cổng
+  const tripConfirmed = Boolean(booking.tripStatus) && booking.tripStatus !== 'Assigned';
   return { ...booking, dispatch, coordination: {
     isLate,
-    canArrive: active && !effective && withinArrivalWindow,
+    tripConfirmed,
+    canArrive: active && !effective && withinArrivalWindow && tripConfirmed,
     canCall: Boolean(active && effective?.status === 'ready' && !held && withinArrivalWindow),
     canAcknowledge: Boolean(active && effective?.status === 'called' && Date.parse(effective.callExpiresAt) > time),
     isHeld: Boolean(held),

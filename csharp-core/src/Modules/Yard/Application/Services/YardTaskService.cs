@@ -22,14 +22,17 @@ public class YardTaskService : IYardTaskService
     private readonly IMessageBrokerService _messageBroker;
     private readonly INotificationService _notificationService;
     private readonly ILogger<YardTaskService> _logger;
+    private readonly IS3StorageService _s3;
     private static bool _tableEnsured = false;
 
     public YardTaskService(
         AppDbContext context,
         IMessageBrokerService messageBroker,
         INotificationService notificationService,
-        ILogger<YardTaskService> logger)
+        ILogger<YardTaskService> logger,
+        IS3StorageService s3)
     {
+        _s3 = s3;
         _context = context;
         _messageBroker = messageBroker;
         _notificationService = notificationService;
@@ -190,7 +193,7 @@ public class YardTaskService : IYardTaskService
             .FirstOrDefaultAsync(c => c.ContainerNumber.ToUpper() == task.ContainerNo.ToUpper(), cancellationToken);
         if (container != null)
         {
-            container.Status = "Handling";
+            container.Status = "moving"; // nhãn "Handling" không tồn tại trong enum container_status của database
         }
 
         await _context.SaveChangesAsync(cancellationToken);
@@ -407,6 +410,25 @@ public class YardTaskService : IYardTaskService
         return MapToDto(task);
     }
 
+
+    // Ảnh nhận container lưu trên S3 (không lưu ảnh trong database); lỗi tải ảnh làm hủy xác nhận để không mất bằng chứng.
+    private async Task<List<string>> UploadReceiptPhotosAsync(List<string>? images, string containerNo, CancellationToken cancellationToken)
+    {
+        var urls = new List<string>();
+        foreach (var image in (images ?? new List<string>()).Take(4))
+        {
+            var comma = image.IndexOf(',');
+            if (!image.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase) || comma < 0)
+                throw new ValidationException("PhotoImages", "Ảnh container không hợp lệ.");
+            var contentType = image.Substring(5, image.IndexOf(';') - 5);
+            var bytes = Convert.FromBase64String(image[(comma + 1)..]);
+            if (bytes.Length > 6 * 1024 * 1024) throw new ValidationException("PhotoImages", "Mỗi ảnh tối đa 6 MB.");
+            var extension = contentType.Contains("png", StringComparison.OrdinalIgnoreCase) ? ".png" : ".jpg";
+            urls.Add(await _s3.UploadBytesAsync(bytes, $"{containerNo}{extension}", contentType, "NexusPort/yard-receipts", cancellationToken));
+        }
+        return urls;
+    }
+
     public async Task<YardTaskDto> ReceiveContainerAtYardAsync(YardReceivingInspectionDto dto, string userId, CancellationToken cancellationToken = default)
     {
         await EnsureTableAndSeedAsync(cancellationToken);
@@ -422,8 +444,11 @@ public class YardTaskService : IYardTaskService
         }
         if (task == null && !string.IsNullOrWhiteSpace(cleanContainerNo))
         {
+            // Lấy nhiệm vụ mới nhất của container (xe hạ bãi vừa qua cổng), không lấy nhiệm vụ cũ.
             task = await _context.Set<YardTask>()
-                .FirstOrDefaultAsync(t => t.ContainerNo.ToUpper() == cleanContainerNo, cancellationToken);
+                .Where(t => t.ContainerNo.ToUpper() == cleanContainerNo && t.Status != "Cancelled")
+                .OrderByDescending(t => t.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
         }
 
         // 2. Tìm hoặc cập nhật Container
@@ -489,6 +514,7 @@ public class YardTaskService : IYardTaskService
             YardBlockCode = task.BlockCode,
             LocationCoordinate = task.ToLocation ?? "A01-05-02-3"
         };
+        receipt.PhotoUrls = System.Text.Json.JsonSerializer.Serialize(await UploadReceiptPhotosAsync(dto.PhotoImages, cleanContainerNo, cancellationToken));
         await _context.Set<YardReceipt>().AddAsync(receipt, cancellationToken);
 
         // 5. Cập nhật trạng thái Container -> In_Yard
@@ -920,7 +946,9 @@ public class YardTaskService : IYardTaskService
         await EnsureTableAndSeedAsync(cancellationToken);
 
         var query = _context.Set<YardTask>()
-            .Where(t => t.OperationType == "Relocate" || t.OperationType.Contains("chuyển") || t.OperationType.Contains("Chuyển") || t.OperationType.Contains("Đảo") || t.OperationType.Contains("Reloc"));
+            .Where(t => t.OperationType == "Relocate" || t.OperationType.Contains("chuyển") || t.OperationType.Contains("Chuyển") || t.OperationType.Contains("Đảo") || t.OperationType.Contains("Reloc") ||
+                // Nhiệm vụ hạ bãi tự tạo khi xe qua cổng vào cũng được điều phối ở trang Lệnh di chuyển container.
+                (t.OperationType == "Unload" && t.CreatedBy == "system:gate-in"));
 
         if (!string.IsNullOrWhiteSpace(status))
         {
