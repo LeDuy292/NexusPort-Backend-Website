@@ -64,9 +64,9 @@ router.post('/voyages', asyncHandler(async (req, res) => {
   res.status(201).json({ success: true, message: 'Tạo chuyến tàu thành công', data });
 }));
 
-router.put('/voyages/:id', asyncHandler(async (req, res) => {
+router.put('/voyages/:id', authenticate, asyncHandler(async (req, res) => {
   const user = req.user ? req.user.username : 'shipping01';
-  const data = await shippingLineService.updateVoyage(req.params.id, req.body, user);
+  const data = await shippingLineService.updateVoyage(req.params.id, req.body, user, req.user && req.user.role);
   res.json({ success: true, message: 'Cập nhật chuyến tàu thành công', data });
 }));
 

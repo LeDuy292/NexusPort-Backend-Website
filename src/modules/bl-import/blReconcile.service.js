@@ -65,10 +65,13 @@ async function containerStates(bl) {
     const state = stateOf(direction, port, booking?.status === 'Loaded' || Boolean(booking?.loaded_at));
     const issues = [];
     const blSeal = String(c.sealNumber || c.sealNo || '').trim();
-    if (port && blSeal && port.seal_no && normNo(port.seal_no) !== normNo(blSeal)) issues.push(`Seal trên B/L (${blSeal}) khác seal tại cảng (${port.seal_no}).`);
+    // Chỉ đối chiếu seal / khối lượng khi container đã thực sự có mặt tại cảng (đã cân, đã kiểm seal).
+    // Container còn "dự kiến" (chưa vào cảng) chỉ mang giá trị mặc định lúc đăng ký thiết bị nên không có gì để so.
+    const verifiable = Boolean(port) && state !== 'EXPECTED' && state !== 'NOT_FOUND';
+    if (verifiable && blSeal && port.seal_no && normNo(port.seal_no) !== normNo(blSeal)) issues.push(`Seal trên B/L (${blSeal}) khác seal tại cảng (${port.seal_no}).`);
     const vgm = Number(c.grossWeightKg || c.vgmKg || 0);
     const gross = Number(port?.gross_weight_kg || 0);
-    if (port && vgm > 0 && gross > 0 && Math.abs(gross - vgm) / vgm > WEIGHT_TOLERANCE) issues.push(`Khối lượng B/L ${vgm} kg lệch khối lượng tại cảng ${gross} kg.`);
+    if (verifiable && vgm > 0 && gross > 0 && Math.abs(gross - vgm) / vgm > WEIGHT_TOLERANCE) issues.push(`Khối lượng B/L ${vgm} kg lệch khối lượng tại cảng ${gross} kg.`);
     return {
       containerNumber: no, sealNumber: blSeal || null, vgmKg: vgm || null,
       state, stateLabel: STATE_LABEL[direction][state],

@@ -51,14 +51,17 @@ public static class ServiceCollectionExtensions
         var connectionString = configuration.GetConnectionString("DefaultConnection") 
             ?? "Host=localhost;Port=5432;Database=NexusPort;Username=postgres;Password=pgadmin4";
 
-        // The hosted database is shared by several apps and frequently exhausts
-        // its connection slots. Reuse one reserved connection and queue requests.
+        // DB host dùng chung nhiều ứng dụng nên giới hạn số kết nối, nhưng KHÔNG ép về 1:
+        // một kết nối duy nhất khiến mọi request (và cả lúc chờ cổng thanh toán) xếp hàng chờ nhau.
+        // Chỉnh bằng biến cấu hình Database:MaxPoolSize (mặc định 6).
         var connectionOptions = new Npgsql.NpgsqlConnectionStringBuilder(connectionString);
         if (!string.Equals(connectionOptions.Host, "localhost", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(connectionOptions.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
-            connectionOptions.MaxPoolSize = 1;
-            connectionOptions.MinPoolSize = 1;
+            var maxPool = int.TryParse(configuration["Database:MaxPoolSize"], out var configured) && configured > 0 ? configured : 6;
+            connectionOptions.MaxPoolSize = maxPool;
+            connectionOptions.MinPoolSize = Math.Min(2, maxPool);
+            connectionOptions.KeepAlive = 30;
             connectionOptions.Timeout = Math.Max(connectionOptions.Timeout, 30);
             connectionString = connectionOptions.ConnectionString;
         }
