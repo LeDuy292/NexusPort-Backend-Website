@@ -117,7 +117,13 @@ public class EmailService : IEmailService
         catch (Exception exception)
         {
             _logger.LogError(exception, "Failed to send email to {To}", to);
-            throw;
+            var allowFallback = bool.TryParse(_configuration["EmailSettings:AllowFallback"], out var fb) && fb
+                || bool.TryParse(_configuration["EmailSettings:BypassSmtp"], out var bp) && bp
+                || !string.Equals(_configuration["ASPNETCORE_ENVIRONMENT"], "Production", StringComparison.OrdinalIgnoreCase);
+            if (!allowFallback)
+            {
+                throw;
+            }
         }
     }
 }

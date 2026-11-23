@@ -360,11 +360,16 @@ class ShippingLineService {
     return newVoyage;
   }
 
-  async updateVoyage(id, payload, user = 'shipping01') {
+  async updateVoyage(id, payload, user = 'shipping01', role = null) {
     const idx = voyages.findIndex(v => v.id === id || v.voyageNumber === id);
     if (idx === -1) throw new Error('Không tìm thấy chuyến tàu');
 
     const current = voyages[idx];
+
+    // Trạng thái chuyến tàu (cập cảng, làm hàng, rời cảng…) do Hãng tàu cập nhật; Dispatcher chỉ được xem.
+    if (role === 'Dispatcher' && payload.status && payload.status !== current.status) {
+      throw new Error('Trạng thái chuyến tàu do Hãng tàu cập nhật, Dispatcher chỉ được xem.');
+    }
 
     // Ghi nhận lịch sử nếu thay đổi Cut-off
     if (payload.cyCutOff && payload.cyCutOff !== current.cyCutOff) {
@@ -419,6 +424,19 @@ class ShippingLineService {
     } catch (err) {
       voyages[idx] = current; // DB không nhận mốc giờ mới thì giữ nguyên chuyến
       throw err;
+    }
+
+    // Trạng thái do Hãng tàu đặt được ghi vào các bản khai của chuyến để Dispatcher (mọi máy) thấy khi đồng bộ; Dispatcher chỉ xem.
+    if (payload.status && payload.status !== current.status) {
+      try {
+        await repo.sequelize.query(
+          `UPDATE shipping_manifests SET payload = jsonb_set(payload, '{vesselStatus}', to_jsonb(CAST(:status AS text)), true)
+            WHERE upper(payload->>'voyageNumber') = upper(:voyage)`,
+          { replacements: { status: payload.status, voyage: current.voyageNumber } },
+        );
+      } catch (err) {
+        console.warn('[voyage] Không ghi được trạng thái tàu vào bản khai:', err.message);
+      }
     }
     return voyages[idx];
   }

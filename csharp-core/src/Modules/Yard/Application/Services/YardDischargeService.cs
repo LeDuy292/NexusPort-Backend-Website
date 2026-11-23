@@ -19,12 +19,45 @@ public class YardDischargeService : IYardDischargeService
 {
     private readonly AppDbContext _context;
     private readonly ILogger<YardDischargeService> _logger;
+    private readonly NexusPort.Infrastructure.ExternalServices.IS3StorageService _storage;
 
-    public YardDischargeService(AppDbContext context, ILogger<YardDischargeService> logger)
+    public YardDischargeService(AppDbContext context, ILogger<YardDischargeService> logger, NexusPort.Infrastructure.ExternalServices.IS3StorageService storage)
     {
         _context = context;
         _logger = logger;
+        _storage = storage;
     }
+
+    /// <summary>
+    /// Ảnh hư hỏng đến dưới dạng data URL base64 (vài trăm KB mỗi ảnh). Đẩy lên S3 và chỉ lưu khóa đối tượng trong bản khai
+    /// để payload không phình; nếu S3 lỗi thì giữ nguyên ảnh gốc để không làm gián đoạn nghiệp vụ.
+    /// </summary>
+    private async Task<List<string>> StorePhotosAsync(List<string>? photos, CancellationToken cancellationToken)
+    {
+        var result = new List<string>();
+        foreach (var photo in photos ?? new List<string>())
+        {
+            var m = System.Text.RegularExpressions.Regex.Match(photo ?? "", @"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$", System.Text.RegularExpressions.RegexOptions.Singleline);
+            if (!m.Success) { result.Add(photo ?? ""); continue; }
+            try
+            {
+                var contentType = m.Groups[1].Value;
+                var ext = contentType.EndsWith("png", StringComparison.OrdinalIgnoreCase) ? ".png" : ".jpg";
+                var url = await _storage.UploadBytesAsync(Convert.FromBase64String(m.Groups[2].Value), "damage" + ext, contentType, "NexusPort/yard-damage", cancellationToken);
+                result.Add(Uri.UnescapeDataString(new Uri(url).AbsolutePath.TrimStart('/')));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Không đẩy được ảnh hư hỏng lên S3, giữ dữ liệu gốc.");
+                result.Add(photo ?? "");
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Khóa S3 -> link có hạn để giao diện hiển thị; giá trị khác (data URL, URL ngoài) giữ nguyên.</summary>
+    private List<string> SignPhotos(IEnumerable<string>? photos) =>
+        (photos ?? Enumerable.Empty<string>()).Select(p => _storage.GetPresignedUrl(p)).ToList();
 
     public async Task<VesselDischargePlanDto> PreAllocateManifestAsync(Guid manifestId, CancellationToken cancellationToken = default)
     {
@@ -281,6 +314,7 @@ public class YardDischargeService : IYardDischargeService
             matchedContainer.DischargeStatus = dto.ConfirmPutdown ? "IN_YARD" : "DISCHARGED";
             if (dto.DamagePhotos != null && dto.DamagePhotos.Count > 0)
             {
+                dto.DamagePhotos = await StorePhotosAsync(dto.DamagePhotos, cancellationToken);
                 matchedContainer.DamagePhotos = dto.DamagePhotos;
             }
 
@@ -329,7 +363,7 @@ public class YardDischargeService : IYardDischargeService
                 ShippingLine = matchedContainer.ShippingLine,
                 Pod = matchedContainer.Pod,
                 Consolidator = matchedContainer.Consolidator,
-                DamagePhotos = matchedContainer.DamagePhotos,
+                DamagePhotos = SignPhotos(matchedContainer.DamagePhotos),
                 Message = dto.ConfirmPutdown
                     ? $"Xác nhận hoàn tất: Container {cleanNo} đã hạ bãi an toàn tại ô {finalSlot} (Trạng thái: IN YARD)."
                     : $"Đối chiếu thành công: Container {cleanNo} thuộc tàu {matchedVessel}. Vị trí đã đặt trước: {finalSlot}."
@@ -345,7 +379,7 @@ public class YardDischargeService : IYardDischargeService
                 ContainerNumber = cleanNo,
                 AssignedBufferSlot = "BUFFER-S01-01-1",
                 DischargeStatus = "EXCEPTION",
-                DamagePhotos = dto.DamagePhotos ?? new List<string>(),
+                DamagePhotos = SignPhotos(await StorePhotosAsync(dto.DamagePhotos, cancellationToken)),
                 Message = $"CẢNH BÁO: Container {cleanNo} KHÔNG TÌM THẤY trong bất kỳ Manifest nhập nào! Hệ thống đã đưa vào hàng đợi ngoại lệ và tự động gán khu cách ly bãi tạm BUFFER-S01.",
                 SuggestedAction = "Báo điều độ viên liên hệ Hãng tàu gửi văn bản xác minh và kiểm tra số seal thực tế."
             };
@@ -741,7 +775,7 @@ public class YardDischargeService : IYardDischargeService
                         DischargedAt = dischargedAt,
                         Condition = condition,
                         InspectionNotes = inspectionNotes,
-                        DamagePhotos = damagePhotos
+                        DamagePhotos = SignPhotos(damagePhotos)
                     });
                 }
             }

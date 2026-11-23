@@ -18,6 +18,7 @@ const line = [authenticate, authorize(ROLES.SHIPPING_LINE)];
 
 router.get('/manifests/:manifestId/bills', ...line, asyncHandler(async (req, res) => ok(res, await service.listBills(req.params.manifestId, req.user))));
 router.post('/manifests/:manifestId/bills/:blNumber/issue', ...line, asyncHandler(async (req, res) => ok(res, await service.issue(req.params.manifestId, req.params.blNumber, req.body || {}, req.user))));
+router.post('/manifests/:manifestId/bills/:blNumber/sync-containers', ...line, asyncHandler(async (req, res) => ok(res, await service.syncContainers(req.params.manifestId, req.params.blNumber, req.user))));
 router.get('/bills', ...line, asyncHandler(async (_req, res) => ok(res, await reconcile.listBills())));
 router.get('/bills/:blNumber/reconcile', ...line, asyncHandler(async (req, res) => ok(res, await reconcile.reconcileBill(req.params.blNumber))));
 

@@ -202,8 +202,9 @@ public partial class BookingService
     {
         BookingFleetPolicy.ValidateWindow(start, end);
         // Live trips and an unclosed physical Gate In remain busy, even after the planned end.
-        var busy = await _context.Database.SqlQueryRaw<BookingBusyFleet>("""
-            SELECT b.driver_id AS "DriverId",COALESCE(b.truck_id,b.vehicle_id,bt.id) AS "TruckId" FROM bookings b
+        // Một lượt truy vấn duy nhất lấy cả: xe/tài xế bận, khối lượng công việc và tài khoản bị chặn (giảm số vòng DB).
+        var rows = await _context.Database.SqlQueryRaw<BookingFleetRow>("""
+            SELECT 'busy' AS "Kind", b.driver_id AS "DriverId",COALESCE(b.truck_id,b.vehicle_id,bt.id) AS "TruckId" FROM bookings b
             LEFT JOIN trucks bt ON b.truck_id IS NULL AND b.vehicle_id IS NULL AND b.vehicle_plate IS NOT NULL
               AND regexp_replace(upper(bt.plate_number),'[^A-Z0-9]','','g')=regexp_replace(upper(b.vehicle_plate),'[^A-Z0-9]','','g')
             WHERE b.id<>{2} AND (
@@ -214,7 +215,7 @@ public partial class BookingService
                 AND NOT EXISTS(SELECT 1 FROM gate_transactions x WHERE x.booking_id=b.id AND x.gate_type::text='gate_out'
                   AND x.status::text='completed' AND x.checked_at>=g.checked_at)))
             UNION ALL
-            SELECT d.id AS "DriverId",COALESCE(t.truck_id,tt.id) AS "TruckId" FROM transport_trips t
+            SELECT 'busy' AS "Kind", d.id AS "DriverId",COALESCE(t.truck_id,tt.id) AS "TruckId" FROM transport_trips t
             LEFT JOIN drivers d ON d.user_id=t.driver_id
             LEFT JOIN trucks tt ON t.truck_id IS NULL AND t.truck_plate IS NOT NULL
               AND regexp_replace(upper(tt.plate_number),'[^A-Z0-9]','','g')=regexp_replace(upper(t.truck_plate),'[^A-Z0-9]','','g')
@@ -222,7 +223,7 @@ public partial class BookingService
               AND (t.status NOT IN ('Assigned','Acknowledged') OR t.appointment_start IS NULL OR t.appointment_end IS NULL
                 OR (t.appointment_start<{1} AND t.appointment_end>{0}))
             UNION ALL
-            SELECT
+            SELECT 'busy' AS "Kind",
               NULLIF(trip->>'driverId', '')::uuid AS "DriverId",
               NULLIF(trip->>'truckId', '')::uuid AS "TruckId"
             FROM eport_service_drafts sd
@@ -236,18 +237,35 @@ public partial class BookingService
               AND trip->>'appointmentEnd' LIKE '____-__-__%'
               AND (trip->>'appointmentStart')::timestamptz < {1}
               AND (trip->>'appointmentEnd')::timestamptz > {0}
-            """, start, end, excludeId ?? Guid.Empty).ToListAsync(token);
+            UNION ALL
+            SELECT 'work' AS "Kind",
+              NULLIF(trip->>'driverId', '')::uuid AS "DriverId",
+              NULLIF(trip->>'truckId', '')::uuid AS "TruckId"
+            FROM eport_service_drafts sd
+            LEFT JOIN eport_service_order_states os ON os.draft_id = sd.id
+            CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(sd.content->'delivery'->'trips') = 'array' THEN sd.content->'delivery'->'trips' ELSE '[]'::jsonb END) AS trip
+            WHERE (os.status IS NULL OR os.status NOT IN ('CANCELLED', 'REJECTED'))
+              AND sd.carrier_id = {3}
+              AND NULLIF(trip->>'truckId', '') IS NOT NULL
+              AND NULLIF(trip->>'driverId', '') IS NOT NULL
+            UNION ALL
+            SELECT 'work' AS "Kind", b.driver_id AS "DriverId", COALESCE(b.truck_id, b.vehicle_id) AS "TruckId"
+            FROM bookings b
+            WHERE b.carrier_id = {3} AND b.status::text NOT IN ('canceled', 'rejected')
+            UNION ALL
+            SELECT 'blocked' AS "Kind", d.id AS "DriverId", NULL::uuid AS "TruckId" FROM drivers d LEFT JOIN users u ON u.id=d.user_id
+            WHERE d.carrier_id={3} AND d.user_id IS NOT NULL
+              AND (u.id IS NULL OR NOT u.is_active OR u.invitation_pending OR u.email_verified_at IS NULL)
+            """, start, end, excludeId ?? Guid.Empty, carrierId).ToListAsync(token);
+        var busy = rows.Where(r => r.Kind == "busy").ToList();
+        var workloads = rows.Where(r => r.Kind == "work").ToList();
+        var blockedAccounts = rows.Where(r => r.Kind == "blocked" && r.DriverId.HasValue).Select(r => r.DriverId!.Value).ToHashSet();
         var driverIds = busy.Where(b => b.DriverId.HasValue).Select(b => b.DriverId!.Value).ToHashSet();
         var truckIds = busy.Where(b => b.TruckId.HasValue).Select(b => b.TruckId!.Value).ToHashSet();
         var trucks = await _context.Set<Vehicle.Domain.Entities.Vehicle>().AsNoTracking()
             .Where(t => t.CarrierId == carrierId).ToListAsync(token);
         var drivers = await _context.Set<Driver.Domain.Entities.Driver>().AsNoTracking()
             .Where(d => d.CarrierId == carrierId).ToListAsync(token);
-        var blockedAccounts = (await _context.Database.SqlQueryRaw<Guid>("""
-            SELECT d.id AS "Value" FROM drivers d LEFT JOIN users u ON u.id=d.user_id
-            WHERE d.carrier_id={0} AND d.user_id IS NOT NULL
-              AND (u.id IS NULL OR NOT u.is_active OR u.invitation_pending OR u.email_verified_at IS NULL)
-            """, carrierId).ToListAsync(token)).ToHashSet();
         var activeTrucks = trucks.Where(t=>t.Status == Vehicle.Domain.Enums.TruckStatus.active).ToList();
         var freeTrucks = activeTrucks.Where(t=>!truckIds.Contains(t.Id)).ToList();
         var eligibleTrucks = freeTrucks.Select(VehicleDetails).ToList();
@@ -255,22 +273,7 @@ public partial class BookingService
             && BookingFleetPolicy.IsAvailableDriver(d.Status.ToString(), d.LicenseExpiryDate, end))
             .Select(DriverDetails).ToList();
 
-        var workloads = await _context.Database.SqlQueryRaw<BookingBusyFleet>("""
-            SELECT
-              NULLIF(trip->>'driverId', '')::uuid AS "DriverId",
-              NULLIF(trip->>'truckId', '')::uuid AS "TruckId"
-            FROM eport_service_drafts sd
-            LEFT JOIN eport_service_order_states os ON os.draft_id = sd.id
-            CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(sd.content->'delivery'->'trips') = 'array' THEN sd.content->'delivery'->'trips' ELSE '[]'::jsonb END) AS trip
-            WHERE (os.status IS NULL OR os.status NOT IN ('CANCELLED', 'REJECTED'))
-              AND sd.carrier_id = {0}
-              AND NULLIF(trip->>'truckId', '') IS NOT NULL
-              AND NULLIF(trip->>'driverId', '') IS NOT NULL
-            UNION ALL
-            SELECT b.driver_id AS "DriverId", COALESCE(b.truck_id, b.vehicle_id) AS "TruckId"
-            FROM bookings b
-            WHERE b.carrier_id = {0} AND b.status::text NOT IN ('canceled', 'rejected')
-            """, carrierId).ToListAsync(token);
+
 
         var truckUsage = workloads.Where(w => w.TruckId.HasValue).GroupBy(w => w.TruckId!.Value).ToDictionary(g => g.Key, g => g.Count());
         var driverUsage = workloads.Where(w => w.DriverId.HasValue).GroupBy(w => w.DriverId!.Value).ToDictionary(g => g.Key, g => g.Count());
@@ -316,6 +319,13 @@ public partial class BookingService
     }
 
 
+}
+
+public sealed class BookingFleetRow
+{
+    public string Kind { get; set; } = "";
+    public Guid? DriverId { get; set; }
+    public Guid? TruckId { get; set; }
 }
 
 public sealed class BookingBusyFleet
