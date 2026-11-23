@@ -77,19 +77,27 @@ async function notifyCarrier(charge, carrierId) {
   if (!carrierId) return;
   try {
     const [carrier] = await sequelize.query('SELECT id, tax_code FROM carriers WHERE id = :id LIMIT 1', { replacements: { id: carrierId }, type: QueryTypes.SELECT });
+    // Phí được báo vào ĐƠN DỊCH VỤ chứa container này (tab Thanh toán), không có trang riêng
+    const [order] = await sequelize.query(
+      `SELECT d.id FROM eport_service_drafts d JOIN eport_service_order_states os ON os.draft_id = d.id
+        WHERE d.carrier_id = :carrier AND os.status NOT IN ('CANCELLED', 'REJECTED')
+          AND d.content->'lines' @> jsonb_build_array(jsonb_build_object('declaration', jsonb_build_object('containerNumber', CAST(:no AS text))))
+        ORDER BY d.created_at DESC LIMIT 1`,
+      { replacements: { carrier: carrierId, no: charge.container_no }, type: QueryTypes.SELECT }).catch(() => []);
+    const actionUrl = order?.id ? `/services?orderId=${order.id}&tab=payments` : '/services';
     await sequelize.query(
       `INSERT INTO cargo_notifications (recipient_company_id, company_tax_code, recipient_role, event_type, direction, priority, title, message, data,
                                         action_type, action_label, action_url, document_type, document_id, dedup_key, created_at)
        VALUES (:company, :tax, 'shipper', 'YardShiftingFee', 'export', 'urgent', :title, :message, CAST(:data AS jsonb),
-               'pay_fee', 'Thanh toán phí', '/shifting-fees', 'yard_shifting_charge', :docId, :dedup, now())
+               'pay_fee', 'Xem đơn dịch vụ', :actionUrl, 'yard_shifting_charge', :docId, :dedup, now())
        ON CONFLICT DO NOTHING`,
       {
         replacements: {
           company: carrierId, tax: carrier?.tax_code || null,
           title: `Phí đảo container ${charge.container_no}: ${Number(charge.amount).toLocaleString('vi-VN')} đ`,
-          message: `Bãi đã đảo container ${charge.container_no} (booking ${charge.booking_code || '—'}). Vui lòng thanh toán phí đảo chuyển; container chỉ được ra cổng sau khi thanh toán đủ.`,
+          message: `Bãi đã đảo container ${charge.container_no} (booking ${charge.booking_code || '—'}). Phí được báo trong đơn dịch vụ của bạn (tab Thanh toán); container chỉ được ra cổng sau khi thanh toán đủ.`,
           data: JSON.stringify({ chargeId: charge.id, code: charge.code, amount: Number(charge.amount) }),
-          docId: charge.id, dedup: `shift:${charge.id}`,
+          docId: charge.id, dedup: `shift:${charge.id}`, actionUrl,
         },
       },
     );
@@ -152,7 +160,7 @@ async function syncCharges() {
 // ── Thanh toán PayOS ───────────────────────────────────────────────────────────
 const payosConfig = () => ({
   clientId: process.env.PAYOS_CLIENT_ID, apiKey: process.env.PAYOS_API_KEY, checksum: process.env.PAYOS_CHECKSUM_KEY,
-  returnUrl: process.env.PAYOS_RETURN_URL || 'http://localhost:5173/shifting-fees', cancelUrl: process.env.PAYOS_CANCEL_URL || 'http://localhost:5173/shifting-fees',
+  returnUrl: process.env.PAYOS_RETURN_URL || 'http://localhost:5173/services', cancelUrl: process.env.PAYOS_CANCEL_URL || 'http://localhost:5173/services',
 });
 const payosReady = () => { const c = payosConfig(); return Boolean(c.clientId && c.apiKey && c.checksum); };
 // Môi trường thử nghiệm dùng chung với đơn dịch vụ: số tiền chuyển thực tế cố định nhỏ (mặc định 2.000đ).
