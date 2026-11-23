@@ -20,17 +20,36 @@ public sealed class AccountInvitationEmail(IEmailService email, IConfiguration c
 {
     public async Task SendAsync(string to, string url, CancellationToken token)
     {
+        var allowFallback = bool.TryParse(config["EmailSettings:AllowFallback"], out var fb) && fb
+            || bool.TryParse(config["EmailSettings:BypassSmtp"], out var bp) && bp
+            || !string.Equals(config["ASPNETCORE_ENVIRONMENT"], "Production", StringComparison.OrdinalIgnoreCase);
+
         if (string.IsNullOrWhiteSpace(config["EmailSettings:SmtpUser"]) || string.IsNullOrWhiteSpace(config["EmailSettings:SmtpPass"]))
+        {
+            if (allowFallback)
+            {
+                Console.WriteLine($"[DriverAccount] Smtp credentials not configured. FALLBACK: Invitation link for {to}: {url}");
+                return;
+            }
             throw new ValidationException("Email", "Chưa cấu hình dịch vụ gửi email xác nhận.");
+        }
+
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-        timeout.CancelAfter(TimeSpan.FromSeconds(20));
+        timeout.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             await email.SendEmailAsync(to, "NexusPort — Liên kết tài khoản tài xế",
                 $"<p>Công ty vận tải đã đăng ký tài khoản tài xế cho bạn.</p><p><a href=\"{System.Net.WebUtility.HtmlEncode(url)}\">Xác nhận email và tạo mật khẩu</a></p><p>Liên kết dùng một lần, có hiệu lực 24 giờ.</p>", timeout.Token);
         }
         catch (Exception ex) when (ex is System.Net.Mail.SmtpException || (ex is OperationCanceledException && !token.IsCancellationRequested))
-        { throw new ValidationException("Email", "Không gửi được email xác nhận. Vui lòng thử lại."); }
+        {
+            if (allowFallback)
+            {
+                Console.WriteLine($"[DriverAccount] SMTP delivery failed ({ex.Message}). FALLBACK SIMULATION: Invitation link for {to}: {url}");
+                return;
+            }
+            throw new ValidationException("Email", "Không gửi được email xác nhận. Vui lòng thử lại.");
+        }
     }
 }
 

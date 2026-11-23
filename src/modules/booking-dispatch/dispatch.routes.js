@@ -4,6 +4,7 @@ const { authenticate } = require('../../middlewares/authenticate');
 const { authorize } = require('../../middlewares/authorize');
 const service = require('./dispatch.service');
 const board = require('./dispatch-board');
+const history = require('./dispatch-history');
 const { pumpDispatchEvents } = require('./dispatch.realtime');
 const router = Router();
 const boardReader = authorize('Dispatcher', 'Administrator', 'Transport Company', 'Carrier Staff');
@@ -13,6 +14,7 @@ const handler = fn => async (req,res,next) => {
   catch(error) { if(error.statusCode) res.status(error.statusCode).json({success:false,message:error.message}); else next(error); }
 };
 router.use(authenticate);
+router.get('/history', authorize('Dispatcher', 'Administrator'), handler(req => history.getHistory({ days: req.query.days })));
 router.get('/board', boardReader, handler(req => board.getBoard(req.query.date, req.query, canSeeYardTrips(req))));
 router.get('/board/booking', boardReader, handler(req => board.getBoardBooking(req.query, canSeeYardTrips(req))));
 router.post('/:id/:action', authorize('Driver','Dispatcher','Administrator'), handler(async req => {

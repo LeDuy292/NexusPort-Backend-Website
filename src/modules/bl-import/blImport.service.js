@@ -60,7 +60,7 @@ const NO_ID = '00000000-0000-0000-0000-000000000000';
  * Container đang thuộc vận đơn khác còn hiệu lực thì chặn; container chưa được chủ hàng khai báo thì báo lại.
  * Sau đó cập nhật số lượng và loại container.
  */
-async function attachContainers(q, { bookingId, companyId, containers }) {
+async function attachContainers(q, { bookingId, companyId, companyName, actorId, containers }) {
   const busy = await q(
     `SELECT upper(c.container_no) AS no, b.booking_no FROM export_booking_containers c JOIN export_bookings b ON b.id = c.export_booking_id
       WHERE upper(c.container_no) IN (:nos) AND c.status NOT IN ('Excluded', 'Rolled') AND b.status NOT IN (:closed) AND b.id <> :booking`,
@@ -77,13 +77,31 @@ async function attachContainers(q, { bookingId, companyId, containers }) {
       { booking: bookingId, no: c.containerNumber },
     );
     if (already) continue;
-    const [decl] = await q(
+    let [decl] = await q(
       `SELECT ct.id AS container_id, d.id AS declaration_id, d.cargo_type
          FROM containers ct JOIN container_declarations d ON d.container_id = ct.id AND d.carrier_id = :company
         WHERE upper(ct.container_no) = :no ORDER BY d.created_at DESC LIMIT 1`,
       { company: companyId, no: c.containerNumber },
     );
-    if (!decl || !(c.grossWeightKg > 0)) { undeclared.push(c.containerNumber); continue; }
+    if (!decl && c.grossWeightKg > 0) {
+      // Container đã qua kiểm tra của hãng tàu (đăng ký thiết bị, số ISO hợp lệ, có trong bản khai): chủ hàng không phải khai báo lại.
+      // Lập khai báo cho chủ hàng từ chính dữ liệu hãng tàu đã nhập (hàng đầy, niêm chì, trọng lượng).
+      const [equipment] = await q('SELECT id FROM containers WHERE upper(container_no) = :no LIMIT 1', { no: c.containerNumber });
+      if (equipment) {
+        const cargoType = /^..R|RF|RH/i.test(c.isoType || '') ? 'reefer' : 'general';
+        [decl] = await q(
+          `INSERT INTO container_declarations (id, container_id, declared_by, carrier_id, load_status, cargo_type, gross_weight_kg, customer_name, seal_number)
+           VALUES (gen_random_uuid(), :cid, :by, :company, 'full', CAST(:cargo AS cargo_type), :kg, :name, :seal)
+           RETURNING container_id, id AS declaration_id, cargo_type`,
+          { cid: equipment.id, by: actorId || null, company: companyId, cargo: cargoType, kg: c.grossWeightKg, name: companyName || null, seal: c.sealNumber || null },
+        );
+      }
+    }
+    if (!decl || !(c.grossWeightKg > 0)) {
+      console.warn(`[bl-import] không gắn được container ${c.containerNumber} vào booking ${bookingId}: ${!(c.grossWeightKg > 0) ? 'thiếu trọng lượng' : 'chưa đăng ký thiết bị'}`);
+      undeclared.push(c.containerNumber);
+      continue;
+    }
     const [row] = await q(
       `INSERT INTO export_booking_containers (id, export_booking_id, container_id, declaration_id, container_no, type_code, seal_number, vgm_kg, cargo_type, status)
        VALUES (gen_random_uuid(), :booking, :cid, :did, :no, :type, :seal, :vgm, :cargoType, 'Expected') RETURNING id`,
@@ -156,8 +174,32 @@ async function createBlSource({ blNumber, manifest, voyage, company, actor, cont
       );
       created = true;
     }
-    const r = await attachContainers(q, { bookingId: source.id, companyId: company.id, containers });
+    const r = await attachContainers(q, { bookingId: source.id, companyId: company.id, companyName: company.company_name, actorId: actor.id, containers });
     return { sourceId: source.id, created, ...r };
+  });
+}
+
+/**
+ * Đồng bộ lại container của vận đơn xuất ĐÃ phát hành vào nguồn khai báo ePort
+ * (dùng khi lúc phát hành container chưa gắn được, vd. thiếu trọng lượng hoặc chưa đăng ký thiết bị).
+ */
+async function syncContainers(manifestId, blNumber, actor) {
+  const manifest = await loadManifest(manifestId, actor);
+  if (String(manifest.direction).toUpperCase() === 'IMPORT') throw httpError(400, 'Chỉ áp dụng cho vận đơn xuất.');
+  const bill = (manifest.bills || []).find((b) => normNo(b.blNumber) === normNo(blNumber));
+  if (!bill) throw httpError(404, 'Không tìm thấy vận đơn trong bản khai.');
+  const registered = await notify.findCompany(bill.shipper);
+  if (!registered) throw httpError(400, `Người gửi hàng "${bill.shipper}" chưa là công ty đã đăng ký trong hệ thống.`);
+  const containers = toContainers(bill);
+  const [companyRow] = await sequelize.query('SELECT company_name FROM carriers WHERE id = :id LIMIT 1', { replacements: { id: registered.id }, type: QueryTypes.SELECT });
+  const no = String(bill.blNumber).trim().toUpperCase();
+  return sequelize.transaction(async (transaction) => {
+    const q = (sql, replacements) => sequelize.query(sql, { replacements, type: QueryTypes.SELECT, transaction });
+    const [source] = await q('SELECT id, carrier_id FROM export_bookings WHERE upper(booking_no) = :no LIMIT 1 FOR UPDATE', { no });
+    if (!source) throw httpError(409, `Vận đơn ${no} chưa được phát hành nên chưa có nguồn khai báo ePort.`);
+    if (source.carrier_id !== registered.id) throw httpError(409, `Số vận đơn ${no} đã được dùng cho chủ hàng khác.`);
+    const r = await attachContainers(q, { bookingId: source.id, companyId: registered.id, companyName: companyRow && companyRow.company_name, actorId: actor.id, containers });
+    return { blNumber: no, added: r.added.length, undeclaredContainers: r.undeclared };
   });
 }
 
@@ -191,7 +233,23 @@ async function listBills(manifestId, actor) {
       );
       if (busy.length) notes.push(`Container đã thuộc vận đơn khác còn hiệu lực: ${busy.map((r) => `${r.no} (${r.booking_no})`).join(', ')}.`);
     }
+    // Cảnh báo (không chặn phát hành): container không gắn được vào nguồn ePort khi phát hành.
+    // Chủ hàng không phải khai báo lại; chỉ cần container đã đăng ký thiết bị và có trọng lượng.
+    const warnings = [];
+    if (direction === 'EXPORT' && containers.length && !issuedAlready) {
+      const registeredNos = new Set((await sequelize.query(
+        'SELECT upper(container_no) AS no FROM containers WHERE upper(container_no) IN (:nos)',
+        { replacements: { nos: containers.map((c) => String(c.containerNumber).toUpperCase()) }, type: QueryTypes.SELECT },
+      )).map((r) => r.no));
+      const unusable = containers
+        .filter((c) => !registeredNos.has(String(c.containerNumber).toUpperCase()) || !(c.grossWeightKg > 0))
+        .map((c) => c.containerNumber);
+      if (unusable.length) {
+        warnings.push(`Container chưa đăng ký thiết bị hoặc thiếu trọng lượng nên sẽ không dùng được để khai báo ePort: ${unusable.join(', ')}.`);
+      }
+    }
     bills.push({
+      warnings,
       blNumber: bill.blNumber, shipper: bill.shipper, consignee: bill.consignee, containerCount: containers.length, containers,
       issuedBl: found && found.status !== 'DRAFT' ? {
         blType: found.blType, freightStatus: found.freightStatus, notifyParty: found.notifyParty, cargoDescription: found.cargoDescription,
@@ -319,4 +377,4 @@ async function createPreAlert(bl, eta) {
   return row?.id || null;
 }
 
-module.exports = { listBills, issue };
+module.exports = { listBills, issue, syncContainers };
