@@ -65,6 +65,13 @@ async function startServer() {
     }, 6 * 60 * 60 * 1000);
     reeferPurgeTimer.unref();
 
+    // Tự động phát hiện xung đột vị trí đặt chỗ khi xe đã vào bãi và báo Dispatcher kèm ô đề xuất
+    if (nodeEnv !== 'test') {
+      require('./src/modules/yard/yard-slot-conflicts').startScheduler();
+      // Phí đảo container chiều xuất: tự tính, gửi Transport Company; chặn ra cổng đến khi thanh toán đủ
+      require('./src/modules/yard/yard-shifting-charges').startScheduler();
+    }
+
     // Seed lệnh xuất bãi nền, tránh request đầu tiên của người dùng phải chờ và timeout
     require('./src/modules/yard/yard.service').ensureInitialData()
       .catch((err) => console.warn('[Yard] Seed gate-out requests failed:', err.message));
