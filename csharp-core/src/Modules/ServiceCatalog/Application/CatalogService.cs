@@ -27,10 +27,18 @@ public sealed class CatalogService(AppDbContext db, ICurrentUser user)
         if (adminRoles.Contains(r1, StringComparer.OrdinalIgnoreCase) && adminRoles.Contains(r2, StringComparer.OrdinalIgnoreCase)) return true;
         return false;
     }
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (string? Role, DateTime Expires)> RoleCache = new();
+    private async Task<string?> LoadRole(CancellationToken ct)
+    {
+        if (RoleCache.TryGetValue(Actor, out var cached) && cached.Expires > DateTime.UtcNow) return cached.Role;
+        var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active", ct, Actor);
+        var found = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
+        RoleCache[Actor] = (found, DateTime.UtcNow.AddSeconds(30));
+        return found;
+    }
     private async Task Authorize(bool admin, CancellationToken ct)
     {
-        var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active", ct, Actor);
-        var role = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
+        var role = await LoadRole(ct);
         CatalogRules.Require(role != null && IsEquivalentRole(role, user.Role), "Tài khoản không còn quyền sử dụng danh mục dịch vụ.", 403, "FORBIDDEN");
         CatalogRules.Require(admin ? role is "Administrator" or "Admin" : role is "Administrator" or "Admin" or "Transport Company" or "Carrier" or "Carrier Staff", "Bạn không có quyền thực hiện thao tác này.", 403, "FORBIDDEN");
     }

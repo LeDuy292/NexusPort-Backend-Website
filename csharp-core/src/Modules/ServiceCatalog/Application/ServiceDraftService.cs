@@ -38,7 +38,16 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         return false;
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(Guid, string), (Guid Company, DateTime Expires)> CompanyCache = new();
     private async Task<Guid> Company(CancellationToken ct)
+    {
+        var cacheKey = (Actor, user.Role ?? "");
+        if (CompanyCache.TryGetValue(cacheKey, out var cached) && cached.Expires > DateTime.UtcNow) return cached.Company;
+        var company = await LoadCompany(ct);
+        CompanyCache[cacheKey] = (company, DateTime.UtcNow.AddSeconds(30));
+        return company;
+    }
+    private async Task<Guid> LoadCompany(CancellationToken ct)
     {
         var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active", ct, Actor);
         var role = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
@@ -222,12 +231,13 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
             {
                 edoRows = await Rows("""
                     SELECT v.id,
-                        COALESCE(NULLIF(v.visit_reference,''), 'EDO-' || c.container_no) AS "referenceNumber",
+                        COALESCE(eo.do_number, NULLIF(v.visit_reference,''), 'EDO-' || c.container_no) AS "referenceNumber",
+                        (eo.do_number IS NOT NULL) AS "isRealEdo",
                         COALESCE(NULLIF(v.bl_booking_no,''), 'BL-' || c.container_no) AS "blNumber",
                         COALESCE(v.source_reference, '') AS "bookingNumber",
                         COALESCE(
                             (SELECT bl.vessel_name FROM bills_of_lading bl WHERE upper(bl.bl_number)=upper(v.bl_booking_no) AND NULLIF(trim(bl.vessel_name),'') IS NOT NULL ORDER BY bl.created_at DESC LIMIT 1),
-                            (SELECT vc.vessel_name FROM vessel_calls vc WHERE vc.id=COALESCE(v.vessel_call_id, c.vessel_call_id) LIMIT 1),
+                            (SELECT vs.name FROM vessel_calls vc JOIN vessels vs ON vs.id=vc.vessel_id WHERE vc.id=COALESCE(v.vessel_call_id, c.vessel_call_id) LIMIT 1),
                             'Tàu nhập khẩu'
                         )::text AS "vesselName",
                         COALESCE(
@@ -235,23 +245,31 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                             (SELECT vc.call_code FROM vessel_calls vc WHERE vc.id=COALESCE(v.vessel_call_id, c.vessel_call_id) LIMIT 1),
                             '—'
                         )::text AS "voyageNumber",
-                        v.started_at AS "eta",
-                        COALESCE(to_char(v.valid_to AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD'), to_char((now() + interval '14 days') AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')) AS "validUntil",
+                        COALESCE((SELECT sh.eta FROM import_shipments sh WHERE upper(sh.bl_number)=upper(v.bl_booking_no) ORDER BY sh.created_at DESC LIMIT 1), v.started_at) AS "eta",
+                        COALESCE(to_char(eo.valid_until AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD'), to_char(v.valid_to AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD'), to_char((now() + interval '14 days') AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')) AS "validUntil",
                         'Cảng Tiên Sa - Đà Nẵng'::text AS "emptyReturnDepot",
                         c.container_no AS "containerNumber",
+                        (SELECT ct.code FROM container_types ct WHERE ct.id=c.container_type_id) AS "typeCode",
+                        COALESCE(NULLIF(d.seal_number,''), NULLIF(c.seal_no,'')) AS "sealNumber",
+                        COALESCE(d.gross_weight_kg, c.gross_weight_kg) AS "grossWeightKg",
                         1::int AS "containerCount",
-                        (v.valid_to IS NOT NULL AND v.valid_to < now()) AS "isExpired",
+                        (COALESCE(eo.valid_until, v.valid_to) IS NOT NULL AND COALESCE(eo.valid_until, v.valid_to) < now()) AS "isExpired",
                         (regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe')) AS "isHeld",
                         CASE
-                            WHEN regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe') THEN 'HELD'
-                            WHEN v.valid_to IS NOT NULL AND v.valid_to < now() THEN 'EXPIRED'
+                            WHEN eo.status = 'HELD' OR regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe') THEN 'HELD'
+                            WHEN COALESCE(eo.valid_until, v.valid_to) IS NOT NULL AND COALESCE(eo.valid_until, v.valid_to) < now() THEN 'EXPIRED'
                             ELSE 'ISSUED'
                         END AS status
                     FROM container_visits v
                     JOIN containers c ON c.id=v.container_id
                     JOIN container_declarations d ON d.id=v.declaration_id AND d.container_id=v.container_id
+                    LEFT JOIN LATERAL (
+                        SELECT o.do_number,o.valid_until,o.status,o.consignee_company_id FROM delivery_orders o
+                        WHERE upper(regexp_replace(o.bl_number,'\s+','','g'))=upper(regexp_replace(COALESCE(v.bl_booking_no,''),'\s+','','g'))
+                          AND o.status IN ('RELEASED','HELD') ORDER BY o.created_at DESC LIMIT 1) eo ON true
                     WHERE v.load_status='full' AND d.load_status='full' AND v.visit_status='active'
                         AND v.movement_type='vessel_discharge' AND v.data_status='verified'
+                        AND (eo.consignee_company_id = @p0 OR d.carrier_id = @p0 OR (eo.do_number IS NULL AND d.carrier_id IS NULL))
                         AND COALESCE(v.source_reference,'') NOT ILIKE 'DEMO-EPORT-%'
                         AND COALESCE(v.bl_booking_no,'') NOT ILIKE 'DEMO-BL-%'
                         AND c.container_no NOT LIKE 'DEMU%'
@@ -449,15 +467,18 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
               OR COALESCE(r.snapshot->'sourceSnapshot'->>'bookingNumber',d.source_snapshot->>'bookingNumber','') ILIKE @p1
               OR COALESCE(d.content->'source'->>'referenceNumber','') ILIKE @p1)
             """;
-        var count = (await Rows("SELECT count(*) AS total " + filter, ct, company, "%" + term + "%"))[0]["total"]!.GetValue<long>();
         var rows = await Rows("""
-            SELECT d.id,d.number,d.flow,COALESCE(r.status,d.status) AS status,d.version,
+            SELECT count(*) OVER() AS "__total",d.id,d.number,d.flow,COALESCE(r.status,d.status) AS status,d.version,
                 COALESCE(r.snapshot->>'mainServiceName',s.name) AS "mainServiceName",
                 r.id AS "registrationId",r.number AS "registrationNumber",r.total,r.currency,r.payment_status AS "paymentStatus",
                 COALESCE(r.snapshot->'sourceSnapshot'->>'bookingNumber',r.snapshot->'content'->'source'->>'referenceNumber',
                     d.source_snapshot->>'bookingNumber',NULLIF(d.content->'source'->>'referenceNumber',''),'Chưa chọn hồ sơ') AS "sourceLabel",
                 jsonb_array_length(d.container_snapshots) AS "containerCount",COALESCE(r.confirmed_at,d.updated_at) AS "updatedAt"
             """ + filter + " ORDER BY COALESCE(r.confirmed_at,d.updated_at) DESC,d.id LIMIT @p2 OFFSET @p3", ct, company, "%" + term + "%", pageSize, (page - 1) * pageSize);
+        var count = rows.Count > 0
+            ? rows[0]["__total"]!.GetValue<long>()
+            : page == 1 ? 0 : (await Rows("SELECT count(*) AS total " + filter, ct, company, "%" + term + "%"))[0]["total"]!.GetValue<long>();
+        foreach (var row in rows) row.Remove("__total");
         await ApplyWorkflowRows(rows, ct);
         return new { items = rows, page, pageSize, total = count };
     }

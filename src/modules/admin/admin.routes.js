@@ -22,6 +22,7 @@ router.get('/gates', handler(() => service.listGates()));
 router.post('/gates', handler((req) => service.createGate(req.body), 201));
 router.patch('/gates/:id', handler((req) => service.updateGate(req.params.id, req.body)));
 router.post('/shipping-line-accounts', handler((req) => service.createShippingLineAccount(req.body), 201));
+router.post('/shipping-line-accounts/:id/resend', handler((req) => service.resendShippingLineAccount(req.params.id, req.body)));
 const actor = (req) => ({ id: req.user && req.user.id });
 router.get('/equipment', handler(() => service.listEquipment()));
 router.post('/equipment', handler((req) => service.createEquipment(actor(req), req.body), 201));

@@ -38,7 +38,19 @@ public sealed partial class ServiceOrderService(AppDbContext db, ICurrentUser us
     }
 
     // A JWT role alone never grants access: verify the current persisted account.
+    // Truy cập chỉ đọc được ghi nhớ 30 giây; thao tác ghi (trong giao dịch) luôn kiểm tra lại có khóa.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(Guid, string), (Guid? Company, DateTime Expires)> AccessCache = new();
     private async Task<Guid?> OrderAccess(CancellationToken ct)
+    {
+        if (db.Database.CurrentTransaction != null) return await LoadOrderAccess(ct);
+        var key = (Actor, user.Role ?? "");
+        if (AccessCache.TryGetValue(key, out var cached) && cached.Expires > DateTime.UtcNow) return cached.Company;
+        var company = await LoadOrderAccess(ct);
+        AccessCache[key] = (company, DateTime.UtcNow.AddSeconds(30));
+        return company;
+    }
+
+    private async Task<Guid?> LoadOrderAccess(CancellationToken ct)
     {
         var locked = db.Database.CurrentTransaction != null;
         var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active" + (locked ? " FOR SHARE" : ""), ct, Actor);

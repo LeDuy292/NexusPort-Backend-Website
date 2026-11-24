@@ -4,11 +4,19 @@ namespace NexusPort.Modules.ServiceCatalog.Application;
 
 public sealed partial class ServiceDraftService
 {
+    // Khi bảng đã tồn tại thì không bao giờ biến mất: ghi nhớ để bỏ một lượt truy vấn ở mỗi yêu cầu.
+    private static volatile bool workflowTableReady;
+    private async Task<bool> WorkflowTableReady(CancellationToken ct)
+    {
+        if (workflowTableReady) return true;
+        var available = await Rows("SELECT to_regclass('eport_service_order_states') IS NOT NULL AS available", ct);
+        return workflowTableReady = available[0]["available"]!.GetValue<bool>();
+    }
+
     private async Task ApplyWorkflowRows(List<JsonObject> rows, CancellationToken ct)
     {
         if (rows.Count == 0) return;
-        var available = await Rows("SELECT to_regclass('eport_service_order_states') IS NOT NULL AS available", ct);
-        if (!available[0]["available"]!.GetValue<bool>()) return;
+        if (!await WorkflowTableReady(ct)) return;
         var states = await Rows("""
             SELECT o.draft_id AS id,o.status,o.approval_status AS "approvalStatus",o.payment_status AS "paymentStatus",o.version AS "orderVersion",
              EXISTS(SELECT 1 FROM eport_service_order_events e WHERE e.draft_id=o.draft_id AND e.action='PAYMENT_REVIEW_REQUIRED') AS "paymentReviewRequired",
@@ -28,8 +36,7 @@ public sealed partial class ServiceDraftService
     // applied. Once present, every old endpoint observes the same workflow lock.
     private async Task<JsonObject?> WorkflowState(Guid id, CancellationToken ct)
     {
-        var available = await Rows("SELECT to_regclass('eport_service_order_states') IS NOT NULL AS available", ct);
-        if (!available[0]["available"]!.GetValue<bool>()) return null;
+        if (!await WorkflowTableReady(ct)) return null;
         return (await Rows("""
             SELECT o.status,o.approval_status AS "approvalStatus",o.payment_status AS "paymentStatus",o.version AS "orderVersion",o.updated_at AS "workflowUpdatedAt",
              EXISTS(SELECT 1 FROM eport_service_order_events e WHERE e.draft_id=o.draft_id AND e.action='PAYMENT_REVIEW_REQUIRED') AS "paymentReviewRequired"

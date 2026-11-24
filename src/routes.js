@@ -7,6 +7,8 @@ const usersRoutes = require('./modules/users/users.routes');
 const tripsRoutes = require('./modules/trips/trips.routes');
 const yardRoutes = require('./modules/yard/yard.routes');
 const adminRoutes = require('./modules/admin/admin.routes');
+const dispatcherRoutes = require('./modules/dispatcher/dispatcher.routes');
+const gateOverviewRoutes = require('./modules/gate-overview/gateOverview.routes');
 const driverBookingRoutes = require('./modules/driver-bookings/driver-bookings.routes');
 const dispatchRoutes = require('./modules/booking-dispatch/dispatch.routes');
 const gateIotRoutes = require('./modules/gate-iot/gate-iot.routes');
@@ -54,6 +56,15 @@ yardReservationsRoutes.post('/', async (req, res) => {
   const item = req.body;
   if (item) {
     const contId = (item.containerId || item.containerNo || item.booking?.containerId || '').trim().toUpperCase();
+    // Quy tắc phân khu: cont lạnh chỉ vào khu lạnh, cont thường không vào khu lạnh
+    try {
+      await require('./modules/yard/slot-zone-rules').assertZoneAllowed({
+        containerNo: contId, blockCode: item.blockCode || item.block, typeHint: item.containerType || item.booking?.containerType,
+      });
+    } catch (err) {
+      if (err.statusCode) return res.status(err.statusCode).json({ success: false, message: err.message });
+      throw err;
+    }
     const existingIdx = reservationsStore.findIndex(r => {
       const rCont = (r.containerId || r.containerNo || r.booking?.containerId || '').trim().toUpperCase();
       return contId && rCont === contId;
@@ -172,6 +183,10 @@ const mountedRouters = [
   { prefix: '/yard', tag: 'Yard Operations Direct', secured: true, router: yardRoutes },
   { prefix: '/api/admin', tag: 'Administrator', secured: true, router: adminRoutes },
   { prefix: '/admin', tag: 'Administrator Direct', secured: true, router: adminRoutes },
+  { prefix: '/api/dispatcher', tag: 'Dispatcher Overview', secured: true, router: dispatcherRoutes },
+  { prefix: '/dispatcher', tag: 'Dispatcher Overview Direct', secured: true, router: dispatcherRoutes },
+  { prefix: '/api/gate-overview', tag: 'Gate Overview', secured: true, router: gateOverviewRoutes },
+  { prefix: '/gate-overview', tag: 'Gate Overview Direct', secured: true, router: gateOverviewRoutes },
   { prefix: '/api', tag: 'Transport Trips', secured: true, router: tripsRoutes },
   { prefix: '/api', tag: 'RBAC Demo', secured: true, router: protectedRoutes },
 ];
