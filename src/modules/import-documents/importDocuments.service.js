@@ -139,6 +139,59 @@ async function notifyCompany(companyId, blNumber, eventType, title, message, ded
   }
 }
 
+/** Báo cho Hãng tàu (chủ hồ sơ và các tài khoản cùng hãng) khi người nhận có phản hồi. */
+async function notifyLine(file, eventType, title, message, dedupKey) {
+  const lineUserId = file?.line_user_id || file?.lineUserId;
+  if (!lineUserId) return;
+  const blNumber = file.bl_number || file.blNumber;
+  try {
+    await sequelize.query(
+      `INSERT INTO cargo_notifications(recipient_user_id, recipient_role, event_type, direction, priority, title, message, data,
+                                       action_type, action_label, action_url, document_type, document_id, dedup_key)
+       SELECT u.id, 'Shipping Line', :eventType, 'import', 'high', :title, :message, jsonb_build_object('blNumber', CAST(:bl AS text)),
+              'view_details', 'Xem hồ sơ', :url, 'IMPORT_DOCUMENT', CAST(:bl AS text), :dedup || ':' || u.id::text
+         FROM users u
+        WHERE u.is_active AND (u.id = CAST(:lineUser AS uuid) OR u.id IN (
+                SELECT a.user_id FROM shipping_line_accounts a
+                 WHERE a.shipping_line_id = (SELECT shipping_line_id FROM shipping_line_accounts WHERE user_id = CAST(:lineUser AS uuid))))
+          AND NOT EXISTS (SELECT 1 FROM cargo_notifications n WHERE n.dedup_key = :dedup || ':' || u.id::text)`,
+      { replacements: { lineUser: lineUserId, eventType, title, message, bl: blNumber, url: `/shipping-line/import-documents?bl=${encodeURIComponent(blNumber)}`, dedup: dedupKey } },
+    );
+  } catch (err) {
+    console.warn('[ImportDocuments] Không báo được cho hãng tàu:', err.message);
+  }
+}
+
+/** Lệnh giao hàng điện tử thật của hồ sơ, đối chiếu với B/L và Arrival Notice để người dùng thấy đúng một nguồn dữ liệu. */
+async function edoView(file, row) {
+  const edo = await require('../shipping-line/shippingLine.repository').findDo(file.doNumber).catch(() => null);
+  if (!edo) return null;
+  const weights = new Map((file.containers || []).map((c) => [String(c.containerNumber).toUpperCase(), c.grossWeightKg]));
+  const nos = (edo.containers || []).map((c) => String(c.containerNumber).toUpperCase());
+  const [res, tasks] = nos.length ? await Promise.all([
+    sequelize.query(`SELECT UPPER(container_no) AS no, block_code AS block, bay, row_no AS row, tier FROM persistent_yard_reservations WHERE UPPER(container_no) IN (:nos)`, { replacements: { nos }, type: QueryTypes.SELECT }).catch(() => []),
+    sequelize.query(`SELECT DISTINCT ON (UPPER("ContainerNo")) UPPER("ContainerNo") AS no, "ToLocation" AS loc FROM yard_tasks WHERE "IsDeleted" = false AND UPPER("ContainerNo") IN (:nos) AND "ToLocation" IS NOT NULL ORDER BY UPPER("ContainerNo"), "CreatedAt" DESC`, { replacements: { nos }, type: QueryTypes.SELECT }).catch(() => []),
+  ]) : [[], []];
+  const slotOf = new Map();
+  tasks.forEach((t) => slotOf.set(t.no, t.loc));
+  res.forEach((r) => slotOf.set(r.no, `${String(r.block).toUpperCase()}-${String(r.bay).padStart(2, '0')}-${String(r.row).padStart(2, '0')}-${r.tier}`));
+  const freeTime = row.notice?.freeTime || {};
+  let taxCode = edo.consigneeTaxCode;
+  if (!taxCode && row.consignee_company_id) {
+    const [c] = await sequelize.query('SELECT tax_code AS "taxCode" FROM carriers WHERE id = :id', { replacements: { id: row.consignee_company_id }, type: QueryTypes.SELECT }).catch(() => []);
+    taxCode = c?.taxCode || null;
+  }
+  return {
+    ...edo, consigneeTaxCode: taxCode,
+    portOfLoading: file.portOfLoading, portOfDischarge: file.portOfDischarge, eta: file.eta, voyageNumber: edo.voyageNumber || file.voyageNumber,
+    consigneeCompany: file.consigneeCompanyName || edo.consignee, demDays: freeTime.demDays ?? edo.freeTimeDays, detDays: freeTime.detDays ?? null,
+    stockLocation: row.notice?.stockLocation || null, blType: file.blType,
+    containers: (edo.containers || []).map((c) => ({
+      ...c, grossWeightKg: weights.get(String(c.containerNumber).toUpperCase()) ?? null, yardSlot: slotOf.get(String(c.containerNumber).toUpperCase()) || null,
+    })),
+  };
+}
+
 // ── Nhận pre-alert → mở hồ sơ ─────────────────────────────────────────────────
 async function listPreAlerts() {
   const [rows] = await sequelize.query(
@@ -231,6 +284,28 @@ async function get(id, actor) {
   const row = await loadFile(id, actor);
   const file = fromRow(row);
   file.events = await getDocumentEvents('IMPORT', file.blNumber);
+  // Arrival Notice gửi trước khi có đủ trường: bổ sung từ hồ sơ để người nhận luôn thấy thông tin đúng
+  // Trạng thái các bước hãng tàu đã làm trên vận đơn (để giao diện ẩn nút đã dùng)
+  const [bl] = await sequelize.query(
+    `SELECT local_charges_status AS "localChargesStatus", local_charges_paid AS "localChargesPaid", status FROM bills_of_lading WHERE bl_number = :bl LIMIT 1`,
+    { replacements: { bl: file.blNumber }, type: QueryTypes.SELECT }).catch(() => []);
+  file.blState = {
+    feesCollected: Boolean(bl && (bl.localChargesStatus === 'PAID' || bl.localChargesPaid)),
+    originalReceived: Boolean(bl && bl.status === 'SURRENDERED'),
+  };
+  if (file.doNumber) file.edo = await edoView(file, row)
+  if (file.consigneeCompanyId) {
+    const [co] = await sequelize.query(
+      `SELECT company_name AS "companyName", tax_code AS "taxCode", address, email, contact_person AS "contactName", phone FROM carriers WHERE id = :id`,
+      { replacements: { id: file.consigneeCompanyId }, type: QueryTypes.SELECT }).catch(() => []);
+    file.companyProfile = co || null;
+  }
+  if (file.notice) {
+    file.notice = { ...file.notice };
+    if (!file.notice.portOfLoading) file.notice.portOfLoading = file.portOfLoading;
+    if (!file.notice.portOfDischarge) file.notice.portOfDischarge = file.portOfDischarge;
+    if (!file.notice.cargo) file.notice.cargo = await cargoSummary(row);
+  }
   return file;
 }
 
@@ -363,6 +438,25 @@ function noticeDeadline(eta, now = new Date()) {
   return d < min ? min : d;
 }
 
+/** Tóm tắt hàng hóa cho Arrival Notice: mô tả, số kiện, trọng lượng (G.W), thể tích (CBM), số container. */
+async function cargoSummary(file) {
+  const containers = Array.isArray(file.containers) ? file.containers : [];
+  const [bl] = await sequelize.query(
+    `SELECT package_count AS "packageCount", package_unit AS "packageUnit", total_gross_weight AS "grossWeight", measurement_cbm AS "cbm", cargo_description AS "description"
+       FROM bills_of_lading WHERE bl_number = :bl LIMIT 1`,
+    { replacements: { bl: file.bl_number }, type: QueryTypes.SELECT }).catch(() => []);
+  const sumKg = containers.reduce((t, c) => t + (Number(c.grossWeightKg) || 0), 0);
+  return {
+    // Bản khai đôi khi điền mô tả hàng trùng số container: không coi đó là tên hàng
+    commodity: [file.cargo_description, bl?.description].find((t) => t && !containers.some((c) => String(c.containerNumber || '').toUpperCase() === String(t).trim().toUpperCase())) || null,
+    packageCount: bl?.packageCount != null ? Number(bl.packageCount) : null,
+    packageUnit: bl?.packageUnit || null,
+    grossWeightKg: bl?.grossWeight != null ? Number(bl.grossWeight) : (sumKg || null),
+    cbm: bl?.cbm != null ? Number(bl.cbm) : null,
+    containerCount: containers.length,
+  };
+}
+
 function buildNotice(file, version, options, deadline) {
   const fees = (options.fees || []).map((f) => ({ name: String(f.name || '').trim(), amountVnd: Number(f.amountVnd) || 0 })).filter((f) => f.name);
   return {
@@ -372,8 +466,11 @@ function buildNotice(file, version, options, deadline) {
       blNumber: file.bl_number, shipper: file.shipper, consignee: file.consignee, notifyParty: file.notify_party, cargoDescription: file.cargo_description,
       containers: file.containers, blType: file.bl_type, freightTerms: file.freight_terms,
     },
-    vesselName: file.vessel_name, voyageNumber: file.voyage_number, eta: file.eta, portOfDischarge: file.port_of_discharge,
+    vesselName: file.vessel_name, voyageNumber: file.voyage_number, eta: file.eta, portOfLoading: file.port_of_loading, portOfDischarge: file.port_of_discharge,
+    cargo: options.cargo || null,
     stockLocation: options.stockLocation || 'Bãi container Cảng Tiên Sa',
+    warehouseCode: String(options.warehouseCode || '').trim().slice(0, 60),
+    notes: String(options.notes || '').trim().slice(0, 1000),
     fees, totalFeesVnd: fees.reduce((s, f) => s + f.amountVnd, 0),
     freeTime: {
       demDays: Number(options.freeTime?.demDays) || 5, detDays: Number(options.freeTime?.detDays) || 7,
@@ -393,7 +490,7 @@ async function sendArrivalNotice(id, options = {}, actor) {
   if (!row.consignee_company_id) throw httpError(409, 'Cần gắn hồ sơ với Transport company của người nhận hàng trước khi gửi Arrival Notice.');
   const deadline = options.deadline ? new Date(options.deadline) : noticeDeadline(row.eta);
   if (Number.isNaN(deadline.getTime()) || deadline.getTime() <= Date.now()) throw httpError(400, 'Hạn chót phản hồi phải ở tương lai.');
-  const notice = buildNotice(row, 1, options, deadline);
+  const notice = buildNotice(row, 1, { ...options, cargo: await cargoSummary(row) }, deadline);
   await sequelize.query(
     `UPDATE import_shipments SET status = 'NOTICE_SENT', notice = CAST(:n AS jsonb), notice_version = 1, notice_deadline = :d, version = version + 1, updated_at = now() WHERE id = :id`,
     { replacements: { id, n: json(notice), d: deadline } },
@@ -409,7 +506,9 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 async function confirmNotice(id, payload = {}, actor) {
   needCompany(actor);
   const row = await loadFile(id, actor);
-  requireStatus(row, STATUS.NOTICE_SENT);
+  requireStatus(row, STATUS.NOTICE_SENT, STATUS.CONFIRMED);
+  const resubmit = row.status === STATUS.CONFIRMED;
+  if (resubmit && row.release_check?.requestedAt) throw httpError(409, 'Đã yêu cầu lấy D/O nên không sửa được thông tin xác nhận. Hãy liên hệ hãng tàu.');
   if (Number(payload.noticeVersion) !== row.notice_version) throw httpError(409, 'Arrival Notice đã được cập nhật. Tải lại và kiểm tra phiên bản mới trước khi xác nhận.');
   const invoice = payload.invoiceInfo || {};
   const contact = payload.contactInfo || {};
@@ -417,12 +516,15 @@ async function confirmNotice(id, payload = {}, actor) {
     if (!value || !String(value).trim()) throw httpError(400, `${label} là bắt buộc.`);
   }
   if (!EMAIL.test(String(invoice.email || ''))) throw httpError(400, 'Email nhận hóa đơn không hợp lệ.');
-  if (payload.freeTimeAcknowledged !== true) throw httpError(400, 'Cần xác nhận đã biết các khoản phí, số ngày free time và ngày dự kiến nhận hàng.');
+  if (payload.freeTimeAcknowledged !== true) throw httpError(400, 'Cần xác nhận đã biết các khoản phí và số ngày free time.');
   await sequelize.query(
     `UPDATE import_shipments SET status = 'CONFIRMED', invoice_info = CAST(:i AS jsonb), contact_info = CAST(:c AS jsonb), version = version + 1, updated_at = now() WHERE id = :id`,
     { replacements: { id, i: json(invoice), c: json({ ...contact, expectedPickupDate: payload.expectedPickupDate || null }) } },
   );
-  await recordDocumentEvent({ direction: 'IMPORT', fileRef: row.bl_number, documentType: 'ARRIVAL_NOTICE', action: 'CONFIRMED', fromStatus: STATUS.NOTICE_SENT, toStatus: STATUS.CONFIRMED, actor, documentVersion: row.notice_version });
+  await recordDocumentEvent({ direction: 'IMPORT', fileRef: row.bl_number, documentType: 'ARRIVAL_NOTICE', action: resubmit ? 'CONFIRMATION_UPDATED' : 'CONFIRMED', fromStatus: row.status, toStatus: STATUS.CONFIRMED, actor, documentVersion: row.notice_version });
+  await notifyLine(row, resubmit ? 'ArrivalNoticeReconfirmed' : 'ArrivalNoticeConfirmed',
+    resubmit ? `Người nhận cập nhật thông tin xác nhận [${row.bl_number}]` : `Người nhận đã xác nhận Arrival Notice [${row.bl_number}]`,
+    `${invoice.companyName} · MST ${invoice.taxCode} · liên hệ ${contact.name} ${contact.phone}`, `an-conf-${row.bl_number}-${row.version}`);
   return get(id, actor);
 }
 
@@ -461,6 +563,8 @@ async function requestAmendment(id, payload = {}, actor) {
     direction: 'IMPORT', fileRef: row.bl_number, documentType: 'ARRIVAL_NOTICE', action: 'REVISION_REQUESTED', fromStatus: STATUS.NOTICE_SENT, toStatus: STATUS.AMENDMENT_REQUESTED, actor,
     documentVersion: row.notice_version, fieldChanges: request.changes.map((c) => ({ field: c.field, old: c.oldValue, new: c.newValue })), note: request.reason,
   });
+  await notifyLine(row, 'ArrivalNoticeAmendmentRequested', `Người nhận yêu cầu sửa Arrival Notice [${row.bl_number}]`,
+    `${request.changes.map((c) => `${c.field}: ${c.oldValue ?? '—'} → ${c.newValue}`).join('; ')}. Lý do: ${request.reason}`, `an-amd-${row.bl_number}-${row.version}`);
   return get(id, actor);
 }
 
@@ -504,6 +608,7 @@ async function resolveAmendment(id, { accept, note, shipperConfirmed } = {}, act
   const deadline = noticeDeadline(row.eta);
   const notice = buildNotice(updated, nextVersion, {
     fees: row.notice?.fees, stockLocation: row.notice?.stockLocation, freeTime: row.notice?.freeTime, requiredDocuments: row.notice?.requiredDocuments,
+    warehouseCode: row.notice?.warehouseCode, notes: row.notice?.notes, cargo: await cargoSummary(updated),
   }, deadline);
   sets.push('invoice_info = CAST(:invoice AS jsonb)', 'contact_info = CAST(:contact AS jsonb)', 'notice = CAST(:notice AS jsonb)');
   Object.assign(replacements, { invoice: json(invoice), contact: json(contact), notice: json(notice), d: deadline, nv: nextVersion });
@@ -568,6 +673,7 @@ async function setAuthorization(id, url, actor) {
   if (!url || !/^(https?:\/\/|\/uploads\/)/i.test(String(url))) throw httpError(400, 'Cần tải lên giấy ủy quyền của consignee.');
   await sequelize.query('UPDATE import_shipments SET authorization_file_url = :u, version = version + 1, updated_at = now() WHERE id = :id', { replacements: { id, u: url } });
   await recordDocumentEvent({ direction: 'IMPORT', fileRef: row.bl_number, documentType: 'DO', action: 'AUTHORIZATION_UPLOADED', actor, note: 'Transport company tải lên giấy ủy quyền của consignee.' });
+  await notifyLine(row, 'ImportAuthorizationUploaded', `Giấy ủy quyền consignee đã được tải lên [${row.bl_number}]`, 'Transport company đã tải lên giấy ủy quyền để nhận hàng.', `an-auth-${row.bl_number}-${row.version}`);
   return get(id, actor);
 }
 
@@ -578,6 +684,7 @@ async function requestDo(id, actor) {
   const check = { ...(row.release_check || {}), requestedAt: new Date().toISOString(), requestedBy: actor.id };
   await sequelize.query('UPDATE import_shipments SET release_check = CAST(:c AS jsonb), version = version + 1, updated_at = now() WHERE id = :id', { replacements: { id, c: json(check) } });
   await recordDocumentEvent({ direction: 'IMPORT', fileRef: row.bl_number, documentType: 'DO', action: 'REQUESTED', fromStatus: row.status, toStatus: row.status, actor });
+  await notifyLine(row, 'ImportDoRequested', `Người nhận yêu cầu lấy D/O [${row.bl_number}]`, 'Hãy ghi nhận thu phí, kiểm quyền nhận hàng và phát hành D/O.', `an-do-${row.bl_number}-${row.version}`);
   return get(id, actor);
 }
 
@@ -612,13 +719,53 @@ async function verifyRelease(id, actor) {
   return { ...(await get(id, actor)), eligibility };
 }
 
+/** Hiệu lực e-D/O = (ngày tàu đến hoặc ngày phát hành, lấy ngày muộn hơn) + số ngày miễn phí lưu bãi (DEM), hết hạn lúc 23:59. */
+function edoValidUntil(row) {
+  const dem = Number(row.notice?.freeTime?.demDays) || 7;
+  const eta = row.eta ? new Date(row.eta).getTime() : 0;
+  const base = Math.max(Date.now(), Number.isNaN(eta) ? 0 : eta);
+  const day = new Date(base + dem * 86400000).toLocaleDateString('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' });
+  return `${day} 23:59:00`;
+}
+
+/** Đưa container của e-D/O vào danh sách hàng nhập của ePort: gắn B/L, hạn lệnh và quyền của công ty nhận hàng. */
+async function linkEdoToEportVisits(edo, companyId) {
+  const nos = (edo.containers || []).map((c) => String(c.containerNumber || '').toUpperCase()).filter(Boolean);
+  if (!nos.length) return 0;
+  try {
+    const [, meta] = await sequelize.query(
+      `UPDATE container_visits v SET movement_type = 'vessel_discharge', data_status = 'verified', bl_booking_no = :bl,
+              valid_to = (SELECT valid_until FROM delivery_orders WHERE do_number = :doNo), updated_at = now()
+         FROM containers c WHERE c.id = v.container_id AND UPPER(c.container_no) IN (:nos) AND v.visit_status = 'active' AND v.completed_at IS NULL`,
+      { replacements: { bl: edo.blNumber, doNo: edo.edoNumber, nos } },
+    );
+    if (companyId) {
+      await sequelize.query(
+        `INSERT INTO container_visit_access (container_visit_id, carrier_id)
+         SELECT v.id, :company FROM container_visits v JOIN containers c ON c.id = v.container_id
+          WHERE UPPER(c.container_no) IN (:nos) AND v.visit_status = 'active' AND v.completed_at IS NULL ON CONFLICT DO NOTHING`,
+        { replacements: { company: companyId, nos } },
+      );
+    }
+    return meta?.rowCount || 0;
+  } catch (err) {
+    console.warn('[ImportDocuments] Không liên kết được e-D/O với danh sách ePort:', err.message);
+    return 0;
+  }
+}
+
 async function issueDo(id, options = {}, actor) {
   needLine(actor);
   const row = await loadFile(id, actor);
   requireStatus(row, STATUS.RELEASE_VERIFIED);
+  const [company] = row.consignee_company_id
+    ? await sequelize.query('SELECT tax_code AS "taxCode" FROM carriers WHERE id = :id', { replacements: { id: row.consignee_company_id }, type: QueryTypes.SELECT }).catch(() => [])
+    : [];
   const edo = await shippingLineService.issueEdo({
-    blNumber: row.bl_number, validUntil: options.validUntil, freeTimeDays: options.freeTimeDays || row.notice?.freeTime?.demDays, notes: options.notes,
+    blNumber: row.bl_number, validUntil: options.validUntil || edoValidUntil(row), freeTimeDays: options.freeTimeDays || row.notice?.freeTime?.demDays, notes: options.notes,
+    pickupDepot: row.notice?.stockLocation, consigneeTaxCode: company?.taxCode, consigneeCompanyId: row.consignee_company_id,
   }, actor.username);
+  await linkEdoToEportVisits(edo, row.consignee_company_id)
   await sequelize.query(`UPDATE import_shipments SET status = 'DO_ISSUED', do_number = :n, version = version + 1, updated_at = now() WHERE id = :id`, { replacements: { id, n: edo.edoNumber } });
   await notifyDoIssued({ blNumber: row.bl_number, companyId: row.consignee_company_id, edo, containers: row.containers, stockLocation: row.notice?.stockLocation });
   if (row.bl_type === 'Original') {
@@ -630,7 +777,7 @@ async function issueDo(id, options = {}, actor) {
 module.exports = {
   STATUS, listPreAlerts, receivePreAlert, list, get, listCompanies, assignConsignee, reconcile, resolveMismatch, sendArrivalNotice,
   confirmNotice, requestAmendment, resolveAmendment, autoAcceptOverdue, collectFees, confirmOriginalReceived, setAuthorization,
-  requestDo, verifyRelease, issueDo, compareBillWithManifest, noticeDeadline,
+  requestDo, verifyRelease, issueDo, linkEdoToEportVisits, compareBillWithManifest, noticeDeadline,
   // Dùng chung cho yêu cầu ngoại lệ sau phát hành B/L
-  loadFile, httpError, needLine, needCompany, notifyCompany, buildNotice, isLine,
+  loadFile, httpError, needLine, needCompany, notifyCompany, notifyLine, buildNotice, isLine,
 };
