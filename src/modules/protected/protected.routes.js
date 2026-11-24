@@ -105,24 +105,6 @@ router.get(
   ok('GET /api/gate/check-in — Gate Officer + Administrator')
 );
 
-// ─── Yard Operator ────────────────────────────────────────────────────────────
-
-/**
- * @swagger
- * /api/yard/containers:
- *   get:
- *     summary: Quản lý bãi container (Administrator + Yard Operator)
- *     tags: [RBAC Demo]
- *     security:
- *       - BearerAuth: []
- */
-router.get(
-  '/yard/containers',
-  authenticate,
-  authorize(PERMISSIONS.YARD_ACCESS),
-  ok('GET /api/yard/containers — Yard Operator + Administrator')
-);
-
 // ─── Transport Company ────────────────────────────────────────────────────────
 
 /**

@@ -18,7 +18,7 @@
  *  GET /admin/dashboard    |  200  |    200     | 403  | 403  |  403  |   403   |  403
  *  GET /dispatcher/ops     |  200  |    200     | 403  | 403  |  403  |   403   |  403
  *  GET /gate/check-in      |  200  |    403     | 200  | 403  |  403  |   403   |  403
- *  GET /yard/containers    |  200  |    403     | 403  | 200  |  403  |   403   |  403
+ *  GET /yard/containers    |  200  |    200     | 200  | 200  |  403  |   403   |  403
  *  GET /berth/schedule     |  200  |    403     | 403  | 403  |  200  |   403   |  403
  *  GET /transport/bookings |  200  |    200     | 403  | 403  |  403  |   200   |  403
  *  GET /driver/trips       |  200  |    403     | 403  | 403  |  403  |   403   |  200
@@ -147,10 +147,10 @@ describe('GET /api/gate/check-in — Administrator + Gate Officer', () => {
 });
 
 // ─── 5. GET /api/yard/containers ─────────────────────────────────────────────
-describe('GET /api/yard/containers — Administrator + Yard Operator', () => {
+describe('GET /api/yard/containers — port staff', () => {
   it('Administrator → 200',  () => get('/api/yard/containers', 'admin').expect(200));
-  it('Dispatcher → 403',     () => get('/api/yard/containers', 'dispatcher').expect(403));
-  it('Gate Officer → 403',   () => get('/api/yard/containers', 'gate').expect(403));
+  it('Dispatcher → 200',     () => get('/api/yard/containers', 'dispatcher').expect(200));
+  it('Gate Officer → 200',   () => get('/api/yard/containers', 'gate').expect(200));
   it('Yard Operator → 200',  () => get('/api/yard/containers', 'yard').expect(200));
   it('Berth Staff → 403',    () => get('/api/yard/containers', 'berth').expect(403));
   it('Transport Company → 403', () => get('/api/yard/containers', 'carrier').expect(403));
