@@ -25,6 +25,40 @@ async function deliverMail({ to, subject, text, html }) {
   const brevoKey = process.env.EmailSettings__BrevoApiKey || process.env.BREVO_API_KEY;
   const senderEmail = process.env.EmailSettings__SenderEmail || process.env.SMTP_USER || 'smartlogai2026@gmail.com';
   const senderName = process.env.EmailSettings__SenderName || 'NexusPort - Hệ Thống Cảng Container';
+  // Cầu gửi qua Google Apps Script (HTTPS, không cần tên miền hay SMTP): đặt EmailSettings__GoogleScriptUrl + EmailSettings__GoogleScriptSecret
+  const scriptUrl = process.env.EmailSettings__GoogleScriptUrl || process.env.GOOGLE_MAIL_SCRIPT_URL;
+  if (scriptUrl) {
+    const res = await fetch(scriptUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        secret: process.env.EmailSettings__GoogleScriptSecret || process.env.GOOGLE_MAIL_SCRIPT_SECRET || '',
+        to, subject, senderName, body: html || text || '', isHtml: Boolean(html),
+      }),
+      redirect: 'follow',
+      signal: AbortSignal.timeout(25000),
+    });
+    const payload = await res.json().catch(() => null);
+    if (!res.ok || !payload?.ok) {
+      throw new Error(`Cầu gửi email Google từ chối yêu cầu (${res.status}): ${payload?.error || 'không rõ lý do'}. Kiểm tra URL, mã bí mật và quyền triển khai của script.`);
+    }
+    return { provider: 'google-script' };
+  }
+  // Resend (HTTPS): đặt EmailSettings__ResendApiKey; người gửi phải thuộc tên miền đã xác thực trong Resend
+  const resendKey = process.env.EmailSettings__ResendApiKey || process.env.RESEND_API_KEY;
+  if (resendKey) {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${resendKey.trim()}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ from: `${senderName} <${senderEmail}>`, to: [to], subject, ...(html ? { html } : { text }) }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => '')).slice(0, 300);
+      throw new Error(`Dịch vụ email (Resend) từ chối yêu cầu (${res.status}): ${detail || 'không rõ lý do'}. Kiểm tra khóa API và địa chỉ người gửi thuộc tên miền đã xác thực.`);
+    }
+    return { provider: 'resend' };
+  }
   if (brevoKey) {
     const res = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
