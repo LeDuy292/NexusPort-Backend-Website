@@ -110,20 +110,22 @@ test.each(['arrived','called','acknowledged','withdrawn'])('%s vehicles cannot b
 });
 
 test('dispatcher can issue a call for a ready vehicle two days before appointment', async () => {
-  const booking = {...base,appointmentStart:new Date(Date.now()+2*24*60*60000).toISOString(),dispatch:{status:'ready',version:1}};
+  const booking = {...base,appointmentStart:new Date(now.getTime()+2*24*60*60000).toISOString(),dispatch:{status:'ready',version:1}};
   sequelize.query.mockResolvedValueOnce([{id}]).mockResolvedValueOnce([booking])
+    .mockResolvedValueOnce([{now}])
     .mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValueOnce([{booking_id:id}])
     .mockResolvedValueOnce([{...booking,dispatch:{status:'called',version:2},gateEntryOrder:{status:'pending_ack'}}]);
   const updated = await service.act(id,'Dispatcher',id,'call',{expectedVersion:1});
   expect(updated.dispatch.status).toBe('called');
   expect(updated.gateEntryOrder.status).toBe('pending_ack');
-  expect(sequelize.query.mock.calls[4][1].replacements).toMatchObject({status:'called',nextVersion:2});
+  expect(sequelize.query.mock.calls[5][1].replacements).toMatchObject({status:'called',nextVersion:2});
   expect(admission.lock.mock.invocationCallOrder.at(-1)).toBeLessThan(sequelize.query.mock.invocationCallOrder[0]);
 });
 
 test.each([null, { status: 'expired' }, { status: 'active' }])('acknowledgment reports success only with a gate permission that became active (%j)', async gateEntryOrder => {
-  const booking = { ...base, dispatch: { status: 'called', callExpiresAt: new Date(Date.now()+60000).toISOString(), version: 2 } };
+  const booking = { ...base, dispatch: { status: 'called', callExpiresAt: new Date(now.getTime()+60000).toISOString(), version: 2 } };
   sequelize.query.mockResolvedValueOnce([{id}]).mockResolvedValueOnce([booking])
+    .mockResolvedValueOnce([{now}])
     .mockResolvedValueOnce([{booking_id:id}])
     .mockResolvedValueOnce([{...booking, dispatch: { status: 'acknowledged', version: 3 }, gateEntryOrder}]);
   const result = service.act(id, 'Driver', id, 'acknowledge', { expectedVersion: 2 });
@@ -135,11 +137,11 @@ test.each([null, { status: 'expired' }, { status: 'active' }])('acknowledgment r
 });
 
 test('full capacity stops a manual call inside the transaction before an entry order is issued', async () => {
-  const booking = {...base,appointmentStart:new Date().toISOString(),dispatch:{status:'ready',version:1}};
-  sequelize.query.mockResolvedValueOnce([{id}]).mockResolvedValueOnce([booking]);
+  const booking = {...base,dispatch:{status:'ready',version:1}};
+  sequelize.query.mockResolvedValueOnce([{id}]).mockResolvedValueOnce([booking]).mockResolvedValueOnce([{now}]);
   admission.requireSpace.mockRejectedValueOnce(Object.assign(new Error('Bãi đã đủ sức chứa'),{statusCode:409}));
   await expect(service.act(id,'Dispatcher',id,'call',{expectedVersion:1})).rejects.toMatchObject({statusCode:409});
-  expect(sequelize.query).toHaveBeenCalledTimes(2);
+  expect(sequelize.query).toHaveBeenCalledTimes(3);
 });
 test('late classification uses arrival timestamp, not time spent waiting for the port', () => {
   expect(decorate({...base,dispatch:{status:'ready',arrivedAt:base.appointmentStart}},new Date('2026-10-17T05:00:00Z')).coordination.isLate).toBe(false);
@@ -164,21 +166,24 @@ test('missing expected version is rejected before accessing database', async () 
   expect(sequelize.query).not.toHaveBeenCalled();
 });
 test('delay needs a reason and bounded duration', async () => {
-  sequelize.query.mockResolvedValueOnce([{id}]).mockResolvedValueOnce([{...base,dispatch:{status:'ready',version:1}}]);
+  sequelize.query.mockResolvedValueOnce([{id}]).mockResolvedValueOnce([{...base,dispatch:{status:'ready',version:1}}]).mockResolvedValueOnce([{now}]);
   await expect(service.act(id,'Dispatcher',id,'delay',{expectedVersion:1,minutes:999,note:''})).rejects.toMatchObject({statusCode:422});
-  expect(sequelize.query).toHaveBeenCalledTimes(2);
+  expect(sequelize.query).toHaveBeenCalledTimes(3);
 });
-test('driver can confirm arrival two days early through the API and only write dispatch state', async () => {
-  const booking={...base,appointmentStart:new Date(Date.now()+2*24*60*60000).toISOString()};
+test('driver can report arrival before any trip acknowledgment and become ready for dispatch', async () => {
+  const booking={...base,appointmentStart:new Date(now.getTime()+2*24*60*60000).toISOString()};
   sequelize.query.mockResolvedValueOnce([{id}]).mockResolvedValueOnce([booking])
+    .mockResolvedValueOnce([{now}])
     .mockResolvedValueOnce([{booking_id:id}]).mockResolvedValueOnce([{...booking,dispatch:{status:'ready',version:1}}]);
   const response = await request(app).post(`/dispatch/${id}/arrive`)
     .set('Authorization', 'Bearer ' + token('Driver')).send({ expectedVersion: 0 });
   expect(response.status).toBe(200);
   expect(response.body.data.booking.dispatch.status).toBe('ready');
-  expect(sequelize.query.mock.calls[2][0]).toContain('INSERT INTO booking_dispatch_state');
+  expect(response.body.data.booking.coordination.canCall).toBe(true);
+  expect(sequelize.query.mock.calls[3][0]).toContain('INSERT INTO booking_dispatch_state');
+  expect(sequelize.query.mock.calls[3][1].replacements).toMatchObject({ status: 'ready', arrivedAt: now, readyAt: now });
   for(const [sql,options] of sequelize.query.mock.calls){
-    expect(sql).not.toMatch(/UPDATE bookings|INSERT INTO gate_transactions/i);
+    expect(sql).not.toMatch(/transport_trips|UPDATE bookings|INSERT INTO gate_transactions/i);
     expect(options.transaction).toBeDefined();
   }
 });

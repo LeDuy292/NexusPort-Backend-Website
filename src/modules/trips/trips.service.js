@@ -106,8 +106,12 @@ async function syncTripsWithDispatch(userId) {
       next = 'Acknowledged'; note = 'Tài xế đã xác nhận lệnh gọi của điều độ';
     }
     if (!next || next === r.status) continue;
-    await sequelize.query('UPDATE transport_trips SET status = :next, updated_at = now() WHERE id = :id', { replacements: { next, id: r.id } });
-    await recordHistory(r.id, r.status, next, userId, note);
+    const [updated] = await sequelize.query(
+      `UPDATE transport_trips SET status = :next, updated_at = now()
+        WHERE id = :id AND status = :current RETURNING id`,
+      { replacements: { next, id: r.id, current: r.status }, type: sequelize.QueryTypes.SELECT },
+    );
+    if (updated) await recordHistory(r.id, r.status, next, userId, note);
   }
 }
 
