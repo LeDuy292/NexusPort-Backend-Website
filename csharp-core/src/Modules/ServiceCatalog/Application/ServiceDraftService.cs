@@ -65,10 +65,6 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
 
     private const string ExportEligible = """
         b.port_status='Accepted' AND b.status IN ('ContainersDeclared','GateIn')
-        AND b.booking_no NOT ILIKE 'DEMO-EPORT-%'
-        AND COALESCE(b.bl_number,'') NOT ILIKE 'BL-DEMO-EPORT-%'
-        AND v.vessel_name NOT ILIKE 'DEMO EPORT%'
-        AND b.id::text NOT LIKE '03810000-%'
         AND v.status='Scheduled' AND e.status='Expected' AND e.active AND d.load_status='full'
         AND v.cy_cutoff>now() AND v.receive_from IS NOT NULL
         AND e.vgm_kg>0 AND NULLIF(trim(e.seal_number),'') IS NOT NULL
@@ -167,7 +163,7 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                 FROM export_bookings b
                 JOIN bills_of_lading bl ON upper(bl.bl_number) = upper(COALESCE(NULLIF(b.bl_number,''), b.booking_no))
                 CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(bl.containers)='array' THEN bl.containers ELSE '[]'::jsonb END) elem
-                WHERE b.booking_no NOT ILIKE 'DEMO-EPORT-%'
+                WHERE TRUE
                   AND NULLIF(trim(elem->>'containerNumber'), '') IS NOT NULL
                   AND NOT EXISTS (SELECT 1 FROM containers c WHERE upper(c.container_no) = upper(trim(elem->>'containerNumber')))
                 ON CONFLICT (container_no) DO NOTHING;
@@ -185,7 +181,7 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                 JOIN bills_of_lading bl ON upper(bl.bl_number) = upper(COALESCE(NULLIF(b.bl_number,''), b.booking_no))
                 CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(bl.containers)='array' THEN bl.containers ELSE '[]'::jsonb END) elem
                 JOIN containers c ON upper(c.container_no) = upper(trim(elem->>'containerNumber'))
-                WHERE b.booking_no NOT ILIKE 'DEMO-EPORT-%'
+                WHERE TRUE
                   AND NOT EXISTS (
                       SELECT 1 FROM container_declarations d
                       WHERE d.container_id = c.id AND d.carrier_id = COALESCE(b.carrier_id, @p0) AND d.load_status = 'full'
@@ -208,7 +204,7 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                 JOIN bills_of_lading bl ON upper(bl.bl_number) = upper(COALESCE(NULLIF(b.bl_number,''), b.booking_no))
                 CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(bl.containers)='array' THEN bl.containers ELSE '[]'::jsonb END) elem
                 JOIN containers c ON upper(c.container_no) = upper(trim(elem->>'containerNumber'))
-                WHERE b.booking_no NOT ILIKE 'DEMO-EPORT-%'
+                WHERE TRUE
                   AND EXISTS (SELECT 1 FROM container_declarations d WHERE d.container_id = c.id AND d.carrier_id = COALESCE(b.carrier_id, @p0) AND d.load_status = 'full')
                   AND NOT EXISTS (
                       SELECT 1 FROM export_booking_containers e
@@ -270,9 +266,6 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                     WHERE v.load_status='full' AND d.load_status='full' AND v.visit_status='active'
                         AND v.movement_type='vessel_discharge' AND v.data_status='verified'
                         AND (eo.consignee_company_id = @p0 OR d.carrier_id = @p0 OR (eo.do_number IS NULL AND d.carrier_id IS NULL))
-                        AND COALESCE(v.source_reference,'') NOT ILIKE 'DEMO-EPORT-%'
-                        AND COALESCE(v.bl_booking_no,'') NOT ILIKE 'DEMO-BL-%'
-                        AND c.container_no NOT LIKE 'DEMU%'
                         AND v.started_at IS NOT NULL AND v.completed_at IS NULL
                         AND (COALESCE(v.visit_reference,'') ILIKE @p1 OR COALESCE(v.bl_booking_no,'') ILIKE @p1 OR c.container_no ILIKE @p1)
                     ORDER BY v.created_at DESC, v.id LIMIT 50
@@ -302,8 +295,10 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                     COALESCE((SELECT l.full_name FROM shipping_lines l WHERE l.id=b.shipping_line_id),
                              (SELECT u.full_name FROM users u WHERE u.id=b.line_user_id),'—') AS "operatorName",
                     v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",
-                    v.etd AS "etd",v.eta AS "eta",count(e.id)::int AS "containerCount"
+                    v.etd AS "etd",v.eta AS "eta",count(e.id)::int AS "containerCount",
+                    array_agg(upper(e.container_no) ORDER BY e.container_no) AS "containerNumbers"
                 """ + ExportJoins + " WHERE " + ExportEligible + """
+                 AND b.carrier_id=@p0
                  AND (b.booking_no ILIKE @p1 OR COALESCE(b.bl_number,'') ILIKE @p1 OR v.vessel_name ILIKE @p1 OR v.voyage_number ILIKE @p1)
                  GROUP BY b.id,b.booking_no,b.bl_number,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff,v.etd,v.eta,b.created_at
                  ORDER BY b.created_at DESC,b.id LIMIT 50
