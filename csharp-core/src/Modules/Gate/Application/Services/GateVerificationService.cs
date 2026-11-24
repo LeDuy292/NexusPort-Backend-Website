@@ -316,6 +316,22 @@ public class GateVerificationService : IGateVerificationService
             bookingId).SingleAsync(cancellationToken);
         if (pending > 0)
             return ("GATE_OUT_DELIVERY_INCOMPLETE", "Xe chưa hoàn thành giao nhận container (bãi chưa xác nhận nhận hoặc tài xế chưa xác nhận). Chưa cho ra cổng.");
+
+        // Phí đảo container chiều xuất: Transport Company phải thanh toán đủ trước khi xe ra cổng.
+        // Bảng do dịch vụ bãi (Node) tạo; chưa có bảng nghĩa là chưa phát sinh phí nào.
+        try
+        {
+            var unpaidShifting = await _context.Database.SqlQueryRaw<int>(
+                "SELECT count(*)::int AS \"Value\" FROM yard_shifting_charges ch WHERE ch.status='UNPAID' AND (ch.booking_id={0} OR EXISTS(" +
+                "SELECT 1 FROM booking_containers bc JOIN containers c ON c.id=bc.container_id WHERE bc.booking_id={0} AND upper(c.container_no)=ch.container_no))",
+                bookingId).SingleAsync(cancellationToken);
+            if (unpaidShifting > 0)
+                return ("GATE_OUT_SHIFTING_FEE_UNPAID", "Container còn phí đảo chuyển chưa thanh toán. Transport Company cần thanh toán đủ trước khi cho ra cổng.");
+        }
+        catch (Exception ex) when (ex is Npgsql.PostgresException { SqlState: "42P01" })
+        {
+            // chưa có bảng phí đảo container
+        }
         return null;
     }
 
