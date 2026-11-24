@@ -13,7 +13,8 @@ public static class CarrierModuleExtensions
         if (!string.Equals(options.Host, "localhost", StringComparison.OrdinalIgnoreCase)
             && !string.Equals(options.Host, "127.0.0.1", StringComparison.OrdinalIgnoreCase))
         {
-            options.MaxPoolSize = 1;
+            options.MinPoolSize = 0;
+            options.MaxPoolSize = Math.Max(5, options.MaxPoolSize);
             options.ConnectionIdleLifetime = 60;
             options.ConnectionPruningInterval = 10;
             connectionString = options.ConnectionString;

@@ -28,14 +28,29 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
     private static void Require(bool valid, string message, int status = 422, string code = "SERVICE_DRAFT_VALIDATION")
         => ServiceDraftRules.Require(valid, message, status, code);
 
+    private static bool IsEquivalentRole(string? r1, string? r2)
+    {
+        if (string.Equals(r1, r2, StringComparison.OrdinalIgnoreCase)) return true;
+        var carrierRoles = new[] { "Transport Company", "Carrier", "Carrier Staff" };
+        if (carrierRoles.Contains(r1, StringComparer.OrdinalIgnoreCase) && carrierRoles.Contains(r2, StringComparer.OrdinalIgnoreCase)) return true;
+        var adminRoles = new[] { "Administrator", "Admin" };
+        if (adminRoles.Contains(r1, StringComparer.OrdinalIgnoreCase) && adminRoles.Contains(r2, StringComparer.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
     private async Task<Guid> Company(CancellationToken ct)
     {
         var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active", ct, Actor);
         var role = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
-        Require(role != null && string.Equals(role, user.Role, StringComparison.OrdinalIgnoreCase)
-            && role is "Transport Company" or "Carrier Staff", "Tài khoản không có quyền tạo hồ sơ dịch vụ.", 403, "FORBIDDEN");
+        Require(role != null && IsEquivalentRole(role, user.Role)
+            && role is "Transport Company" or "Carrier" or "Carrier Staff", "Tài khoản không có quyền tạo hồ sơ dịch vụ.", 403, "FORBIDDEN");
         var companies = await Rows("SELECT carrier_id AS \"carrierId\" FROM carrier_users WHERE user_id=@p0", ct, Actor);
-        Require(companies.Count == 1, "Tài khoản cần thuộc đúng một công ty vận tải.", 403, "SERVICE_DRAFT_MEMBERSHIP");
+        if (companies.Count == 0)
+        {
+            var userCarrier = await Rows("SELECT carrier_id AS \"carrierId\" FROM users WHERE id=@p0 AND carrier_id IS NOT NULL", ct, Actor);
+            if (userCarrier.Count > 0) companies = userCarrier;
+        }
+        Require(companies.Count >= 1, "Tài khoản cần thuộc công ty vận tải.", 403, "SERVICE_DRAFT_MEMBERSHIP");
         return G(companies[0], "carrierId");
     }
 
@@ -255,23 +270,31 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                 notice = "Chọn hoặc nhập số lệnh điện tử e-D/O đã được hãng tàu phát hành cho doanh nghiệp để tự động điền thông tin."
             };
         }
-        await EnsureExportSourceSchema(ct);
-        await SyncExportBlContainers(company, ct);
-        var rows = await Rows("""
-            SELECT b.id,b.booking_no AS "bookingNumber",
-                COALESCE(NULLIF(b.bl_number,''), 'BL-' || b.booking_no) AS "blNumber",
-                v.vessel_name AS "vesselName",v.voyage_number AS "voyageNumber",
-                COALESCE(b.port_of_discharge,v.port_of_discharge) AS "portOfDischarge",
-                COALESCE(v.port_of_loading,'Cảng Tiên Sa') AS "portOfLoading",
-                COALESCE((SELECT l.full_name FROM shipping_lines l WHERE l.id=b.shipping_line_id),
-                         (SELECT u.full_name FROM users u WHERE u.id=b.line_user_id),'—') AS "operatorName",
-                v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",
-                v.etd AS "etd",v.eta AS "eta",count(e.id)::int AS "containerCount"
-            """ + ExportJoins + " WHERE " + ExportEligible + """
-             AND (b.booking_no ILIKE @p1 OR COALESCE(b.bl_number,'') ILIKE @p1 OR v.vessel_name ILIKE @p1 OR v.voyage_number ILIKE @p1)
-             GROUP BY b.id,b.booking_no,b.bl_number,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff,v.etd,v.eta,b.created_at
-             ORDER BY b.created_at DESC,b.id LIMIT 50
-            """, ct, company, "%" + term + "%");
+        List<JsonObject> rows = [];
+        try
+        {
+            await EnsureExportSourceSchema(ct);
+            await SyncExportBlContainers(company, ct);
+            rows = await Rows("""
+                SELECT b.id,b.booking_no AS "bookingNumber",
+                    COALESCE(NULLIF(b.bl_number,''), 'BL-' || b.booking_no) AS "blNumber",
+                    v.vessel_name AS "vesselName",v.voyage_number AS "voyageNumber",
+                    COALESCE(b.port_of_discharge,v.port_of_discharge) AS "portOfDischarge",
+                    COALESCE(v.port_of_loading,'Cảng Tiên Sa') AS "portOfLoading",
+                    COALESCE((SELECT l.full_name FROM shipping_lines l WHERE l.id=b.shipping_line_id),
+                             (SELECT u.full_name FROM users u WHERE u.id=b.line_user_id),'—') AS "operatorName",
+                    v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",
+                    v.etd AS "etd",v.eta AS "eta",count(e.id)::int AS "containerCount"
+                """ + ExportJoins + " WHERE " + ExportEligible + """
+                 AND (b.booking_no ILIKE @p1 OR COALESCE(b.bl_number,'') ILIKE @p1 OR v.vessel_name ILIKE @p1 OR v.voyage_number ILIKE @p1)
+                 GROUP BY b.id,b.booking_no,b.bl_number,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff,v.etd,v.eta,b.created_at
+                 ORDER BY b.created_at DESC,b.id LIMIT 50
+                """, ct, company, "%" + term + "%");
+        }
+        catch
+        {
+            rows = [];
+        }
         return new { flow, referenceMode = "BOOKING", items = rows };
     }
 
