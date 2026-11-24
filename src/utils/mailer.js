@@ -95,7 +95,48 @@ async function sendPasswordResetOtpEmail(toEmail, otpCode, fullNameOrUsername) {
   });
 }
 
+const escapeHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/**
+ * Gửi thông tin đăng nhập cho tài khoản mới do quản trị viên tạo.
+ * @param {string} toEmail  Email người nhận (ví dụ Gmail của hãng tàu)
+ * @param {{ fullName?: string, username: string, password: string, roleLabel: string, organization?: string, loginUrl?: string }} info
+ */
+async function sendAccountCredentialsEmail(toEmail, info) {
+  const transporter = getTransporter();
+  const senderEmail = process.env.EmailSettings__SenderEmail || process.env.SMTP_USER || 'smartlogai2026@gmail.com';
+  const senderName = process.env.EmailSettings__SenderName || 'NexusPort - Hệ Thống Cảng Container';
+  const loginUrl = info.loginUrl || process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:5173/login';
+  const name = escapeHtml(info.fullName || info.username);
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Tài khoản NexusPort</title></head>
+<body style="margin:0;padding:24px;background:#f1f5f9;font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;color:#0f172a;">
+  <table align="center" width="100%" style="max-width:520px;background:#ffffff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;" cellpadding="0" cellspacing="0">
+    <tr><td style="padding:24px 28px;border-bottom:3px solid #ff682c;"><span style="font-size:22px;font-weight:800;">NexusPort<span style="color:#ff682c;">.</span></span></td></tr>
+    <tr><td style="padding:28px;">
+      <h2 style="margin:0 0 12px;font-size:18px;">Tài khoản của bạn đã được tạo</h2>
+      <p style="margin:0 0 18px;font-size:14px;line-height:1.6;color:#475569;">Xin chào <strong>${name}</strong>, quản trị viên đã tạo tài khoản <strong>${escapeHtml(info.roleLabel)}</strong>${info.organization ? ` cho <strong>${escapeHtml(info.organization)}</strong>` : ''} trên hệ thống NexusPort.</p>
+      <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin-bottom:18px;">
+        <tr><td style="padding:14px 18px;font-size:13px;color:#64748b;">Tên đăng nhập</td><td style="padding:14px 18px;font-size:14px;font-weight:700;text-align:right;">${escapeHtml(info.username)}</td></tr>
+        <tr><td style="padding:14px 18px;font-size:13px;color:#64748b;border-top:1px solid #e2e8f0;">Email</td><td style="padding:14px 18px;font-size:14px;font-weight:700;text-align:right;border-top:1px solid #e2e8f0;">${escapeHtml(toEmail)}</td></tr>
+        <tr><td style="padding:14px 18px;font-size:13px;color:#64748b;border-top:1px solid #e2e8f0;">Mật khẩu</td><td style="padding:14px 18px;font-size:15px;font-weight:800;text-align:right;border-top:1px solid #e2e8f0;letter-spacing:.5px;">${escapeHtml(info.password)}</td></tr>
+      </table>
+      <p style="margin:0 0 20px;"><a href="${escapeHtml(loginUrl)}" style="display:inline-block;background:#ff682c;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:10px;">Đăng nhập NexusPort</a></p>
+      <p style="margin:0;font-size:12px;line-height:1.6;color:#64748b;background:#fff7ed;border-left:3px solid #f59e0b;padding:10px 12px;">Vì lý do bảo mật, hãy đổi mật khẩu sau lần đăng nhập đầu tiên và không chia sẻ email này cho người khác.</p>
+    </td></tr>
+    <tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;text-align:center;">Email tự động từ hệ thống NexusPort, vui lòng không trả lời thư này.</td></tr>
+  </table>
+</body></html>`;
+  return transporter.sendMail({
+    from: `"${senderName}" <${senderEmail}>`,
+    to: toEmail,
+    subject: '[NexusPort] Thông tin đăng nhập tài khoản của bạn',
+    text: `Tài khoản ${info.roleLabel} NexusPort đã được tạo.\nTên đăng nhập: ${info.username}\nMật khẩu: ${info.password}\nĐăng nhập: ${loginUrl}\nHãy đổi mật khẩu sau lần đăng nhập đầu tiên.`,
+    html,
+  });
+}
+
 module.exports = {
+  sendAccountCredentialsEmail,
   getTransporter,
   sendPasswordResetOtpEmail,
 };

@@ -133,6 +133,7 @@ class GateOutDeliveryService {
     }
 
     // 2. Kiểm tra quy tắc bất biến: Một container chỉ giao một lần; sau khi Đã ra cổng không giao lại
+    // COMPLETED chỉ được đặt khi xác nhận xe RA CỔNG (confirmGateOutExit) => container đã giao xong, không kiểm tra lại.
     if (yardReq && (yardReq.status === 'COMPLETED' || yardReq.status === 'GATED_OUT')) {
       return {
         eligible: false,
@@ -183,9 +184,24 @@ class GateOutDeliveryService {
     const checks = {};
     const failureReasons = [];
 
+    // Dữ liệu thật của booking: chiều nhập/xuất, khung giờ hẹn, thời điểm xe qua cổng vào
+    const [bookingInfo] = await sequelize.query(`
+      SELECT b.booking_type::text AS "bookingType", b.appointment_start AS "appointmentStart", b.appointment_end AS "appointmentEnd",
+             (SELECT max(g.checked_at) FROM gate_transactions g WHERE g.booking_id = b.id AND g.gate_type = 'gate_in' AND g.status = 'completed') AS "gateInAt"
+        FROM bookings b
+       WHERE b.booking_code = :code
+          OR b.id IN (SELECT bc.booking_id FROM booking_containers bc JOIN containers c ON c.id = bc.container_id
+                       WHERE UPPER(c.container_no) = :cont)
+       ORDER BY (b.booking_code = :code) DESC, b.created_at DESC LIMIT 1`,
+      { replacements: { code: cleanBooking || yardReq?.booking_code || '', cont: cleanContId || yardReq?.container_id || '' }, type: sequelize.QueryTypes.SELECT });
+    const isExportFlow = bookingInfo?.bookingType === 'dropoff';
+
     // ── ĐIỀU KIỆN 1: Container Sẵn sàng giải phóng (e-D/O còn hiệu lực, không bị giữ) ──
     const targetCont = cleanContId || yardReq?.container_id || 'CAIU1234567';
-    if (yardReq?.status === 'CANCELLED_EDO_HELD') {
+    if (isExportFlow) {
+      // Chiều xuất (hạ container) không phát hành e-D/O: chỉ chiều nhập mới có.
+      checks.edoValid = { pass: true, status: 'NOT_REQUIRED', reason: 'Chiều xuất không sử dụng e-D/O.' };
+    } else if (yardReq?.status === 'CANCELLED_EDO_HELD') {
       checks.edoValid = {
         pass: false,
         status: 'EDO_HELD',
@@ -213,19 +229,30 @@ class GateOutDeliveryService {
 
     // ── ĐIỀU KIỆN 2: Lệnh lấy hàng đã thanh toán ──
     // Trong nghiệp vụ cảng Tiên Sa, phí nâng hạ bãi & cước dịch vụ phải được thanh toán trước
-    const isPaid = true; // Tiền cước nâng hạ đã đối soát thanh toán điện tử
+    const [paidOrder] = await sequelize.query(`
+      SELECT os.payment_status AS "paymentStatus"
+        FROM eport_service_drafts d
+        JOIN eport_service_order_states os ON os.draft_id = d.id
+       WHERE os.status NOT IN ('CANCELLED', 'REJECTED')
+         AND d.content->'lines' @> jsonb_build_array(jsonb_build_object('declaration', jsonb_build_object('containerNumber', :cont::text)))
+       ORDER BY (os.payment_status IN ('PAID', 'NOT_REQUIRED')) DESC, os.updated_at DESC LIMIT 1`,
+      { replacements: { cont: targetCont }, type: sequelize.QueryTypes.SELECT });
+    const payState = paidOrder?.paymentStatus || null;
+    const isPaid = payState === 'PAID' || payState === 'NOT_REQUIRED';
     if (!isPaid) {
       checks.paymentValid = {
         pass: false,
-        status: 'UNPAID',
-        reason: 'Lệnh lấy hàng chưa được thanh toán phí dịch vụ nâng hạ / lưu bãi. Vui lòng thanh toán tại Cổng thanh toán ePort.',
+        status: payState || 'NO_ORDER',
+        reason: payState
+          ? 'Đơn dịch vụ của container này chưa thanh toán phí nâng hạ / lưu bãi. Vui lòng thanh toán trước khi giao nhận.'
+          : 'Container này chưa có đơn dịch vụ ePort nào để đối chiếu thanh toán.',
       };
       failureReasons.push(`[Thanh toán]: ${checks.paymentValid.reason}`);
     } else {
       checks.paymentValid = {
         pass: true,
-        status: 'PAID',
-        reason: 'Lệnh lấy hàng đã hoàn tất thanh toán cước nâng hạ và phí lưu bãi.',
+        status: payState,
+        reason: payState === 'PAID' ? 'Đơn dịch vụ đã thanh toán đầy đủ cước nâng hạ và phí lưu bãi.' : 'Đơn dịch vụ không phát sinh khoản phải thanh toán.',
       };
     }
 
@@ -233,9 +260,23 @@ class GateOutDeliveryService {
     // Đối chiếu giờ hẹn của xe
     let inWindow = true;
     let windowReason = 'Xe đến đúng khung giờ đăng ký hoặc nằm trong cửa sổ cho phép (±60 phút).';
-    if (yardReq?.requested_time) {
-      // Cho phép linh hoạt trong ngày
-      inWindow = true;
+    if (bookingInfo?.appointmentStart && bookingInfo?.appointmentEnd) {
+      const arrival = new Date(bookingInfo.gateInAt || Date.now()).getTime();
+      const from = new Date(bookingInfo.appointmentStart).getTime() - 60 * 60000;
+      const to = new Date(bookingInfo.appointmentEnd).getTime() + 60 * 60000;
+      if (arrival < from || arrival > to) {
+        const detail = `Xe qua cổng lúc ${new Date(arrival).toLocaleString('vi-VN')}, khung giờ hẹn ${new Date(bookingInfo.appointmentStart).toLocaleString('vi-VN')} – ${new Date(bookingInfo.appointmentEnd).toLocaleString('vi-VN')} (±60 phút).`;
+        if (bookingInfo.gateInAt) {
+          // Cổng đã cho xe vào (hoặc có ngoại lệ được duyệt): bãi chỉ ghi nhận, không chặn giao nhận.
+          windowReason = `Lệch khung giờ hẹn nhưng cổng đã cho xe vào. ${detail}`;
+        } else {
+          inWindow = false;
+          windowReason = `Xe chưa vào cổng và đang ngoài khung giờ hẹn. ${detail}`;
+          failureReasons.push(`[Khung giờ]: ${windowReason}`);
+        }
+      }
+    } else {
+      windowReason = 'Chưa có khung giờ hẹn trên booking để đối chiếu.';
     }
     checks.timeSlotValid = {
       pass: inWindow,
@@ -298,6 +339,16 @@ class GateOutDeliveryService {
       status: containerReady ? 'READY' : 'WAITING_YARD_READY',
       reason: yardReadyReason,
     };
+
+    // ── Phí đảo container (chiều xuất): phải thanh toán đủ trước khi ra cổng ──
+    const shiftingUnpaid = await require('./yard-shifting-charges').unpaidForContainer(targetCont);
+    if (shiftingUnpaid.count > 0) {
+      const text = `Còn ${shiftingUnpaid.count} khoản phí đảo container chưa thanh toán (${shiftingUnpaid.amount.toLocaleString('vi-VN')} đ). Transport Company cần thanh toán đủ trước khi ra cổng.`;
+      checks.shiftingFeeValid = { pass: false, status: 'UNPAID', reason: text };
+      failureReasons.push(`[Phí đảo container]: ${text}`);
+    } else {
+      checks.shiftingFeeValid = { pass: true, status: 'PAID', reason: 'Không có phí đảo container chưa thanh toán.' };
+    }
 
     const eligible = failureReasons.length === 0;
 
@@ -629,6 +680,16 @@ class GateOutDeliveryService {
     // 2. NGOẠI LỆ PHÚT CHÓT: Bị giữ phút chót (nhận được EDoHeld hoặc EDoCancelled)
     // Hạ container lại đúng vị trí, hủy giao, thông báo
     const targetCont = yardReq.container_id;
+
+    // Phí đảo container chiều xuất phải thanh toán đủ mới cho ra cổng
+    const shiftingUnpaid = await require('./yard-shifting-charges').unpaidForContainer(targetCont);
+    if (shiftingUnpaid.count > 0) {
+      const err = new Error(`Container ${targetCont} còn ${shiftingUnpaid.count} khoản phí đảo container chưa thanh toán (${shiftingUnpaid.amount.toLocaleString('vi-VN')} đ). Chưa cho ra cổng.`);
+      err.statusCode = 409;
+      err.code = 'SHIFTING_FEE_UNPAID';
+      throw err;
+    }
+
     let isHeld = Boolean(simulateHeld);
     let heldReason = 'Lệnh giao hàng e-D/O bị tạm giữ phút chót (EDoHeld).';
 

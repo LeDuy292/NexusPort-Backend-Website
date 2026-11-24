@@ -18,6 +18,51 @@ router.get('/layout', authenticate,
     } catch (error) { next(error); }
   });
 
+// Danh sách container đang có mặt trong bãi kèm thông tin chi tiết (trang Chi Tiết Container).
+router.get('/containers', authenticate,
+  authorize('Yard Operator', 'Dispatcher', 'Administrator', 'Gate Officer'),
+  async (_req, res, next) => {
+    try {
+      res.set('Cache-Control', 'no-store');
+      res.json({ success: true, data: await require('./yard-containers').getYardContainers() });
+    } catch (error) { next(error); }
+  });
+
+// Báo cáo sự cố / hư hỏng tại bãi: nhân viên bãi gửi, Dispatcher nhận và xử lý.
+const incidentActor = (req) => ({
+  id: req.user && req.user.id,
+  role: req.user && req.user.role,
+  username: (req.authenticatedAccount && req.authenticatedAccount.username) || (req.user && req.user.username),
+  full_name: req.authenticatedAccount && req.authenticatedAccount.full_name,
+});
+const incidentHandler = (fn, status = 200) => async (req, res, next) => {
+  try { res.status(status).json({ success: true, data: await fn(req) }); }
+  catch (error) {
+    if (error.statusCode) return res.status(error.statusCode).json({ success: false, message: error.message });
+    return next(error);
+  }
+};
+router.post('/incident-reports', authenticate, authorize('Yard Operator', 'Gate Officer', 'Administrator'),
+  incidentHandler((req) => require('./yard-incidents').createReport(incidentActor(req), req.body), 201));
+router.get('/incident-reports', authenticate, authorize('Dispatcher', 'Administrator'),
+  incidentHandler((req) => require('./yard-incidents').listReports(req.query)));
+router.patch('/incident-reports/:id', authenticate, authorize('Dispatcher', 'Administrator'),
+  incidentHandler((req) => require('./yard-incidents').updateStatus(incidentActor(req), req.params.id, req.body)));
+
+// Xung đột vị trí đặt chỗ: quét ngay (tự động vẫn chạy nền) và Dispatcher chấp nhận ô đề xuất.
+router.post('/slot-conflicts/check', authenticate, authorize('Dispatcher', 'Administrator', 'Yard Operator'),
+  incidentHandler(() => require('./yard-slot-conflicts').checkSlotConflicts()));
+router.post('/incident-reports/:id/apply-proposal', authenticate, authorize('Dispatcher', 'Administrator'),
+  incidentHandler((req) => require('./yard-slot-conflicts').applyProposal(incidentActor(req), req.params.id, req.body && req.body.slot)));
+
+// Phí đảo container chiều xuất: Transport Company xem và thanh toán; bãi / Dispatcher theo dõi.
+router.get('/shifting-charges', authenticate, authorize('Transport Company', 'Dispatcher', 'Administrator', 'Yard Operator', 'Gate Officer'),
+  incidentHandler((req) => require('./yard-shifting-charges').listCharges(incidentActor(req), req.query)));
+router.post('/shifting-charges/:id/payment', authenticate, authorize('Transport Company', 'Administrator'),
+  incidentHandler((req) => require('./yard-shifting-charges').createPayment(incidentActor(req), req.params.id)));
+router.post('/shifting-charges/:id/sync', authenticate, authorize('Transport Company', 'Administrator'),
+  incidentHandler((req) => require('./yard-shifting-charges').syncPayment(incidentActor(req), req.params.id)));
+
 router.post('/blocks',authenticate,authorize('Yard Operator','Administrator'),async(req,res,next)=>{
   try{res.status(201).json({success:true,data:await require('./yard-layout.commands').createBlock(req.body)});}catch(error){next(error);}
 });

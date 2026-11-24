@@ -6,6 +6,7 @@ const protectedRoutes = require('./modules/protected/protected.routes');
 const usersRoutes = require('./modules/users/users.routes');
 const tripsRoutes = require('./modules/trips/trips.routes');
 const yardRoutes = require('./modules/yard/yard.routes');
+const adminRoutes = require('./modules/admin/admin.routes');
 const driverBookingRoutes = require('./modules/driver-bookings/driver-bookings.routes');
 const dispatchRoutes = require('./modules/booking-dispatch/dispatch.routes');
 const gateIotRoutes = require('./modules/gate-iot/gate-iot.routes');
@@ -169,6 +170,8 @@ const mountedRouters = [
   { prefix: '/users', tag: 'Users Direct', secured: true, router: usersRoutes },
   { prefix: '/api/yard', tag: 'Yard Operations', secured: true, router: yardRoutes },
   { prefix: '/yard', tag: 'Yard Operations Direct', secured: true, router: yardRoutes },
+  { prefix: '/api/admin', tag: 'Administrator', secured: true, router: adminRoutes },
+  { prefix: '/admin', tag: 'Administrator Direct', secured: true, router: adminRoutes },
   { prefix: '/api', tag: 'Transport Trips', secured: true, router: tripsRoutes },
   { prefix: '/api', tag: 'RBAC Demo', secured: true, router: protectedRoutes },
 ];
