@@ -54,6 +54,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.middleware("http")
+async def allow_private_network(request, call_next):
+    """Trình duyệt hỏi trước (preflight) khi trang web công khai gọi tới localhost: trả lời cho phép."""
+    response = await call_next(request)
+    if request.headers.get("access-control-request-private-network") == "true":
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
 # Pipeline tái sử dụng từ hw_service
 pipeline = hw_service.pipeline or SmartPortGatePipeline()
 esp32 = hw_service.esp32 or ESP32Controller()
