@@ -27,17 +27,32 @@ public sealed partial class ServiceOrderService(AppDbContext db, ICurrentUser us
     private static void Require(bool valid, string message, int status = 422, string code = "SERVICE_ORDER_VALIDATION")
         => ServiceDraftRules.Require(valid, message, status, code);
 
+    private static bool IsEquivalentRole(string? r1, string? r2)
+    {
+        if (string.Equals(r1, r2, StringComparison.OrdinalIgnoreCase)) return true;
+        var carrierRoles = new[] { "Transport Company", "Carrier", "Carrier Staff" };
+        if (carrierRoles.Contains(r1, StringComparer.OrdinalIgnoreCase) && carrierRoles.Contains(r2, StringComparer.OrdinalIgnoreCase)) return true;
+        var adminRoles = new[] { "Administrator", "Admin" };
+        if (adminRoles.Contains(r1, StringComparer.OrdinalIgnoreCase) && adminRoles.Contains(r2, StringComparer.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
     // A JWT role alone never grants access: verify the current persisted account.
     private async Task<Guid?> OrderAccess(CancellationToken ct)
     {
         var locked = db.Database.CurrentTransaction != null;
         var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active" + (locked ? " FOR SHARE" : ""), ct, Actor);
         var role = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
-        Require(role != null && string.Equals(role, user.Role, StringComparison.OrdinalIgnoreCase), "Tài khoản không còn quyền truy cập đơn dịch vụ.", 403, "FORBIDDEN");
+        Require(role != null && IsEquivalentRole(role, user.Role), "Tài khoản không còn quyền truy cập đơn dịch vụ.", 403, "FORBIDDEN");
         if (role is "Administrator" or "Admin" or "Dispatcher") return null;
-        Require(role is "Transport Company" or "Carrier Staff", "Tài khoản không có quyền truy cập đơn dịch vụ.", 403, "FORBIDDEN");
+        Require(role is "Transport Company" or "Carrier" or "Carrier Staff", "Tài khoản không có quyền truy cập đơn dịch vụ.", 403, "FORBIDDEN");
         var memberships = await Rows("SELECT carrier_id AS \"carrierId\" FROM carrier_users WHERE user_id=@p0" + (locked ? " FOR SHARE" : ""), ct, Actor);
-        Require(memberships.Count == 1, "Tài khoản cần thuộc đúng một công ty vận tải.", 403, "SERVICE_DRAFT_MEMBERSHIP");
+        if (memberships.Count == 0)
+        {
+            var userCarrier = await Rows("SELECT carrier_id AS \"carrierId\" FROM users WHERE id=@p0 AND carrier_id IS NOT NULL" + (locked ? " FOR SHARE" : ""), ct, Actor);
+            if (userCarrier.Count > 0) memberships = userCarrier;
+        }
+        Require(memberships.Count >= 1, "Tài khoản cần thuộc công ty vận tải.", 403, "SERVICE_DRAFT_MEMBERSHIP");
         return G(memberships[0], "carrierId");
     }
 
