@@ -218,6 +218,7 @@ public class YardDischargeService : IYardDischargeService
                 SELECT id, payload
                 FROM shipping_manifests
                 WHERE payload->>'status' IN ('PORT_APPROVED', 'DISCHARGING', 'SENT_TO_PORT')
+                  AND UPPER(COALESCE(payload->>'direction', 'IMPORT')) NOT IN ('EXPORT', 'XUẤT KHẨU')
                 ORDER BY created_at DESC
                 LIMIT 20";
 
@@ -276,6 +277,7 @@ public class YardDischargeService : IYardDischargeService
                 SELECT id, payload
                 FROM shipping_manifests
                 WHERE payload->>'status' IN ('PORT_APPROVED', 'DISCHARGING', 'SENT_TO_PORT')
+                  AND UPPER(COALESCE(payload->>'direction', 'IMPORT')) NOT IN ('EXPORT', 'XUẤT KHẨU')
                 ORDER BY created_at DESC";
 
             using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
@@ -437,6 +439,9 @@ public class YardDischargeService : IYardDischargeService
             if (reservedIds.Contains(slot.Id)) continue;
 
             var blockCode = slot.Block?.Code ?? "";
+            // Tuyệt đối chỉ xếp vào 4 khu A, B, C, D (Không xếp vào khu E, F, G)
+            if (blockCode.StartsWith("E") || blockCode.StartsWith("F") || blockCode.StartsWith("G")) continue;
+
             var isReeferBlock = slot.HasReeferPlug || (slot.Block != null && slot.Block.IsReeferArea) || blockCode.StartsWith("D") || blockCode == "R";
 
             // ===== 1. CỠ VÀ CHỦNG LOẠI CONTAINER (Mục 4.5.1) =====
@@ -492,18 +497,22 @@ public class YardDischargeService : IYardDischargeService
             var reasons = new List<string>();
 
             var isNearGateBlock = blockCode.StartsWith("F") || blockCode.StartsWith("E") || blockCode == "B04" || blockCode == "B03" || blockCode == "C09" || blockCode == "C10" || (slot.Block?.IsNearGate == true);
-            var isNearSeaBlock = blockCode.StartsWith("A") || blockCode == "B01" || blockCode == "B02" || blockCode == "C01" || blockCode == "C02" || blockCode == "C03" || blockCode == "C04";
+            var isNearSeaBlock = blockCode.StartsWith("A") || blockCode == "B01" || blockCode == "B02" || blockCode == "C01" || blockCode == "C02" || blockCode == "C03";
 
             if (manifestDirection == "EXPORT")
             {
-                // ----- A. CONTAINER HÀNG XUẤT (EXPORT) (Mục 4.5.1) -----
-                // Vị trí bãi: Xe ngoài chở vào tập kết -> Ưu tiên khu gần cổng Gate
-                if (isNearSeaBlock) continue; // Cấm xếp gần biển gây nghẽn cầu tàu
-
-                if (isNearGateBlock)
+                // ----- A. CONTAINER HÀNG XUẤT (EXPORT) -----
+                // Ưu tiên các dãy gần cầu tàu (A01-A04 gần cầu 4-5, B01-B02 gần cầu 1 STS, C01-C03 gần cầu 2)
+                if (isNearSeaBlock)
                 {
-                    score += 40;
-                    reasons.Add($"Bãi tập kết hàng xuất gần cổng Block {blockCode} (+40đ)");
+                    score += 60;
+                    reasons.Add($"Dãy gần cầu tàu tập kết hàng xuất Block {blockCode} (+60đ)");
+                }
+                else
+                {
+                    // Khi các dãy gần cầu đầy chỗ, hàng xuất linh hoạt xếp ở các block bãi trong
+                    score += 20;
+                    reasons.Add($"Bãi dự phòng hàng xuất Block {blockCode} (+20đ)");
                 }
 
                 // 1. Phân tách theo Cảng dỡ hàng (POD) & Chuyến tàu
@@ -552,16 +561,22 @@ public class YardDischargeService : IYardDischargeService
             }
             else
             {
-                // ----- B. CONTAINER HÀNG NHẬP (IMPORT) (Mục 4.5.1) -----
-                // Vị trí bãi: Dỡ từ tàu cập bến -> Ưu tiên gần biển / cầu cảng
-                if (isNearSeaBlock)
+                // ----- B. CONTAINER HÀNG NHẬP (IMPORT) -----
+                // Ưu tiên mềm gần cổng trước (C10 lùi dần về C04, rồi qua B04 và B03)
+                if (blockCode == "C10") { score += 70; reasons.Add("Ưu tiên số 1 sát cổng giao nhận Block C10 (+70đ)"); }
+                else if (blockCode == "C09") { score += 65; reasons.Add("Ưu tiên số 2 gần cổng Block C09 (+65đ)"); }
+                else if (blockCode == "C08") { score += 60; reasons.Add("Ưu tiên Block C08 (+60đ)"); }
+                else if (blockCode == "C07") { score += 55; reasons.Add("Ưu tiên Block C07 (+55đ)"); }
+                else if (blockCode == "C06") { score += 50; reasons.Add("Ưu tiên Block C06 (+50đ)"); }
+                else if (blockCode == "C05") { score += 45; reasons.Add("Ưu tiên Block C05 (+45đ)"); }
+                else if (blockCode == "C04") { score += 40; reasons.Add("Ưu tiên Block C04 (+40đ)"); }
+                else if (blockCode == "B04") { score += 35; reasons.Add("Ưu tiên Block B04 (+35đ)"); }
+                else if (blockCode == "B03") { score += 30; reasons.Add("Ưu tiên Block B03 (+30đ)"); }
+                else if (isNearSeaBlock)
                 {
-                    score += 45;
-                    reasons.Add($"Gần cầu cảng/cẩu bờ bốc dỡ Block {blockCode} (+45đ)");
-                }
-                else if (isNearGateBlock && cont.CargoType != "LCL")
-                {
-                    score -= 25; // Hàng nhập nguyên cont FCL không nên để ngoài cổng
+                    // Khi các block ưu tiên đầy chỗ, hàng nhập linh hoạt xếp ở dãy gần cầu tàu
+                    score += 20;
+                    reasons.Add($"Bãi dự phòng hàng nhập khi đầy chỗ Block {blockCode} (+20đ)");
                 }
 
                 // 1. Phân tách theo Hãng tàu

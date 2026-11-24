@@ -140,4 +140,21 @@ public static class ServiceDraftRules
             Documents = input.Documents ?? input.Delivery?.Documents ?? []
         };
     }
+
+    public static ServiceDraftInput NormalizeForEmail(ServiceDraftInput input)
+    {
+        var flow = Flow(input.Flow);
+        var source = input.Source ?? new ServiceDraftSource();
+        source = source with
+        {
+            ReferenceNumber = (source.ReferenceNumber ?? "").Trim(),
+            BookingNumber = (source.BookingNumber ?? "").Trim(),
+            BlNumber = (source.BlNumber ?? "").Trim(),
+            VesselName = (source.VesselName ?? "").Trim(),
+            VoyageNumber = (source.VoyageNumber ?? "").Trim(),
+            BookingId = flow == "IMPORT" ? null : source.BookingId,
+            DocumentType = flow == "IMPORT" ? "EDO" : source.DocumentType
+        };
+        return input with { Flow = flow, Source = source };
+    }
 }
