@@ -250,4 +250,32 @@ async function createShippingLineAccount(body = {}) {
   return { userId, username, email, shippingLine: line.shortName, emailSent, emailError };
 }
 
-module.exports = { createShippingLineAccount, getOverview, getReports, getBilling, listGates, createGate, updateGate, listEquipment, createEquipment, updateEquipment, deleteEquipment };
+/** Đặt lại mật khẩu ngẫu nhiên cho tài khoản hãng tàu và gửi thông tin đăng nhập mới về email của tài khoản. */
+async function resendShippingLineAccount(userId, body = {}) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(userId))) throw fail('Mã tài khoản không hợp lệ.');
+  const [acc] = await run(
+    `SELECT u.id, u.username, u.email, u.full_name AS "fullName", l.full_name AS "lineName"
+       FROM users u JOIN shipping_line_accounts a ON a.user_id = u.id JOIN shipping_lines l ON l.id = a.shipping_line_id
+      WHERE u.id = :id AND u.role = 'Shipping Line'`, { id: userId });
+  if (!acc) throw fail('Không tìm thấy tài khoản hãng tàu.', 404);
+  const customEmail = cleanText(body.email, 200).toLowerCase();
+  const to = customEmail || acc.email;
+  if (!EMAIL_RE.test(to)) throw fail('Email người nhận không hợp lệ.');
+
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+  const bytes = require('crypto').randomBytes(10);
+  const password = `${Array.from(bytes, (b) => chars[b % chars.length]).join('')}#7`;
+  const bcrypt = require('bcryptjs');
+  const { bcrypt: bcryptConfig } = require('../../config/env');
+  await sequelize.query('UPDATE users SET password = :p, updated_at = now() WHERE id = :id', { replacements: { p: await bcrypt.hash(password, bcryptConfig.saltRounds), id: userId } });
+
+  try {
+    await require('../../utils/mailer').sendAccountCredentialsEmail(to, { fullName: acc.fullName || acc.username, username: acc.username, password, roleLabel: 'Hãng tàu', organization: acc.lineName });
+    return { userId, username: acc.username, email: to, emailSent: true, emailError: null };
+  } catch (err) {
+    // Mật khẩu đã đổi nhưng chưa gửi được thư: trả mật khẩu mới để admin chuyển cho người nhận bằng cách khác
+    return { userId, username: acc.username, email: to, emailSent: false, emailError: err.message, newPassword: password };
+  }
+}
+
+module.exports = { createShippingLineAccount, resendShippingLineAccount, getOverview, getReports, getBilling, listGates, createGate, updateGate, listEquipment, createEquipment, updateEquipment, deleteEquipment };

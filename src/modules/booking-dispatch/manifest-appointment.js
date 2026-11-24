@@ -22,13 +22,41 @@ function windowFrom(startValue, endValue, defaultMinutes) {
 function registeredAppointment(snapshot, containerNumber) {
   const target = normalizeContainer(containerNumber);
   const { lines, delivery } = snapshot?.content || {};
-  if (!target || !Array.isArray(lines) || !Array.isArray(delivery?.trips)) return null;
-  const matchingLines = lines.filter(line => line?.sourceContainerId &&
-    normalizeContainer(line.declaration?.containerNumber || line.containerNumber) === target);
-  if (matchingLines.length !== 1) return null;
-  const trips = delivery.trips.filter(trip => trip?.sourceContainerId === matchingLines[0].sourceContainerId);
+  const containers = Array.isArray(snapshot?.containers) ? snapshot.containers : [];
+  if (!target || !Array.isArray(delivery?.trips)) return null;
+
+  const matchedIds = new Set();
+  if (Array.isArray(lines)) {
+    for (const line of lines) {
+      if (line?.sourceContainerId &&
+        normalizeContainer(line.declaration?.containerNumber || line.containerNumber) === target) {
+        matchedIds.add(String(line.sourceContainerId));
+      }
+    }
+  }
+  for (const cont of containers) {
+    const scId = cont?.sourceContainerId || cont?.id;
+    if (scId && normalizeContainer(cont.containerNumber || cont.containerNo) === target) {
+      matchedIds.add(String(scId));
+    }
+  }
+
+  let trips = [];
+  if (matchedIds.size === 1) {
+    const [sourceId] = matchedIds;
+    trips = delivery.trips.filter(trip => String(trip?.sourceContainerId || '') === sourceId);
+  }
+  if (!trips.length) {
+    trips = delivery.trips.filter(trip => normalizeContainer(trip?.containerNumber || trip?.containerNo) === target);
+  }
+  if (!trips.length && delivery.trips.length === 1 && (containers.length === 1 || (Array.isArray(lines) && lines.length === 1))) {
+    const onlyCont = normalizeContainer(
+      containers[0]?.containerNumber || lines?.[0]?.declaration?.containerNumber || lines?.[0]?.containerNumber
+    );
+    if (onlyCont === target) trips = delivery.trips;
+  }
   if (trips.length !== 1) return null;
-  return windowFrom(trips[0].appointmentStart, trips[0].appointmentEnd);
+  return windowFrom(trips[0].appointmentStart || snapshot?.content?.plannedAt, trips[0].appointmentEnd, 90);
 }
 
 async function getNewManifestAppointment(booking, query) {

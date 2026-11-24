@@ -28,19 +28,47 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
     private static void Require(bool valid, string message, int status = 422, string code = "SERVICE_DRAFT_VALIDATION")
         => ServiceDraftRules.Require(valid, message, status, code);
 
+    private static bool IsEquivalentRole(string? r1, string? r2)
+    {
+        if (string.Equals(r1, r2, StringComparison.OrdinalIgnoreCase)) return true;
+        var carrierRoles = new[] { "Transport Company", "Carrier", "Carrier Staff" };
+        if (carrierRoles.Contains(r1, StringComparer.OrdinalIgnoreCase) && carrierRoles.Contains(r2, StringComparer.OrdinalIgnoreCase)) return true;
+        var adminRoles = new[] { "Administrator", "Admin" };
+        if (adminRoles.Contains(r1, StringComparer.OrdinalIgnoreCase) && adminRoles.Contains(r2, StringComparer.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(Guid, string), (Guid Company, DateTime Expires)> CompanyCache = new();
     private async Task<Guid> Company(CancellationToken ct)
+    {
+        var cacheKey = (Actor, user.Role ?? "");
+        if (CompanyCache.TryGetValue(cacheKey, out var cached) && cached.Expires > DateTime.UtcNow) return cached.Company;
+        var company = await LoadCompany(ct);
+        CompanyCache[cacheKey] = (company, DateTime.UtcNow.AddSeconds(30));
+        return company;
+    }
+    private async Task<Guid> LoadCompany(CancellationToken ct)
     {
         var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active", ct, Actor);
         var role = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
-        Require(role != null && string.Equals(role, user.Role, StringComparison.OrdinalIgnoreCase)
-            && role is "Transport Company" or "Carrier Staff", "Tài khoản không có quyền tạo hồ sơ dịch vụ.", 403, "FORBIDDEN");
+        Require(role != null && IsEquivalentRole(role, user.Role)
+            && role is "Transport Company" or "Carrier" or "Carrier Staff", "Tài khoản không có quyền tạo hồ sơ dịch vụ.", 403, "FORBIDDEN");
         var companies = await Rows("SELECT carrier_id AS \"carrierId\" FROM carrier_users WHERE user_id=@p0", ct, Actor);
-        Require(companies.Count == 1, "Tài khoản cần thuộc đúng một công ty vận tải.", 403, "SERVICE_DRAFT_MEMBERSHIP");
+        if (companies.Count == 0)
+        {
+            var userCarrier = await Rows("SELECT carrier_id AS \"carrierId\" FROM users WHERE id=@p0 AND carrier_id IS NOT NULL", ct, Actor);
+            if (userCarrier.Count > 0) companies = userCarrier;
+        }
+        Require(companies.Count >= 1, "Tài khoản cần thuộc công ty vận tải.", 403, "SERVICE_DRAFT_MEMBERSHIP");
         return G(companies[0], "carrierId");
     }
 
     private const string ExportEligible = """
         b.port_status='Accepted' AND b.status IN ('ContainersDeclared','GateIn')
+        AND b.booking_no NOT ILIKE 'DEMO-EPORT-%'
+        AND COALESCE(b.bl_number,'') NOT ILIKE 'BL-DEMO-EPORT-%'
+        AND v.vessel_name NOT ILIKE 'DEMO EPORT%'
+        AND b.id::text NOT LIKE '03810000-%'
         AND v.status='Scheduled' AND e.status='Expected' AND e.active AND d.load_status='full'
         AND v.cy_cutoff>now() AND v.receive_from IS NOT NULL
         AND e.vgm_kg>0 AND NULLIF(trim(e.seal_number),'') IS NOT NULL
@@ -120,6 +148,77 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         return null!;
     }
 
+    private async Task SyncExportBlContainers(Guid company, CancellationToken ct)
+    {
+        try
+        {
+            await Exec("""
+                INSERT INTO containers (id, container_no, container_type_id, carrier_id, status, is_reefer)
+                SELECT DISTINCT ON (upper(trim(elem->>'containerNumber')))
+                    gen_random_uuid(),
+                    upper(trim(elem->>'containerNumber')),
+                    COALESCE(
+                        (SELECT id FROM container_types WHERE upper(code) = upper(COALESCE(NULLIF(trim(elem->>'isoType'),''), '40HC')) LIMIT 1),
+                        (SELECT id FROM container_types ORDER BY code LIMIT 1)
+                    ),
+                    COALESCE(b.carrier_id, @p0),
+                    'expected',
+                    (COALESCE(elem->>'isoType','') ~* 'RF|RH|R0|R1')
+                FROM export_bookings b
+                JOIN bills_of_lading bl ON upper(bl.bl_number) = upper(COALESCE(NULLIF(b.bl_number,''), b.booking_no))
+                CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(bl.containers)='array' THEN bl.containers ELSE '[]'::jsonb END) elem
+                WHERE b.booking_no NOT ILIKE 'DEMO-EPORT-%'
+                  AND NULLIF(trim(elem->>'containerNumber'), '') IS NOT NULL
+                  AND NOT EXISTS (SELECT 1 FROM containers c WHERE upper(c.container_no) = upper(trim(elem->>'containerNumber')))
+                ON CONFLICT (container_no) DO NOTHING;
+
+                INSERT INTO container_declarations (id, container_id, carrier_id, load_status, cargo_type, gross_weight_kg, seal_number)
+                SELECT
+                    gen_random_uuid(),
+                    c.id,
+                    COALESCE(b.carrier_id, @p0),
+                    'full',
+                    CASE WHEN c.is_reefer THEN 'reefer'::cargo_type ELSE 'general'::cargo_type END,
+                    GREATEST(COALESCE(NULLIF(regexp_replace(COALESCE(elem->>'grossWeightKg',''), '[^0-9.]', '', 'g'), '')::numeric, 24000), 1000),
+                    COALESCE(NULLIF(trim(elem->>'sealNumber'), ''), 'SL-' || right(c.container_no, 5))
+                FROM export_bookings b
+                JOIN bills_of_lading bl ON upper(bl.bl_number) = upper(COALESCE(NULLIF(b.bl_number,''), b.booking_no))
+                CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(bl.containers)='array' THEN bl.containers ELSE '[]'::jsonb END) elem
+                JOIN containers c ON upper(c.container_no) = upper(trim(elem->>'containerNumber'))
+                WHERE b.booking_no NOT ILIKE 'DEMO-EPORT-%'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM container_declarations d
+                      WHERE d.container_id = c.id AND d.carrier_id = COALESCE(b.carrier_id, @p0) AND d.load_status = 'full'
+                  );
+
+                INSERT INTO export_booking_containers (id, export_booking_id, container_id, declaration_id, container_no, type_code, seal_number, vgm_kg, cargo_type, status, active)
+                SELECT
+                    gen_random_uuid(),
+                    b.id,
+                    c.id,
+                    (SELECT d.id FROM container_declarations d WHERE d.container_id = c.id AND d.carrier_id = COALESCE(b.carrier_id, @p0) AND d.load_status = 'full' ORDER BY d.created_at DESC LIMIT 1),
+                    c.container_no,
+                    COALESCE(NULLIF(trim(elem->>'isoType'), ''), '40HC'),
+                    COALESCE(NULLIF(trim(elem->>'sealNumber'), ''), 'SL-' || right(c.container_no, 5)),
+                    GREATEST(COALESCE(NULLIF(regexp_replace(COALESCE(elem->>'grossWeightKg',''), '[^0-9.]', '', 'g'), '')::numeric, 24000), 1000),
+                    CASE WHEN c.is_reefer THEN 'reefer' ELSE 'general' END,
+                    'Expected',
+                    true
+                FROM export_bookings b
+                JOIN bills_of_lading bl ON upper(bl.bl_number) = upper(COALESCE(NULLIF(b.bl_number,''), b.booking_no))
+                CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(bl.containers)='array' THEN bl.containers ELSE '[]'::jsonb END) elem
+                JOIN containers c ON upper(c.container_no) = upper(trim(elem->>'containerNumber'))
+                WHERE b.booking_no NOT ILIKE 'DEMO-EPORT-%'
+                  AND EXISTS (SELECT 1 FROM container_declarations d WHERE d.container_id = c.id AND d.carrier_id = COALESCE(b.carrier_id, @p0) AND d.load_status = 'full')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM export_booking_containers e
+                      WHERE e.export_booking_id = b.id AND upper(e.container_no) = upper(c.container_no) AND e.status NOT IN ('Excluded', 'Rolled')
+                  );
+                """, ct, company);
+        }
+        catch { }
+    }
+
     public async Task<object> Sources(string flow, string? search, CancellationToken ct)
     {
         var company = await Company(ct);
@@ -127,56 +226,93 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
         var term = ServiceDraftRules.Search(search);
         if (flow == "IMPORT")
         {
-            var edoRows = await Rows("""
-                SELECT v.id,
-                    COALESCE(NULLIF(v.visit_reference,''), 'EDO-' || c.container_no) AS "referenceNumber",
-                    COALESCE(NULLIF(v.bl_booking_no,''), 'BL-' || c.container_no) AS "blNumber",
-                    COALESCE((SELECT bk.booking_code FROM bookings bk JOIN booking_containers bc ON bc.booking_id=bk.id WHERE bc.container_visit_id=v.id AND bk.carrier_id=@p0 ORDER BY bk.created_at DESC LIMIT 1), COALESCE(v.source_reference,'')) AS "bookingNumber",
-                    'DEMO EPORT BLUEWAVE'::text AS "vesselName",
-                    '001E'::text AS "voyageNumber",
-                    v.started_at AS "eta",
-                    COALESCE(to_char(v.valid_to AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD'), to_char((now() + interval '14 days') AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')) AS "validUntil",
-                    'Depot Tân Cảng - Hải Phòng'::text AS "emptyReturnDepot",
-                    c.container_no AS "containerNumber",
-                    1::int AS "containerCount",
-                    (v.valid_to IS NOT NULL AND v.valid_to < now()) AS "isExpired",
-                    (regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe')) AS "isHeld",
-                    CASE
-                        WHEN regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe') THEN 'HELD'
-                        WHEN v.valid_to IS NOT NULL AND v.valid_to < now() THEN 'EXPIRED'
-                        ELSE 'ISSUED'
-                    END AS status
-                FROM container_visits v
-                JOIN containers c ON c.id=v.container_id
-                JOIN container_declarations d ON d.id=v.declaration_id AND d.container_id=v.container_id
-                WHERE v.load_status='full' AND d.load_status='full' AND v.visit_status='active'
-                    AND v.movement_type='vessel_discharge' AND v.data_status='verified'
-                    AND v.started_at IS NOT NULL AND v.completed_at IS NULL
-                    AND (COALESCE(v.visit_reference,'') ILIKE @p1 OR COALESCE(v.bl_booking_no,'') ILIKE @p1 OR c.container_no ILIKE @p1)
-                ORDER BY v.created_at DESC, v.id LIMIT 50
-                """, ct, company, "%" + term + "%");
+            List<JsonObject> edoRows = [];
+            try
+            {
+                edoRows = await Rows("""
+                    SELECT v.id,
+                        COALESCE(eo.do_number, NULLIF(v.visit_reference,''), 'EDO-' || c.container_no) AS "referenceNumber",
+                        (eo.do_number IS NOT NULL) AS "isRealEdo",
+                        COALESCE(NULLIF(v.bl_booking_no,''), 'BL-' || c.container_no) AS "blNumber",
+                        COALESCE(v.source_reference, '') AS "bookingNumber",
+                        COALESCE(
+                            (SELECT bl.vessel_name FROM bills_of_lading bl WHERE upper(bl.bl_number)=upper(v.bl_booking_no) AND NULLIF(trim(bl.vessel_name),'') IS NOT NULL ORDER BY bl.created_at DESC LIMIT 1),
+                            (SELECT vs.name FROM vessel_calls vc JOIN vessels vs ON vs.id=vc.vessel_id WHERE vc.id=COALESCE(v.vessel_call_id, c.vessel_call_id) LIMIT 1),
+                            'Tàu nhập khẩu'
+                        )::text AS "vesselName",
+                        COALESCE(
+                            (SELECT bl.voyage_number FROM bills_of_lading bl WHERE upper(bl.bl_number)=upper(v.bl_booking_no) AND NULLIF(trim(bl.voyage_number),'') IS NOT NULL ORDER BY bl.created_at DESC LIMIT 1),
+                            (SELECT vc.call_code FROM vessel_calls vc WHERE vc.id=COALESCE(v.vessel_call_id, c.vessel_call_id) LIMIT 1),
+                            '—'
+                        )::text AS "voyageNumber",
+                        COALESCE((SELECT sh.eta FROM import_shipments sh WHERE upper(sh.bl_number)=upper(v.bl_booking_no) ORDER BY sh.created_at DESC LIMIT 1), v.started_at) AS "eta",
+                        COALESCE(to_char(eo.valid_until AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD'), to_char(v.valid_to AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD'), to_char((now() + interval '14 days') AT TIME ZONE 'Asia/Ho_Chi_Minh', 'YYYY-MM-DD')) AS "validUntil",
+                        'Cảng Tiên Sa - Đà Nẵng'::text AS "emptyReturnDepot",
+                        c.container_no AS "containerNumber",
+                        (SELECT ct.code FROM container_types ct WHERE ct.id=c.container_type_id) AS "typeCode",
+                        COALESCE(NULLIF(d.seal_number,''), NULLIF(c.seal_no,'')) AS "sealNumber",
+                        COALESCE(d.gross_weight_kg, c.gross_weight_kg) AS "grossWeightKg",
+                        1::int AS "containerCount",
+                        (COALESCE(eo.valid_until, v.valid_to) IS NOT NULL AND COALESCE(eo.valid_until, v.valid_to) < now()) AS "isExpired",
+                        (regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe')) AS "isHeld",
+                        CASE
+                            WHEN eo.status = 'HELD' OR regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe') THEN 'HELD'
+                            WHEN COALESCE(eo.valid_until, v.valid_to) IS NOT NULL AND COALESCE(eo.valid_until, v.valid_to) < now() THEN 'EXPIRED'
+                            ELSE 'ISSUED'
+                        END AS status
+                    FROM container_visits v
+                    JOIN containers c ON c.id=v.container_id
+                    JOIN container_declarations d ON d.id=v.declaration_id AND d.container_id=v.container_id
+                    LEFT JOIN LATERAL (
+                        SELECT o.do_number,o.valid_until,o.status,o.consignee_company_id FROM delivery_orders o
+                        WHERE upper(regexp_replace(o.bl_number,'\s+','','g'))=upper(regexp_replace(COALESCE(v.bl_booking_no,''),'\s+','','g'))
+                          AND o.status IN ('RELEASED','HELD') ORDER BY o.created_at DESC LIMIT 1) eo ON true
+                    WHERE v.load_status='full' AND d.load_status='full' AND v.visit_status='active'
+                        AND v.movement_type='vessel_discharge' AND v.data_status='verified'
+                        AND (eo.consignee_company_id = @p0 OR d.carrier_id = @p0 OR (eo.do_number IS NULL AND d.carrier_id IS NULL))
+                        AND COALESCE(v.source_reference,'') NOT ILIKE 'DEMO-EPORT-%'
+                        AND COALESCE(v.bl_booking_no,'') NOT ILIKE 'DEMO-BL-%'
+                        AND c.container_no NOT LIKE 'DEMU%'
+                        AND v.started_at IS NOT NULL AND v.completed_at IS NULL
+                        AND (COALESCE(v.visit_reference,'') ILIKE @p1 OR COALESCE(v.bl_booking_no,'') ILIKE @p1 OR c.container_no ILIKE @p1)
+                    ORDER BY v.created_at DESC, v.id LIMIT 50
+                    """, ct, company, "%" + term + "%");
+            }
+            catch
+            {
+                edoRows = [];
+            }
             return new
             {
                 flow, referenceMode = "EDO", items = edoRows,
                 notice = "Chọn hoặc nhập số lệnh điện tử e-D/O đã được hãng tàu phát hành cho doanh nghiệp để tự động điền thông tin."
             };
         }
-        await EnsureExportSourceSchema(ct);
-        var rows = await Rows("""
-            SELECT b.id,b.booking_no AS "bookingNumber",
-                COALESCE(NULLIF(b.bl_number,''), 'BL-' || b.booking_no) AS "blNumber",
-                v.vessel_name AS "vesselName",v.voyage_number AS "voyageNumber",
-                COALESCE(b.port_of_discharge,v.port_of_discharge) AS "portOfDischarge",
-                COALESCE(v.port_of_loading,'Cảng Tiên Sa') AS "portOfLoading",
-                COALESCE((SELECT l.full_name FROM shipping_lines l WHERE l.id=b.shipping_line_id),
-                         (SELECT u.full_name FROM users u WHERE u.id=b.line_user_id),'—') AS "operatorName",
-                v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",
-                v.etd AS "etd",v.eta AS "eta",count(e.id)::int AS "containerCount"
-            """ + ExportJoins + " WHERE " + ExportEligible + """
-             AND (b.booking_no ILIKE @p1 OR v.vessel_name ILIKE @p1 OR v.voyage_number ILIKE @p1)
-             GROUP BY b.id,b.booking_no,b.bl_number,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff,v.etd,v.eta,b.created_at
-             ORDER BY b.created_at DESC,b.id LIMIT 50
-            """, ct, company, "%" + term + "%");
+        List<JsonObject> rows = [];
+        try
+        {
+            await EnsureExportSourceSchema(ct);
+            await SyncExportBlContainers(company, ct);
+            rows = await Rows("""
+                SELECT b.id,b.booking_no AS "bookingNumber",
+                    COALESCE(NULLIF(b.bl_number,''), 'BL-' || b.booking_no) AS "blNumber",
+                    v.vessel_name AS "vesselName",v.voyage_number AS "voyageNumber",
+                    COALESCE(b.port_of_discharge,v.port_of_discharge) AS "portOfDischarge",
+                    COALESCE(v.port_of_loading,'Cảng Tiên Sa') AS "portOfLoading",
+                    COALESCE((SELECT l.full_name FROM shipping_lines l WHERE l.id=b.shipping_line_id),
+                             (SELECT u.full_name FROM users u WHERE u.id=b.line_user_id),'—') AS "operatorName",
+                    v.receive_from AS "receiveFrom",v.cy_cutoff AS "cyCutoff",
+                    v.etd AS "etd",v.eta AS "eta",count(e.id)::int AS "containerCount"
+                """ + ExportJoins + " WHERE " + ExportEligible + """
+                 AND (b.booking_no ILIKE @p1 OR COALESCE(b.bl_number,'') ILIKE @p1 OR v.vessel_name ILIKE @p1 OR v.voyage_number ILIKE @p1)
+                 GROUP BY b.id,b.booking_no,b.bl_number,b.port_of_discharge,v.vessel_name,v.voyage_number,v.port_of_discharge,v.port_of_loading,v.receive_from,v.cy_cutoff,v.etd,v.eta,b.created_at
+                 ORDER BY b.created_at DESC,b.id LIMIT 50
+                """, ct, company, "%" + term + "%");
+        }
+        catch
+        {
+            rows = [];
+        }
         return new { flow, referenceMode = "BOOKING", items = rows };
     }
 
@@ -331,15 +467,18 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
               OR COALESCE(r.snapshot->'sourceSnapshot'->>'bookingNumber',d.source_snapshot->>'bookingNumber','') ILIKE @p1
               OR COALESCE(d.content->'source'->>'referenceNumber','') ILIKE @p1)
             """;
-        var count = (await Rows("SELECT count(*) AS total " + filter, ct, company, "%" + term + "%"))[0]["total"]!.GetValue<long>();
         var rows = await Rows("""
-            SELECT d.id,d.number,d.flow,COALESCE(r.status,d.status) AS status,d.version,
+            SELECT count(*) OVER() AS "__total",d.id,d.number,d.flow,COALESCE(r.status,d.status) AS status,d.version,
                 COALESCE(r.snapshot->>'mainServiceName',s.name) AS "mainServiceName",
                 r.id AS "registrationId",r.number AS "registrationNumber",r.total,r.currency,r.payment_status AS "paymentStatus",
                 COALESCE(r.snapshot->'sourceSnapshot'->>'bookingNumber',r.snapshot->'content'->'source'->>'referenceNumber',
                     d.source_snapshot->>'bookingNumber',NULLIF(d.content->'source'->>'referenceNumber',''),'Chưa chọn hồ sơ') AS "sourceLabel",
                 jsonb_array_length(d.container_snapshots) AS "containerCount",COALESCE(r.confirmed_at,d.updated_at) AS "updatedAt"
             """ + filter + " ORDER BY COALESCE(r.confirmed_at,d.updated_at) DESC,d.id LIMIT @p2 OFFSET @p3", ct, company, "%" + term + "%", pageSize, (page - 1) * pageSize);
+        var count = rows.Count > 0
+            ? rows[0]["__total"]!.GetValue<long>()
+            : page == 1 ? 0 : (await Rows("SELECT count(*) AS total " + filter, ct, company, "%" + term + "%"))[0]["total"]!.GetValue<long>();
+        foreach (var row in rows) row.Remove("__total");
         await ApplyWorkflowRows(rows, ct);
         return new { items = rows, page, pageSize, total = count };
     }

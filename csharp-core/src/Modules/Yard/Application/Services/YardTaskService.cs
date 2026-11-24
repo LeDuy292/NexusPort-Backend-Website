@@ -808,6 +808,30 @@ public class YardTaskService : IYardTaskService
         {
             response.BlockCode = block.Code;
 
+            // Quy tắc phân khu: container lạnh chỉ vào khu lạnh; container thường không được vào khu lạnh
+            var typeText = (dto.ContainerType ?? string.Empty).ToUpperInvariant();
+            var isReeferContainer = typeText.Contains("RF") || typeText.Contains("RH") || typeText.Contains("REEFER");
+            if (!isReeferContainer && !string.IsNullOrWhiteSpace(dto.ContainerNo))
+            {
+                var flag = await _context.Database.SqlQueryRaw<bool>(
+                    "SELECT COALESCE(bool_or(is_reefer), false) AS \"Value\" FROM containers WHERE upper(container_no)={0}",
+                    dto.ContainerNo.Trim().ToUpperInvariant()).FirstOrDefaultAsync(cancellationToken);
+                isReeferContainer = flag;
+            }
+            var isReeferZone = block.IsReeferArea || block.Code.StartsWith("D", StringComparison.OrdinalIgnoreCase) || string.Equals(block.Code, "R", StringComparison.OrdinalIgnoreCase);
+            if (isReeferContainer && !isReeferZone)
+            {
+                response.IsValid = false;
+                response.Message = $"Container lạnh chỉ được xếp vào khu lạnh (có ổ cắm điện), không thể xếp vào Block {block.Code}.";
+                return response;
+            }
+            if (!isReeferContainer && isReeferZone)
+            {
+                response.IsValid = false;
+                response.Message = $"Container thường không được xếp vào khu lạnh (Block {block.Code}). Hãy chọn khu bãi thường.";
+                return response;
+            }
+
             // Tìm Slot trong DB
             var slot = await _context.Set<YardSlot>()
                 .FirstOrDefaultAsync(s => s.YardBlockId == block.Id && s.Bay == bay && s.Row == row && s.Tier == tier, cancellationToken);

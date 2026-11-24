@@ -46,6 +46,35 @@ function ensureTable() {
   return tableReady;
 }
 
+const SEVERITY_VI = { CRITICAL: 'Nghiêm trọng', HIGH: 'Cao', MEDIUM: 'Trung bình', LOW: 'Thấp' };
+
+/** Gửi thông báo sự cố vào chuông thông báo của từng Dispatcher đang hoạt động. */
+async function notifyDispatchers(report) {
+  try {
+    const users = await sequelize.query(`SELECT id FROM users WHERE role = 'Dispatcher' AND is_active = true`, { type: QueryTypes.SELECT });
+    if (!users.length) return;
+    const sev = SEVERITY_VI[report.severity] || report.severity;
+    const where = [report.container_no || report.containerNo, report.location].filter(Boolean).join(' · ');
+    const title = `Sự cố bãi (${sev}): ${report.incident_type || report.incidentType || report.type}`;
+    const message = `${where ? `${where}. ` : ''}${String(report.description || '').slice(0, 300)}`;
+    const urgent = ['CRITICAL', 'HIGH'].includes(report.severity);
+    for (const u of users) {
+      await sequelize.query(
+        `INSERT INTO cargo_notifications (recipient_user_id, recipient_role, event_type, direction, priority, title, message, data,
+                                          action_type, action_label, action_url, document_type, document_id, dedup_key, created_at)
+         VALUES (:uid, 'dispatcher', 'YardIncident', 'general', :priority, :title, :message, CAST(:data AS jsonb),
+                 'view', 'Xử lý sự cố', '/dispatcher/yard-incidents', 'yard_incident', :docId, :dedup, now())
+         ON CONFLICT DO NOTHING`,
+        { replacements: { uid: u.id, priority: urgent ? 'urgent' : 'normal', title, message,
+          data: JSON.stringify({ incidentId: report.id, code: report.code, severity: report.severity }),
+          docId: String(report.id), dedup: `incident:${report.id}:${u.id}` } },
+      );
+    }
+  } catch (err) {
+    console.warn('[YardIncident] Không gửi được thông báo:', err.message);
+  }
+}
+
 const clean = (v, max) => String(v == null ? '' : v).trim().slice(0, max);
 const fail = (message, statusCode = 422) => Object.assign(new Error(message), { statusCode });
 
@@ -136,6 +165,7 @@ async function createReport(user, body = {}) {
   );
   const report = await sign(row);
   try { emitToDispatchers('yard_incident:new', report); } catch { /* realtime không làm hỏng việc lưu báo cáo */ }
+  await notifyDispatchers(report);
   return report;
 }
 
@@ -197,6 +227,7 @@ async function createSystemReport({ type, severity = 'HIGH', location, container
   );
   const report = await sign(row);
   try { emitToDispatchers('yard_incident:new', report); } catch { /* bỏ qua */ }
+  await notifyDispatchers(report);
   return report;
 }
 

@@ -14,7 +14,7 @@ const repo = require('../shipping-line/shippingLine.repository');
 const { recordDocumentEvent } = require('../document-workflow/documentEvents');
 const imports = require('./importDocuments.service');
 
-const { httpError, needLine, needCompany, loadFile, notifyCompany, STATUS } = imports;
+const { httpError, needLine, needCompany, loadFile, notifyCompany, notifyLine, STATUS } = imports;
 const json = (v) => JSON.stringify(v);
 const LOI_RETURN_DAYS = Math.max(1, Number(process.env.LOI_ORIGINAL_RETURN_DAYS) || 30);
 const REMINDER_DAYS = 3;
@@ -88,6 +88,8 @@ async function create(importId, input = {}, actor) {
     fieldChanges: type === 'CHANGE_CONSIGNEE' ? [{ field: 'consignee', old: row.consignee, new: payload.newConsignee }]
       : type === 'CHANGE_POD' ? [{ field: 'portOfDischarge', old: row.port_of_discharge, new: payload.newPod }] : undefined,
   });
+  const typeText = { LOI_RELEASE: 'nhận hàng bằng thư bảo lãnh (LOI)', CHANGE_CONSIGNEE: 'đổi người nhận', CHANGE_POD: 'đổi cảng dỡ' }[type] || type;
+  await notifyLine(row, `BlRequest${type}`, `Yêu cầu ${typeText} [${row.bl_number}]`, `Lý do: ${reason}`, `bl-req-${created.id}`);
   return fromRow(created);
 }
 

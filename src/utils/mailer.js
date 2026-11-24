@@ -17,15 +17,38 @@ function getTransporter() {
 }
 
 /**
+ * Gửi thư: ưu tiên Brevo HTTPS API (cổng 443) khi có EmailSettings__BrevoApiKey / BREVO_API_KEY,
+ * vì nhiều nền tảng deploy (Railway gói thấp) chặn cổng SMTP đi ra. Không có khóa thì dùng SMTP như cũ.
+ * Địa chỉ người gửi phải là địa chỉ đã xác minh trong Brevo.
+ */
+async function deliverMail({ to, subject, text, html }) {
+  const brevoKey = process.env.EmailSettings__BrevoApiKey || process.env.BREVO_API_KEY;
+  const senderEmail = process.env.EmailSettings__SenderEmail || process.env.SMTP_USER || 'smartlogai2026@gmail.com';
+  const senderName = process.env.EmailSettings__SenderName || 'NexusPort - Hệ Thống Cảng Container';
+  if (brevoKey) {
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: { 'api-key': brevoKey, 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ sender: { name: senderName, email: senderEmail }, to: [{ email: to }], subject, htmlContent: html, textContent: text }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) {
+      const detail = (await res.text().catch(() => '')).slice(0, 300);
+      throw new Error(`Dịch vụ email (Brevo) từ chối yêu cầu (${res.status}): ${detail || 'không rõ lý do'}. Kiểm tra khóa API và địa chỉ người gửi đã xác minh.`);
+    }
+    return { provider: 'brevo' };
+  }
+  await getTransporter().sendMail({ from: `"${senderName}" <${senderEmail}>`, to, subject, text, html });
+  return { provider: 'smtp' };
+}
+
+/**
  * Gửi email chứa mã OTP khôi phục mật khẩu
  * @param {string} toEmail 
  * @param {string} otpCode 
  * @param {string} fullNameOrUsername 
  */
 async function sendPasswordResetOtpEmail(toEmail, otpCode, fullNameOrUsername) {
-  const transporter = getTransporter();
-  const senderEmail = process.env.EmailSettings__SenderEmail || process.env.SMTP_USER || 'smartlogai2026@gmail.com';
-  const senderName = process.env.EmailSettings__SenderName || 'NexusPort - Hệ Thống Cảng Container';
 
   const htmlContent = `
   <!DOCTYPE html>
@@ -86,8 +109,7 @@ async function sendPasswordResetOtpEmail(toEmail, otpCode, fullNameOrUsername) {
   </html>
   `;
 
-  return transporter.sendMail({
-    from: `"${senderName}" <${senderEmail}>`,
+  return deliverMail({
     to: toEmail,
     subject: `[NexusPort] ${otpCode} là mã xác thực khôi phục mật khẩu của bạn`,
     text: `Mã OTP khôi phục mật khẩu NexusPort của bạn là: ${otpCode}. Mã có hiệu lực trong 15 phút. Tuyệt đối không chia sẻ mã này cho người khác.`,
@@ -103,9 +125,6 @@ const escapeHtml = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => 
  * @param {{ fullName?: string, username: string, password: string, roleLabel: string, organization?: string, loginUrl?: string }} info
  */
 async function sendAccountCredentialsEmail(toEmail, info) {
-  const transporter = getTransporter();
-  const senderEmail = process.env.EmailSettings__SenderEmail || process.env.SMTP_USER || 'smartlogai2026@gmail.com';
-  const senderName = process.env.EmailSettings__SenderName || 'NexusPort - Hệ Thống Cảng Container';
   const loginUrl = info.loginUrl || process.env.APP_URL || process.env.FRONTEND_URL || 'http://localhost:5173/login';
   const name = escapeHtml(info.fullName || info.username);
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Tài khoản NexusPort</title></head>
@@ -126,8 +145,7 @@ async function sendAccountCredentialsEmail(toEmail, info) {
     <tr><td style="padding:16px 28px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#94a3b8;text-align:center;">Email tự động từ hệ thống NexusPort, vui lòng không trả lời thư này.</td></tr>
   </table>
 </body></html>`;
-  return transporter.sendMail({
-    from: `"${senderName}" <${senderEmail}>`,
+  return deliverMail({
     to: toEmail,
     subject: '[NexusPort] Thông tin đăng nhập tài khoản của bạn',
     text: `Tài khoản ${info.roleLabel} NexusPort đã được tạo.\nTên đăng nhập: ${info.username}\nMật khẩu: ${info.password}\nĐăng nhập: ${loginUrl}\nHãy đổi mật khẩu sau lần đăng nhập đầu tiên.`,
@@ -136,6 +154,7 @@ async function sendAccountCredentialsEmail(toEmail, info) {
 }
 
 module.exports = {
+  deliverMail,
   sendAccountCredentialsEmail,
   getTransporter,
   sendPasswordResetOtpEmail,

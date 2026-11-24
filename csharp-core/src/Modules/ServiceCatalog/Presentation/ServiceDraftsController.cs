@@ -30,8 +30,8 @@ public sealed class ServiceDraftsController(ServiceDraftService service) : Contr
             {
                 try { return Ok(await action()); }
                 catch (Exception error) when (attempt < 4 &&
-                    (IsConnectionSlotError(error) || readOnly && attempt < 2 && IsTransientDatabaseError(error)))
-                { await Task.Delay(IsConnectionSlotError(error) ? 1000 * (attempt + 1) : 500 * (attempt + 1), HttpContext.RequestAborted); }
+                    (IsConnectionSlotError(error) || attempt < 3 && IsTransientDatabaseError(error)))
+                { await Task.Delay(IsConnectionSlotError(error) ? 1000 * (attempt + 1) : 400 * (attempt + 1), HttpContext.RequestAborted); }
             }
         }
         catch (AppException error) { return StatusCode(error.StatusCode, new { message = error.Message, errorCode = error.ErrorCode }); }

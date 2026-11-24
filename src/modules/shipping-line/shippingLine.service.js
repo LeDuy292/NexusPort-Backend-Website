@@ -1569,7 +1569,7 @@ class ShippingLineService {
 
   // Luồng phát hành eDO
   async issueEdo(payload, user = 'shipping01') {
-    const { blNumber, validUntil, containerNumbers, emptyReturnDepot, freeTimeDays, notes } = payload;
+    const { blNumber, validUntil, containerNumbers, emptyReturnDepot, freeTimeDays, notes, pickupDepot, consigneeTaxCode, consigneeCompanyId } = payload;
     if (!blNumber) throw new Error('Số B/L là bắt buộc');
 
     // Kiểm tra điều kiện trước khi phát hành - Chặn 100% nếu chưa đạt
@@ -1595,7 +1595,7 @@ class ShippingLineService {
         containerNumber: c.containerNumber,
         isoType: c.isoType,
         sealNumber: c.sealNumber,
-        pickupDepot: 'Bãi Container Cảng Tiên Sa - Khu A',
+        pickupDepot: pickupDepot || 'Bãi container Cảng Tiên Sa',
         gateOutStatus: 'NOT_GATE_OUT',
       }));
 
@@ -1605,6 +1605,8 @@ class ShippingLineService {
       voyageNumber: bl.voyageNumber,
       vesselName: bl.vesselName,
       consignee: bl.consignee,
+      consigneeTaxCode: consigneeTaxCode || null,
+      consigneeCompanyId: consigneeCompanyId || null,
       issueDate: new Date().toISOString().replace('T', ' ').slice(0, 16),
       validUntil: validUntil || check.edoDraftInfo?.suggestedValidUntil || '2026-11-20 23:59:00',
       emptyReturnDepot: emptyReturnDepot || 'Bãi Depot Cảng Tiên Sa (Khu C)',
@@ -1614,7 +1616,7 @@ class ShippingLineService {
       issuedBy: user,
       releaseOfficer: 'Đại diện Hãng tàu (NexusPort Liner Agent)',
       containers: selectedContainers,
-      notes: notes || 'Lệnh phát hành hợp lệ, đủ điều kiện làm thủ tục lấy container tại cổng cảng',
+      notes: notes || 'Đã thu đủ phí và xác nhận quyền nhận hàng. Xuất trình lệnh này tại cổng để lấy container.',
     };
 
     // Khóa dòng B/L để hai yêu cầu đồng thời không cùng phát hành được 2 lệnh còn hiệu lực

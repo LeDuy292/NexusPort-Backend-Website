@@ -18,12 +18,29 @@ public sealed class CatalogService(AppDbContext db, ICurrentUser user)
         => (await db.Database.SqlQueryRaw<string>("SELECT row_to_json(q)::text AS \"Value\" FROM (" + sql + ") q", Args(args)).ToListAsync(ct)).Select(s => JsonNode.Parse(s)!.AsObject()).ToList();
     private Task<int> Exec(string sql, CancellationToken ct, params object?[] args) => db.Database.ExecuteSqlRawAsync(sql, Args(args), ct);
     private Guid Actor => user.UserId ?? throw new CatalogException("Vui lòng đăng nhập.", 401, "UNAUTHORIZED");
+    private static bool IsEquivalentRole(string? r1, string? r2)
+    {
+        if (string.Equals(r1, r2, StringComparison.OrdinalIgnoreCase)) return true;
+        var carrierRoles = new[] { "Transport Company", "Carrier", "Carrier Staff" };
+        if (carrierRoles.Contains(r1, StringComparer.OrdinalIgnoreCase) && carrierRoles.Contains(r2, StringComparer.OrdinalIgnoreCase)) return true;
+        var adminRoles = new[] { "Administrator", "Admin" };
+        if (adminRoles.Contains(r1, StringComparer.OrdinalIgnoreCase) && adminRoles.Contains(r2, StringComparer.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, (string? Role, DateTime Expires)> RoleCache = new();
+    private async Task<string?> LoadRole(CancellationToken ct)
+    {
+        if (RoleCache.TryGetValue(Actor, out var cached) && cached.Expires > DateTime.UtcNow) return cached.Role;
+        var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active", ct, Actor);
+        var found = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
+        RoleCache[Actor] = (found, DateTime.UtcNow.AddSeconds(30));
+        return found;
+    }
     private async Task Authorize(bool admin, CancellationToken ct)
     {
-        var accounts = await Rows("SELECT role FROM users WHERE id=@p0 AND is_active", ct, Actor);
-        var role = accounts.FirstOrDefault()?["role"]?.GetValue<string>();
-        CatalogRules.Require(role != null && string.Equals(role, user.Role, StringComparison.OrdinalIgnoreCase), "Tài khoản không còn quyền sử dụng danh mục dịch vụ.", 403, "FORBIDDEN");
-        CatalogRules.Require(admin ? role is "Administrator" or "Admin" : role is "Administrator" or "Admin" or "Transport Company" or "Carrier Staff", "Bạn không có quyền thực hiện thao tác này.", 403, "FORBIDDEN");
+        var role = await LoadRole(ct);
+        CatalogRules.Require(role != null && IsEquivalentRole(role, user.Role), "Tài khoản không còn quyền sử dụng danh mục dịch vụ.", 403, "FORBIDDEN");
+        CatalogRules.Require(admin ? role is "Administrator" or "Admin" : role is "Administrator" or "Admin" or "Transport Company" or "Carrier" or "Carrier Staff", "Bạn không có quyền thực hiện thao tác này.", 403, "FORBIDDEN");
     }
     private async Task<JsonObject> Find(Guid id, CancellationToken ct, bool locked = false)
     {

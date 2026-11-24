@@ -71,6 +71,12 @@ function evaluateSlot(pos, me, idx) {
   if (!slot) return { code: 'NOT_IN_LAYOUT', text: 'ô này không tồn tại trên sơ đồ bãi' };
   if (slot.status === 'maintenance' || slot.status === 'blocked') return { code: 'MAINTENANCE', text: 'ô đang bảo trì / bị khóa' };
 
+  // Đúng khu: cont lạnh -> khu lạnh; cont thường -> không vào khu lạnh
+  if (Boolean(me.isReefer) !== isReeferBlock(String(pos.block).toUpperCase(), slot)) {
+    return me.isReefer
+      ? { code: 'WRONG_ZONE', text: 'container lạnh chỉ được xếp vào khu lạnh có ổ cắm điện' }
+      : { code: 'WRONG_ZONE', text: 'container thường không được xếp vào khu lạnh' };
+  }
   const meNo = String(me.containerNo).toUpperCase();
   if (occupied(slot) && String(slot.containerNumber).toUpperCase() !== meNo) {
     return slot.status === 'reserved'
@@ -135,6 +141,15 @@ function proposeSlots(me, original, idx, ctx) {
       if (heavy && s.tier === 1) { score += 25; reasons.push('cont nặng hạ tầng 1'); }
       else if (light && s.tier >= 2) { score += 15; reasons.push('cont nhẹ xếp tầng trên'); }
     }
+    if (direction === 'EXPORT' && me.voyageKey) {
+      const mates = (ctx.voyageSlots?.get(me.voyageKey) || []).filter((m) => m.block === block);
+      if (mates.length) {
+        const gap = Math.min(...mates.map((m) => Math.abs(m.bay - s.bay)));
+        if (gap <= 2) { score += 60; reasons.push(`xếp sát cont cùng chuyến tàu ${me.voyageLabel || ''} (Block ${block})`.replace('  ', ' ')); }
+        else if (gap <= 6) { score += 45; reasons.push(`gần cont cùng chuyến tàu ${me.voyageLabel || ''} (Block ${block})`.replace('  ', ' ')); }
+        else { score += 30; reasons.push(`cùng khu với cont chuyến tàu ${me.voyageLabel || ''} (Block ${block})`.replace('  ', ' ')); }
+      }
+    }
     if (me.line && ctx.lineBlocks.get(me.line)?.has(block)) { score += 35; reasons.push(`cùng nhóm hãng tàu ${me.line}`); }
     if (me.isReefer && s.hasReeferPlug) { score += 30; reasons.push('có ổ cắm điện cho cont lạnh'); }
     const st = idx.blockStats.get(block);
@@ -163,7 +178,7 @@ async function loadActiveArrivals() {
     SELECT UPPER(c.container_no) AS "containerNo", b.booking_code AS "bookingCode", b.booking_type::text AS "bookingType",
            COALESCE(t.plate_number, b.vehicle_plate) AS "plate", COALESCE(d.full_name, b.driver_name) AS "driverName",
            c.iso_size_type AS "isoType", c.is_reefer AS "isReefer", c.gross_weight_kg AS "weightKg", sl.short_name AS "line",
-           ct.size AS "sizeFt"
+           ct.size AS "sizeFt", xv.voyage_key AS "voyageKey", xv.voyage_label AS "voyageLabel"
       FROM bookings b
       JOIN booking_containers bc ON bc.booking_id = b.id
       JOIN containers c ON c.id = bc.container_id
@@ -171,6 +186,13 @@ async function loadActiveArrivals() {
       LEFT JOIN shipping_lines sl ON sl.id = c.shipping_line_id
       LEFT JOIN drivers d ON d.id = b.driver_id
       LEFT JOIN trucks t ON t.id = b.truck_id
+      LEFT JOIN LATERAL (
+        SELECT ev.id::text AS voyage_key, trim(concat(ev.vessel_name, ' ', ev.voyage_number)) AS voyage_label
+          FROM export_booking_containers ebc
+          JOIN export_bookings eb ON eb.id = ebc.export_booking_id
+          JOIN export_voyages ev ON ev.id = eb.voyage_id
+         WHERE UPPER(ebc.container_no) = UPPER(c.container_no) AND ebc.active IS NOT FALSE
+         ORDER BY ebc.gate_in_at DESC NULLS LAST LIMIT 1) xv ON true
      WHERE b.status::text = 'checked_in'
        AND EXISTS (SELECT 1 FROM gate_transactions g WHERE g.booking_id = b.id AND g.gate_type = 'gate_in' AND g.status = 'completed')
        AND NOT EXISTS (SELECT 1 FROM gate_transactions o WHERE o.booking_id = b.id AND o.gate_type = 'gate_out' AND o.status = 'completed'
@@ -198,6 +220,7 @@ async function loadActiveArrivals() {
     return {
       containerNo: r.containerNo, bookingCode: r.bookingCode, plate: r.plate, driverName: r.driverName, line: r.line || null,
       isReefer: Boolean(r.isReefer), weightKg: Number(r.weightKg) || 0, lengthFt,
+      voyageKey: r.voyageKey || null, voyageLabel: r.voyageLabel || '',
       direction: r.bookingType === 'dropoff' ? 'EXPORT' : 'IMPORT', reserved,
     };
   }).filter((r) => r.reserved);
@@ -225,6 +248,22 @@ async function checkSlotConflicts() {
         `SELECT UPPER(c.container_no) AS no, c.gross_weight_kg AS w, sl.short_name AS line FROM containers c LEFT JOIN shipping_lines sl ON sl.id = c.shipping_line_id
           WHERE UPPER(c.container_no) IN (:nos)`, { replacements: { nos: usedNos }, type: QueryTypes.SELECT }).catch(() => []) : [];
       const weights = new Map(info.filter((i) => i.w != null).map((i) => [i.no, Number(i.w)]));
+      const voyageSlots = new Map();
+      if (usedNos.length) {
+        const vrows = await sequelize.query(
+          `SELECT DISTINCT ON (UPPER(ebc.container_no)) UPPER(ebc.container_no) AS no, eb.voyage_id::text AS voyage
+             FROM export_booking_containers ebc JOIN export_bookings eb ON eb.id = ebc.export_booking_id
+            WHERE UPPER(ebc.container_no) IN (:nos) AND ebc.active IS NOT FALSE AND eb.voyage_id IS NOT NULL
+            ORDER BY UPPER(ebc.container_no), ebc.gate_in_at DESC NULLS LAST`,
+          { replacements: { nos: usedNos }, type: QueryTypes.SELECT }).catch(() => []);
+        const voyageOf = new Map(vrows.map((v) => [v.no, v.voyage]));
+        for (const s of idx.bySlot.values()) {
+          const v = voyageOf.get(String(s.containerNumber || '').toUpperCase());
+          if (!v) continue;
+          if (!voyageSlots.has(v)) voyageSlots.set(v, []);
+          voyageSlots.get(v).push({ block: String(s.block).toUpperCase(), bay: Number(s.bay) });
+        }
+      }
       const lineBlocks = new Map();
       for (const s of idx.bySlot.values()) {
         if (!s.containerNumber) continue;
@@ -242,7 +281,7 @@ async function checkSlotConflicts() {
         stillConflicted.add(dedup);
         if (openMap.has(dedup)) continue;
 
-        const proposals = proposeSlots(a, a.reserved, idx, { weights, lineBlocks });
+        const proposals = proposeSlots(a, a.reserved, idx, { weights, lineBlocks, voyageSlots });
         const best = proposals[0];
         const description = `Xe ${a.plate || '—'} (tài xế ${a.driverName || '—'}) đã vào bãi với container ${a.containerNo} nhưng vị trí đã giữ chỗ ${reservedText}: ${problem.text}. `
           + (best

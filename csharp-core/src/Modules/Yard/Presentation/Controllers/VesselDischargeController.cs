@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NexusPort.Modules.Yard.Application.DTOs;
 using NexusPort.Modules.Yard.Application.Interfaces;
@@ -72,6 +73,8 @@ public class VesselDischargeController : ControllerBase
     /// <summary>
     /// Cho phép Dispatcher điều chỉnh thủ công ô bãi dự kiến cho một container
     /// </summary>
+    // Chỉ Dispatcher (hoặc quản trị) được đổi vị trí bãi; nhân viên bãi chỉ thực hiện theo lệnh.
+    [Authorize(Roles = "Dispatcher,Administrator,Admin")]
     [HttpPost("override-slot")]
     public async Task<ActionResult<VesselDischargePlanDto>> OverrideSlot(
         [FromBody] OverrideSlotRequestDto dto,

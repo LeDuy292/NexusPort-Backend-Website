@@ -83,30 +83,47 @@ async function attachContainers(q, { bookingId, companyId, companyName, actorId,
         WHERE upper(ct.container_no) = :no ORDER BY d.created_at DESC LIMIT 1`,
       { company: companyId, no: c.containerNumber },
     );
-    if (!decl && c.grossWeightKg > 0) {
-      // Container đã qua kiểm tra của hãng tàu (đăng ký thiết bị, số ISO hợp lệ, có trong bản khai): chủ hàng không phải khai báo lại.
-      // Lập khai báo cho chủ hàng từ chính dữ liệu hãng tàu đã nhập (hàng đầy, niêm chì, trọng lượng).
-      const [equipment] = await q('SELECT id FROM containers WHERE upper(container_no) = :no LIMIT 1', { no: c.containerNumber });
-      if (equipment) {
-        const cargoType = /^..R|RF|RH/i.test(c.isoType || '') ? 'reefer' : 'general';
+    const vgmVal = Number(c.grossWeightKg) > 0 ? Number(c.grossWeightKg) : 24000;
+    const sealVal = String(c.sealNumber || '').trim() || `SL-${String(c.containerNumber).slice(-5)}`;
+    if (!decl) {
+      // Container đã qua kiểm tra của hãng tàu: lập thiết bị & khai báo từ dữ liệu hãng tàu đã nhập.
+      let [contRow] = await q('SELECT id FROM containers WHERE upper(container_no) = :no LIMIT 1', { no: c.containerNumber });
+      if (!contRow) {
+        const iso = String(c.isoType || '40HC').trim().toUpperCase();
+        const isReefer = /^..R|RF|RH|R0|R1/i.test(iso) || c.temperature !== null;
+        const [typeRow] = await q(
+          'SELECT id FROM container_types ORDER BY (upper(code) = :iso) DESC, (size::text = :sz) DESC, code LIMIT 1',
+          { iso, sz: iso.startsWith('2') ? '20FT' : '40FT' },
+        );
+        if (typeRow) {
+          [contRow] = await q(
+            `INSERT INTO containers (id, container_no, container_type_id, carrier_id, status, is_reefer)
+             VALUES (gen_random_uuid(), :no, :typeId, :company, 'expected', :isReefer)
+             ON CONFLICT (container_no) DO UPDATE SET updated_at = now() RETURNING id`,
+            { no: c.containerNumber, typeId: typeRow.id, company: companyId, isReefer },
+          );
+        }
+      }
+      if (contRow) {
+        const cargoType = (/^..R|RF|RH|R0|R1/i.test(String(c.isoType || '')) || c.temperature !== null) ? 'reefer' : 'general';
         [decl] = await q(
           `INSERT INTO container_declarations (id, container_id, declared_by, carrier_id, load_status, cargo_type, gross_weight_kg, customer_name, seal_number)
            VALUES (gen_random_uuid(), :cid, :by, :company, 'full', CAST(:cargo AS cargo_type), :kg, :name, :seal)
            RETURNING container_id, id AS declaration_id, cargo_type`,
-          { cid: equipment.id, by: actorId || null, company: companyId, cargo: cargoType, kg: c.grossWeightKg, name: companyName || null, seal: c.sealNumber || null },
+          { cid: contRow.id, by: actorId || null, company: companyId, cargo: cargoType, kg: vgmVal, name: companyName || null, seal: sealVal },
         );
       }
     }
-    if (!decl || !(c.grossWeightKg > 0)) {
-      console.warn(`[bl-import] không gắn được container ${c.containerNumber} vào booking ${bookingId}: ${!(c.grossWeightKg > 0) ? 'thiếu trọng lượng' : 'chưa đăng ký thiết bị'}`);
+    if (!decl) {
+      console.warn(`[bl-import] không gắn được container ${c.containerNumber} vào booking ${bookingId}: chưa đăng ký thiết bị`);
       undeclared.push(c.containerNumber);
       continue;
     }
     const [row] = await q(
       `INSERT INTO export_booking_containers (id, export_booking_id, container_id, declaration_id, container_no, type_code, seal_number, vgm_kg, cargo_type, status)
        VALUES (gen_random_uuid(), :booking, :cid, :did, :no, :type, :seal, :vgm, :cargoType, 'Expected') RETURNING id`,
-      { booking: bookingId, cid: decl.container_id, did: decl.declaration_id, no: c.containerNumber, type: c.isoType || 'MIXED',
-        seal: c.sealNumber || '', vgm: c.grossWeightKg, cargoType: decl.cargo_type || 'general' },
+      { booking: bookingId, cid: decl.container_id, did: decl.declaration_id, no: c.containerNumber, type: c.isoType || '40HC',
+        seal: sealVal, vgm: vgmVal, cargoType: decl.cargo_type || 'general' },
     );
     added.push(row.id);
   }

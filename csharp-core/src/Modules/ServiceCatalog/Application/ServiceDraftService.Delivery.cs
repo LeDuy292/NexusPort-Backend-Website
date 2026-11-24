@@ -86,7 +86,7 @@ public sealed partial class ServiceDraftService
     public async Task<object> RegistrationEmailStatus(Guid id, ServiceDraftInput request, CancellationToken ct)
     {
         var company = await Company(ct); await GuardEmailDraft(id, company, ct);
-        var input = ServiceDraftRules.Normalize(request);
+        var input = ServiceDraftRules.NormalizeForEmail(request);
         if (await HasSourceEmail(id, input, company, ct)) return new { verified = true, challenge = (JsonObject?)null };
         var email = await RegisteredEmail(ct);
         var pending = await Rows("""
