@@ -130,14 +130,41 @@ const belongsTo = (company, text) => {
 async function myBills(user) {
   const company = await companyOf(user);
   const bls = await repo.listBls();
-  return bls
+  const mine = bls
     .filter((b) => b.status !== 'CANCELLED' && b.status !== 'DRAFT')
-    .filter((b) => (String(b.direction).toUpperCase() === 'EXPORT' ? belongsTo(company, b.shipper) : belongsTo(company, b.consignee)))
-    .map((b) => ({
-      blNumber: b.blNumber, direction: String(b.direction).toUpperCase(), status: b.status, blType: b.blType, voyageNumber: b.voyageNumber, vesselName: b.vesselName,
+    .filter((b) => (String(b.direction).toUpperCase() === 'EXPORT' ? belongsTo(company, b.shipper) : belongsTo(company, b.consignee)));
+  // Một lượt truy vấn cho tất cả container của mọi vận đơn (thay vì hai lượt cho từng vận đơn)
+  const allNos = [...new Set(mine.flatMap((b) => (b.containers || []).map((c) => normNo(c.containerNumber || c.containerNo))).filter(Boolean))];
+  const [ports, loadedRows] = allNos.length
+    ? await Promise.all([
+      sequelize.query(
+        `SELECT DISTINCT ON (upper(container_no)) upper(container_no) AS no, status::text AS status, left_at
+           FROM containers WHERE upper(container_no) IN (:nos) ORDER BY upper(container_no), updated_at DESC`,
+        { replacements: { nos: allNos }, type: QueryTypes.SELECT },
+      ),
+      sequelize.query(
+        `SELECT upper(container_no) AS no, status, loaded_at FROM export_booking_containers WHERE upper(container_no) IN (:nos)`,
+        { replacements: { nos: allNos }, type: QueryTypes.SELECT },
+      ),
+    ])
+    : [[], []];
+  const portBy = new Map(ports.map((p) => [p.no, p]));
+  const loadedBy = new Map(loadedRows.map((p) => [p.no, p]));
+  return mine.map((b) => {
+    const direction = String(b.direction).toUpperCase();
+    // Hoàn tất: hàng xuất đã xếp lên tàu hết; hàng nhập đã giao khỏi bãi hết
+    const finished = direction === 'EXPORT' ? 'LOADED' : 'RELEASED';
+    const nos = (b.containers || []).map((c) => normNo(c.containerNumber || c.containerNo)).filter(Boolean);
+    const completed = nos.length > 0 && nos.every((no) => {
+      const booking = loadedBy.get(no);
+      return stateOf(direction, portBy.get(no) || null, booking?.status === 'Loaded' || Boolean(booking?.loaded_at)) === finished;
+    });
+    return {
+      blNumber: b.blNumber, direction, status: b.status, blType: b.blType, voyageNumber: b.voyageNumber, vesselName: b.vesselName,
       pol: b.pol, pod: b.pod, shipper: b.shipper, consignee: b.consignee, containerCount: (b.containers || []).length, issueDate: b.issueDate,
-      freightStatus: b.freightStatus, edoIssued: Boolean(b.edoIssued),
-    }));
+      freightStatus: b.freightStatus, edoIssued: Boolean(b.edoIssued), completed,
+    };
+  });
 }
 
 async function myBill(user, blNumber) {
