@@ -37,7 +37,7 @@ public sealed partial class ServiceDraftService
     {
         var company = await Company(ct);
         await GuardEmailDraft(id, company, ct);
-        var input = ServiceDraftRules.Normalize(request);
+        var input = ServiceDraftRules.NormalizeForEmail(request);
         if (input.Flow == "IMPORT")
             Require(!string.IsNullOrEmpty(input.Source.ReferenceNumber) || !string.IsNullOrEmpty(input.Source.BlNumber), "Nhập số eDO hoặc vận đơn trước khi xác thực.");
         else
