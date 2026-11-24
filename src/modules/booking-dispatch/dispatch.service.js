@@ -506,24 +506,8 @@ async function syncManifestGateBookings() {
   }
 }
 
-// Xe chỉ hiện "sẵn sàng" cho điều độ khi tài xế đã xác nhận chuyến VÀ báo đã đến cổng.
-// Chuyến vận chuyển của lịch hẹn phải được tài xế xác nhận (không còn ở trạng thái "Assigned") trước khi báo đã đến.
-async function requireConfirmedTrip(userId, bookingId) {
-  const find = () => query(`SELECT t.status FROM transport_trips t WHERE t.booking_id=:bookingId AND t.driver_id=:userId
-    AND t.status<>'Cancelled' ORDER BY t.created_at DESC LIMIT 1`, { bookingId, userId });
-  let [trip] = await find();
-  if (!trip) {
-    await require('../trips/trips.service').ensureTripsForDriverBookings(userId).catch(() => {});
-    [trip] = await find();
-  }
-  if (!trip || trip.status === 'Assigned') {
-    throw fail('Hãy xác nhận chuyến vận chuyển trước, sau đó mới báo đã đến cổng để điều độ gọi xe.', 409);
-  }
-}
-
 async function act(userId, role, bookingId, action, input = {}) {
   const version = expectedVersion(input.expectedVersion);
-  if (role === 'Driver' && action === 'arrive') await requireConfirmedTrip(userId, bookingId);
   return sequelize.transaction(async transaction => {
     if (action === 'call') await admission.lock(transaction);
     // Serialize by booking and fleet driver, including concurrent dispatchers.
@@ -612,7 +596,7 @@ async function act(userId, role, bookingId, action, input = {}) {
     if (action === 'acknowledge' && updated.gateEntryOrder?.status !== 'active') {
       throw fail('Lệnh vào cổng không còn hiệu lực. Vui lòng yêu cầu điều độ gọi lại.');
     }
-    return decorate(updated);
+    return decorate(updated, now);
   });
 }
 module.exports = { act, syncManifestGateBookings };

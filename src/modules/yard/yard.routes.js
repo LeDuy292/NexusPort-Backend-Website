@@ -18,7 +18,23 @@ router.get('/layout', authenticate,
     } catch (error) { next(error); }
   });
 
-// Danh sách container đang có mặt trong bãi kèm thông tin chi tiết (trang Chi Tiết Container).
+/**
+ * @swagger
+ * /api/yard/containers:
+ *   get:
+ *     summary: Lấy danh sách container đang có mặt trong bãi
+ *     description: Dành cho Yard Operator, Dispatcher, Administrator và Gate Officer.
+ *     tags: [Yard Operations]
+ *     security:
+ *       - BearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Danh sách container và vị trí trong bãi.
+ *       401:
+ *         description: Chưa đăng nhập hoặc phiên không hợp lệ.
+ *       403:
+ *         description: Tài khoản không có quyền xem danh sách container trong bãi.
+ */
 router.get('/containers', authenticate,
   authorize('Yard Operator', 'Dispatcher', 'Administrator', 'Gate Officer'),
   async (_req, res, next) => {
