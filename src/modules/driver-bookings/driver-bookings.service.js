@@ -55,6 +55,7 @@ const BOOKING_FIELDS = `SELECT b.id, b.booking_code AS "bookingCode", b.booking_
 const BOOKING_SELECT = BOOKING_FIELDS + ' WHERE d.user_id=:userId';
 
 async function getFeed(userId) {
+  await require('../booking-dispatch/dispatch.service').syncManifestGateBookings().catch(() => {});
   // Lịch hẹn đã duyệt luôn có chuyến vận chuyển để tài xế xác nhận trước khi báo đã đến cổng
   await require('../trips/trips.service').ensureTripsForDriverBookings(userId).catch(() => {});
   const [profile, bookings, notifications, counts] = await Promise.all([

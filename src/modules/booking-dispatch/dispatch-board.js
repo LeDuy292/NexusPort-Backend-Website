@@ -4,6 +4,7 @@ const { QueryTypes } = require('sequelize');
 const { sequelize } = require('../../config/database');
 const { BOOKING_FIELDS } = require('../driver-bookings/driver-bookings.service');
 const { POLICY, decorate, fail } = require('./dispatch.policy');
+const { syncManifestGateBookings } = require('./dispatch.service');
 const admission = require('./yard-admission');
 
 const FILTERS = ['all', 'waiting', 'called', 'inside', 'exited', 'absent'];
@@ -30,7 +31,7 @@ const activeQueue = "b.status IN ('approved','ready')";
 const dayStart = "(CAST(:date AS date)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh')";
 const dayEnd = "((CAST(:date AS date)+1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh')";
 const queueAtDate = `${activeQueue} AND
-  ((b.appointment_start<${dayEnd} AND b.appointment_end>${dayStart})
+  ((b.appointment_start<=${dayEnd} + (:early * interval '1 minute') AND b.appointment_end>${dayStart})
    OR EXISTS (
      SELECT 1 FROM gate_entry_orders e WHERE e.booking_id=b.id AND e.status IN ('pending_ack','active')
        AND e.valid_until>CAST(:now AS timestamptz) AND e.valid_until>${dayStart} AND e.issued_at<${dayEnd}
@@ -60,6 +61,7 @@ async function getBoard(date, { page: rawPage = '1', filter = 'all' } = {}, incl
   if (typeof rawPage !== 'string' || !/^[1-9]\d{0,8}$/.test(rawPage) || !FILTERS.includes(filter)) {
     throw fail('Trang hoặc trạng thái điều phối không hợp lệ.', 422);
   }
+  await syncManifestGateBookings().catch(() => {});
   const now = new Date();
   const params = { date, page: Number(rawPage), filter, size: PAGE_SIZE, now: now.toISOString(),
     early: POLICY.earlyArrivalMinutes, grace: POLICY.lateGraceMinutes };
@@ -118,7 +120,7 @@ async function getBoardBooking({ bookingId, bookingCode, date }, includeGateTrip
   const now = new Date();
   const condition = byId ? 'b.id=:reference' : 'upper(b.booking_code)=:reference';
   const scope = tripScope(includeGateTrips, includeGateTrips ? activeQueue : queueAtDate);
-  const params = { reference: byId ? bookingId : bookingCode.trim().toUpperCase(), now: now.toISOString(), date };
+  const params = { reference: byId ? bookingId : bookingCode.trim().toUpperCase(), now: now.toISOString(), date, early: POLICY.earlyArrivalMinutes };
   const [booking] = await read(`
     SELECT details.*,scope.trip_group AS "group" FROM (
       ${BOOKING_FIELDS} WHERE ${condition}

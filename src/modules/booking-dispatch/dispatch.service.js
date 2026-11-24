@@ -18,8 +18,9 @@ async function syncSingleManifestBooking(gb, context) {
   const gbStatus = String(gb.status || '').toLowerCase();
   const plateRaw = String(gb.licensePlate || gb.vehiclePlate || gb.suggestedPlate || gb.vehicleSnapshot?.plateNumber || '').trim();
   const driverRaw = String(gb.driverName || gb.suggestedDriver || gb.driverSnapshot?.fullName || '').trim();
+  const hasTransportAssignment = Boolean(gb.transportSubmitted || gb.eportOrderId || (plateRaw && driverRaw));
 
-  if (gbStatus === 'waitingtransport' || gbStatus === 'rejected' || !plateRaw) {
+  if ((gbStatus === 'waitingtransport' && !hasTransportAssignment) || ['rejected', 'canceled', 'cancelled'].includes(gbStatus) || !plateRaw) {
     await sequelize.query(
       `UPDATE bookings SET status = 'canceled', updated_at = now()
        WHERE booking_code = :bookingCode AND status::text IN ('pending','approved','ready')`,
@@ -28,7 +29,8 @@ async function syncSingleManifestBooking(gb, context) {
     return;
   }
 
-  const isEligible = ['ready', 'approved'].includes(gbStatus) ||
+  const isEligible = ['ready', 'approved', 'pending', 'under review'].includes(gbStatus) ||
+    hasTransportAssignment ||
     gb.portBillPaid === true ||
     String(gb.paymentStatus || '').toLowerCase() === 'paid';
   if (!isEligible || !driverRaw) return;
@@ -44,8 +46,13 @@ async function syncSingleManifestBooking(gb, context) {
     );
     if (existing && ['checked_in', 'completed'].includes(existing.status)) return;
     // A registered appointment belongs to Booking. Only the explicit rescheduling flow can edit it.
-    const newAppointment = existing ? null : await getNewManifestAppointment(gb, tQuery);
-    if (!existing && !newAppointment) return;
+    let newAppointment = existing ? null : await getNewManifestAppointment(gb, tQuery);
+    if (!existing && !newAppointment) {
+      const fallbackStartStr = gb.vesselEta || (gb.etaDate ? `${gb.etaDate}T08:30:00+07:00` : null);
+      const parsedFallback = fallbackStartStr ? Date.parse(String(fallbackStartStr).trim().replace(' ', 'T')) : NaN;
+      const startDate = Number.isFinite(parsedFallback) ? new Date(parsedFallback) : new Date();
+      newAppointment = { start: startDate, end: new Date(startDate.getTime() + 90 * 60000) };
+    }
     const startMs = existing ? new Date(existing.appointment_start).getTime() : newAppointment.start.getTime();
 
     const matchedCarrier = carriers.find(c =>
@@ -295,17 +302,96 @@ async function syncSingleManifestBooking(gb, context) {
   });
 }
 
+function extractEportRegistrationTrips(regRows) {
+  const activeByKey = new Map();
+  const activeByOrderCont = new Map();
+  const allActiveTrips = [];
+  const closedOrderIds = new Set();
+
+  for (const row of regRows || []) {
+    const ordStatus = String(row.orderStatus || '').toUpperCase();
+    if (['REJECTED', 'CANCELLED', 'DRAFT'].includes(ordStatus)) {
+      if (row.id) closedOrderIds.add(String(row.id));
+      if (row.draftId) closedOrderIds.add(String(row.draftId));
+      continue;
+    }
+    const snapshot = row.snapshot || {};
+    const content = snapshot.content || {};
+    const delivery = content.delivery || {};
+    const trips = Array.isArray(delivery.trips) ? delivery.trips : [];
+    const lines = Array.isArray(content.lines) ? content.lines : [];
+    const conts = Array.isArray(snapshot.containers) ? snapshot.containers : [];
+    const flow = String(content.flow || conts[0]?.flow || 'EXPORT').toUpperCase() === 'IMPORT' ? 'IMPORT' : 'EXPORT';
+    const isPaid = String(row.paymentStatus || '').toUpperCase() === 'PAID';
+
+    trips.forEach((trip, idx) => {
+      const line = lines.find(l => String(l?.sourceContainerId || '') === String(trip?.sourceContainerId || ''));
+      const ordCont = conts.find(c => String(c?.sourceContainerId || c?.id || '') === String(trip?.sourceContainerId || ''));
+      const rawCont = ordCont?.containerNumber ||
+        line?.declaration?.containerNumber ||
+        line?.containerNumber ||
+        trip?.containerNumber ||
+        conts[idx]?.containerNumber ||
+        lines[idx]?.declaration?.containerNumber ||
+        lines[idx]?.containerNumber ||
+        '';
+      const containerNo = String(rawCont || '').trim().toUpperCase();
+      const plate = String(trip?.vehicle?.plateNumber || trip?.truckPlate || delivery.truckPlate || '').trim();
+      const driver = String(trip?.driver?.fullName || trip?.driverName || delivery.driverName || '').trim();
+      if (!containerNo || (!plate && !driver)) return;
+
+      const tripInfo = {
+        eportOrderId: String(row.id || row.draftId),
+        eportOrderNumber: row.number || '',
+        companyId: row.carrierId || null,
+        direction: flow,
+        containerNo,
+        containerType: ordCont?.typeCode || line?.declaration?.isoCode || '40HC',
+        sealNumber: ordCont?.sealNumber || line?.declaration?.sealNumber || null,
+        grossWeightKg: Number(ordCont?.grossWeightKg || line?.declaration?.weightKg) || 24500,
+        driverId: trip?.driver?.id || trip?.driverId || null,
+        driverName: driver,
+        licenseNumber: trip?.driver?.licenseNumber || trip?.licenseNumber || null,
+        phone: trip?.driver?.phone || trip?.driverPhone || content.contactPhone || null,
+        driverSnapshot: trip?.driver || null,
+        vehicleId: trip?.vehicle?.id || trip?.vehicleId || null,
+        licensePlate: plate,
+        vehicleSnapshot: trip?.vehicle || null,
+        appointmentStart: trip?.appointmentStart || content.plannedAt || null,
+        appointmentEnd: trip?.appointmentEnd || null,
+        paymentStatus: isPaid ? 'Paid' : 'Unpaid',
+        portBillPaid: isPaid,
+        status: isPaid ? 'Ready' : 'Approved',
+      };
+
+      const dirKey = `${flow}:${containerNo}`;
+      if (!activeByKey.has(dirKey)) activeByKey.set(dirKey, tripInfo);
+      if (!activeByKey.has(containerNo)) activeByKey.set(containerNo, tripInfo);
+      if (row.id) activeByOrderCont.set(`${row.id}:${containerNo}`, tripInfo);
+      if (row.draftId) activeByOrderCont.set(`${row.draftId}:${containerNo}`, tripInfo);
+      allActiveTrips.push(tripInfo);
+    });
+  }
+
+  return { activeByKey, activeByOrderCont, allActiveTrips, closedOrderIds };
+}
+
 async function syncManifestGateBookings() {
   if (process.env.NODE_ENV === 'test') return;
   try {
-    const [manifests, carriers, drivers, trucks, containerTypeRows] = await Promise.all([
+    const [manifests, carriers, drivers, trucks, containerTypeRows, eportRegRows] = await Promise.all([
       query(`SELECT payload->'generatedBookings' AS bookings FROM shipping_manifests
              WHERE (payload->>'portApprovalStatus' = 'PORT_APPROVED' OR payload->>'status' = 'PORT_APPROVED')
                AND jsonb_typeof(payload->'generatedBookings')='array' AND payload->'generatedBookings'<>'[]'::jsonb`),
       query('SELECT id, company_name FROM carriers'),
-      query('SELECT id, carrier_id, full_name, license_number, phone FROM drivers'),
+      query('SELECT id, user_id, carrier_id, full_name, license_number, phone FROM drivers ORDER BY (user_id IS NOT NULL) DESC'),
       query('SELECT id, carrier_id, plate_number FROM trucks'),
       query('SELECT id, code FROM container_types'),
+      query(`SELECT r.id, r.draft_id AS "draftId", r.number, r.carrier_id AS "carrierId", r.snapshot,
+                    o.status AS "orderStatus", o.approval_status AS "approvalStatus", o.payment_status AS "paymentStatus"
+             FROM eport_service_registrations r
+             JOIN eport_service_order_states o ON o.draft_id = r.draft_id
+             ORDER BY o.updated_at DESC`).catch(() => []),
     ]);
 
     const containerTypes = {};
@@ -315,14 +401,104 @@ async function syncManifestGateBookings() {
       containerTypeIds.push(ct.id);
     }
 
+    const { activeByKey, activeByOrderCont, allActiveTrips, closedOrderIds } = extractEportRegistrationTrips(eportRegRows);
     const context = { carriers, drivers, trucks, containerTypes, containerTypeIds };
+    const syncedContainerKeys = new Set();
+
     for (const manifest of manifests) {
-      for (const gb of manifest.bookings) {
+      for (const rawGb of manifest.bookings) {
         try {
+          let gb = rawGb;
+          const contNo = String(gb?.containerId || gb?.containerNumber || '').trim().toUpperCase();
+          const dir = (String(gb?.direction || '').toUpperCase() === 'IMPORT' || gb?.operation === 'Pickup') ? 'IMPORT' : 'EXPORT';
+          if (contNo) {
+            syncedContainerKeys.add(`${dir}:${contNo}`);
+            syncedContainerKeys.add(contNo);
+          }
+
+          const matchedEport =
+            (gb?.eportOrderId && contNo && activeByOrderCont.get(`${gb.eportOrderId}:${contNo}`)) ||
+            (contNo && activeByKey.get(`${dir}:${contNo}`)) ||
+            (contNo && activeByKey.get(contNo)) ||
+            null;
+
+          if (matchedEport) {
+            gb = {
+              ...gb,
+              transportSubmitted: true,
+              eportOrderId: matchedEport.eportOrderId || gb.eportOrderId,
+              eportOrderNumber: matchedEport.eportOrderNumber || gb.eportOrderNumber,
+              companyId: matchedEport.companyId || gb.companyId,
+              driverId: matchedEport.driverId || gb.driverId,
+              driverName: matchedEport.driverName || gb.driverName,
+              licenseNumber: matchedEport.licenseNumber || gb.licenseNumber,
+              phone: matchedEport.phone || gb.phone,
+              driverSnapshot: matchedEport.driverSnapshot || gb.driverSnapshot,
+              vehicleId: matchedEport.vehicleId || gb.vehicleId,
+              licensePlate: matchedEport.licensePlate || gb.licensePlate,
+              vehiclePlate: matchedEport.licensePlate || gb.vehiclePlate,
+              vehicleSnapshot: matchedEport.vehicleSnapshot || gb.vehicleSnapshot,
+              appointmentStart: matchedEport.appointmentStart || gb.appointmentStart,
+              appointmentEnd: matchedEport.appointmentEnd || gb.appointmentEnd,
+              paymentStatus: matchedEport.portBillPaid ? 'Paid' : (gb.paymentStatus || matchedEport.paymentStatus),
+              portBillPaid: Boolean(gb.portBillPaid || matchedEport.portBillPaid),
+              status: matchedEport.portBillPaid
+                ? 'Ready'
+                : (['ready', 'approved'].includes(String(gb.status || '').toLowerCase()) ? gb.status : 'Approved'),
+            };
+          } else if (gb?.eportOrderId && closedOrderIds.has(String(gb.eportOrderId))) {
+            gb = { ...gb, status: 'Rejected', licensePlate: null, driverName: null, transportSubmitted: false };
+          }
+
           await syncSingleManifestBooking(gb, context);
         } catch (err) {
-          console.warn('[syncManifestGateBookings] Booking sync skipped:', gb?.id, err.message);
+          console.warn('[syncManifestGateBookings] Booking sync skipped:', rawGb?.id, err.message);
         }
+      }
+    }
+
+    // Đồng bộ các đơn ePort đã đặt tài xế & xe nhưng chưa nằm trong generatedBookings của shipping_manifests
+    for (const eportTrip of allActiveTrips) {
+      const dirKey = `${eportTrip.direction}:${eportTrip.containerNo}`;
+      if (syncedContainerKeys.has(dirKey) || syncedContainerKeys.has(eportTrip.containerNo)) continue;
+      syncedContainerKeys.add(dirKey);
+      syncedContainerKeys.add(eportTrip.containerNo);
+      const shortOrder = String(eportTrip.eportOrderNumber || eportTrip.eportOrderId || 'EPORT').replace(/[^A-Z0-9]/gi, '').slice(-6).toUpperCase();
+      const contSuffix = eportTrip.containerNo.slice(-4) || '0001';
+      const dirTag = eportTrip.direction === 'IMPORT' ? 'IMP' : 'EXP';
+      const bookingCode = `BK-${dirTag}-${shortOrder}-${contSuffix}`;
+      try {
+        await syncSingleManifestBooking({
+          id: bookingCode,
+          bookingCode,
+          status: eportTrip.status,
+          transportSubmitted: true,
+          direction: eportTrip.direction,
+          operation: eportTrip.direction === 'IMPORT' ? 'Pickup' : 'Dropoff',
+          containerId: eportTrip.containerNo,
+          containerNumber: eportTrip.containerNo,
+          containerType: eportTrip.containerType,
+          sealNumber: eportTrip.sealNumber,
+          grossWeightKg: eportTrip.grossWeightKg,
+          companyId: eportTrip.companyId,
+          driverId: eportTrip.driverId,
+          driverName: eportTrip.driverName,
+          licenseNumber: eportTrip.licenseNumber,
+          phone: eportTrip.phone,
+          driverSnapshot: eportTrip.driverSnapshot,
+          vehicleId: eportTrip.vehicleId,
+          licensePlate: eportTrip.licensePlate,
+          vehiclePlate: eportTrip.licensePlate,
+          vehicleSnapshot: eportTrip.vehicleSnapshot,
+          appointmentStart: eportTrip.appointmentStart,
+          appointmentEnd: eportTrip.appointmentEnd,
+          eportOrderId: eportTrip.eportOrderId,
+          eportOrderNumber: eportTrip.eportOrderNumber,
+          paymentStatus: eportTrip.paymentStatus,
+          portBillPaid: eportTrip.portBillPaid,
+        }, context);
+      } catch (err) {
+        console.warn('[syncManifestGateBookings] Direct ePort sync skipped:', bookingCode, err.message);
       }
     }
   } catch (err) {
