@@ -34,7 +34,6 @@ const BOOKING_FIELDS = `SELECT b.id, b.booking_code AS "bookingCode", b.booking_
       ORDER BY o.version LIMIT 1
     ) END)
     FROM gate_entry_orders e WHERE e.booking_id=b.id ORDER BY e.issued_at DESC,e.dispatch_version DESC LIMIT 1) AS "gateEntryOrder",
-  (SELECT t.status FROM transport_trips t WHERE t.booking_id=b.id AND t.status<>'Cancelled' ORDER BY t.created_at DESC LIMIT 1) AS "tripStatus",
   CASE WHEN ds.booking_id IS NULL THEN NULL ELSE jsonb_build_object(
     'status',ds.status,'action',ds.action,'arrivedAt',ds.arrived_at,'readyAt',ds.ready_at,
     'calledAt',ds.called_at,'callExpiresAt',ds.call_expires_at,'acknowledgedAt',ds.acknowledged_at,
@@ -56,7 +55,7 @@ const BOOKING_SELECT = BOOKING_FIELDS + ' WHERE d.user_id=:userId';
 
 async function getFeed(userId) {
   await require('../booking-dispatch/dispatch.service').syncManifestGateBookings().catch(() => {});
-  // Lịch hẹn đã duyệt luôn có chuyến vận chuyển để tài xế xác nhận trước khi báo đã đến cổng
+  // Đồng bộ lịch hẹn đã duyệt với danh sách chuyến vận chuyển của tài xế.
   await require('../trips/trips.service').ensureTripsForDriverBookings(userId).catch(() => {});
   const [profile, bookings, notifications, counts] = await Promise.all([
     getProfile(userId),

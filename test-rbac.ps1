@@ -54,7 +54,7 @@ $ENDPOINTS = @(
     [pscustomobject]@{ path="/admin/dashboard";       label="Admin Dashboard      (Admin + Dispatcher)";               allowed=@("Administrator","Dispatcher") }
     [pscustomobject]@{ path="/dispatcher/operations"; label="Dispatcher Ops       (Admin + Dispatcher)";               allowed=@("Administrator","Dispatcher") }
     [pscustomobject]@{ path="/gate/check-in";         label="Gate Check-in        (Admin + Gate)";                     allowed=@("Administrator","Gate Officer") }
-    [pscustomobject]@{ path="/yard/containers";       label="Yard Containers      (Admin + Yard)";                     allowed=@("Administrator","Yard Operator") }
+    [pscustomobject]@{ path="/yard/containers";       label="Yard Containers      (Port staff)";                       allowed=@("Administrator","Dispatcher","Gate Officer","Yard Operator") }
     [pscustomobject]@{ path="/berth/schedule";        label="Berth Schedule       (Admin + Berth)";                    allowed=@("Administrator","Berth Staff") }
     [pscustomobject]@{ path="/transport/bookings";    label="Transport Bookings   (Admin + Carrier + Dispatcher)";     allowed=@("Administrator","Transport Company","Dispatcher") }
     [pscustomobject]@{ path="/driver/trips";          label="Driver Trips         (Admin + Driver)";                   allowed=@("Administrator","Driver") }
