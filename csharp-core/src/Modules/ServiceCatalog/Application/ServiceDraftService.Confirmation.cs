@@ -191,6 +191,30 @@ public sealed partial class ServiceDraftService
         return "DRY";
     }
 
+    /// <summary>
+    /// Container chỉ được đăng ký lại khi đã ra cổng (hoặc đã xếp tàu) sau lệnh trước và không còn lệnh hay booking nào đang mở.
+    /// </summary>
+    private async Task<bool> HasOtherOpenOrder(Guid draftId, string containerNumber, CancellationToken ct) =>
+        (await Rows("""
+            SELECT (
+                EXISTS(
+                    SELECT 1 FROM eport_service_drafts d2
+                    JOIN eport_service_order_states o2 ON o2.draft_id=d2.id
+                    WHERE d2.id<>@p0 AND o2.status NOT IN ('DRAFT','CANCELLED','REJECTED')
+                      AND EXISTS(SELECT 1 FROM jsonb_array_elements(d2.container_snapshots) cs WHERE upper(cs->>'containerNumber')=upper(@p1))
+                      AND NOT EXISTS(SELECT 1 FROM containers c WHERE upper(c.container_no)=upper(@p1) AND c.left_at IS NOT NULL AND c.left_at>d2.created_at)
+                      AND NOT EXISTS(SELECT 1 FROM gate_transactions g WHERE upper(g.container_number)=upper(@p1) AND g.gate_type='gate_out' AND g.status='completed' AND g.checked_at>d2.created_at)
+                      AND NOT EXISTS(SELECT 1 FROM export_booking_containers e WHERE upper(e.container_no)=upper(@p1) AND e.loaded_at IS NOT NULL AND e.loaded_at>d2.created_at)
+                )
+                OR EXISTS(
+                    SELECT 1 FROM booking_containers bc
+                    JOIN bookings bk ON bk.id=bc.booking_id
+                    JOIN containers ct ON ct.id=bc.container_id
+                    WHERE upper(ct.container_no)=upper(@p1) AND bk.status::text IN ('pending','approved','ready','checked_in')
+                )
+            ) AS busy
+            """, ct, draftId, containerNumber))[0]["busy"]!.GetValue<bool>();
+
     private async Task<JsonObject> BuildValidation(JsonObject draft, Guid company, CancellationToken ct)
     {
         var input = draft["content"]!.Deserialize<ServiceDraftInput>(Json)!;
@@ -351,6 +375,9 @@ public sealed partial class ServiceDraftService
                 Issue("CONTAINER_ON_HOLD", $"{number}: container đang bị giữ, khóa hoặc không an toàn.", "lines", line.SourceContainerId);
             if (container["hasActiveOrder"]?.GetValue<bool>() == true)
                 Issue("CONTAINER_ACTIVE_ORDER", $"{number}: container đang có một lệnh dịch vụ mở. Mỗi container chỉ có một lệnh đang mở.", "lines", line.SourceContainerId);
+            // Mã container nguồn do giao diện có thể là mã sinh ra, nên đối chiếu thêm theo SỐ container
+            else if (!string.IsNullOrWhiteSpace(number) && await HasOtherOpenOrder(G(draft, "id"), number, ct))
+                Issue("CONTAINER_ACTIVE_ORDER", $"{number}: container đang có một lệnh dịch vụ khác chưa hoàn tất (chưa được hủy hoặc chưa giao xong). Mỗi container chỉ có một lệnh đang mở; hãy hủy lệnh cũ trước khi đăng ký lại.", "lines", line.SourceContainerId);
             if (input.Flow == "EXPORT")
             {
                 if (!(container["vgmKg"]?.GetValue<decimal>() > 0)) Issue("VGM_REQUIRED", $"{number}: thiếu VGM hợp lệ từ hồ sơ nguồn.", "lines", line.SourceContainerId);

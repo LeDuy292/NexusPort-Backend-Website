@@ -376,7 +376,18 @@ public sealed partial class ServiceDraftService(AppDbContext db, ICurrentUser us
                     COALESCE(b.port_of_discharge,v.port_of_discharge) AS "destinationPort",
                     (e.vgm_kg IS NOT NULL AND e.vgm_kg > 0) AS "hasValidVgm",
                     (regexp_replace(lower(COALESCE(to_jsonb(c)->>'status','')),'[^a-z0-9]','','g') IN ('hold','customshold','inactive','blocked','damagedunsafe')) AS "isHeld",
-                    false AS "hasActiveOrder"
+                    EXISTS(
+                        SELECT 1 FROM eport_service_drafts d2
+                        JOIN eport_service_order_states o2 ON o2.draft_id=d2.id
+                        WHERE o2.status NOT IN ('DRAFT','CANCELLED','REJECTED')
+                          AND EXISTS(SELECT 1 FROM jsonb_array_elements(d2.container_snapshots) cs WHERE upper(cs->>'containerNumber')=upper(e.container_no))
+                          AND NOT EXISTS(SELECT 1 FROM export_booking_containers x WHERE upper(x.container_no)=upper(e.container_no) AND x.loaded_at IS NOT NULL AND x.loaded_at>d2.created_at)
+                          AND NOT EXISTS(SELECT 1 FROM gate_transactions g WHERE upper(g.container_number)=upper(e.container_no) AND g.gate_type='gate_out' AND g.status='completed' AND g.checked_at>d2.created_at)
+                    ) OR EXISTS(
+                        SELECT 1 FROM booking_containers bc2
+                        JOIN bookings bk2 ON bk2.id=bc2.booking_id
+                        WHERE bc2.container_id=e.container_id AND bk2.status::text IN ('pending','approved','ready','checked_in')
+                    ) AS "hasActiveOrder"
                 """ + ExportJoins + " WHERE b.id=@p0 AND " + ExportEligible + filter +
                 " ORDER BY e.container_no,e.id LIMIT 50", ct, sourceId.Value, ids == null ? "%" + search + "%" : ids);
         }
